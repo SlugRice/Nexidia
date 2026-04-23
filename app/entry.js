@@ -60,5 +60,5 @@
   modal.appendChild(card);
   document.body.appendChild(modal);
 
-  setTimeout(render, 0);
+  setTimeout(render, 50);
 })();
