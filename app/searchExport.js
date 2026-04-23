@@ -31,15 +31,12 @@
 
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-        // --- Fetch metadata field list ---
         let metadataFields = [];
         try {
           const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
           if (res.ok) {
             const json = await res.json();
-            metadataFields = Array.isArray(json)
-              ? json.filter(f => f.isEnabled !== false)
-              : [];
+            metadataFields = Array.isArray(json) ? json.filter(f => f.isEnabled !== false) : [];
           }
         } catch (_) { }
 
@@ -144,7 +141,11 @@
           return { wrap, input: ta };
         };
 
-        // --- Searchable field picker ---
+        // Returns the set of storageNames currently active across all filter rows
+        const getActiveStorageNames = () =>
+          new Set(filterRows.map(r => r.picker.getStorageName()).filter(Boolean));
+
+        // Searchable field picker — shows display names only, excludes already-active fields
         function makeFieldPicker(onSelect) {
           const wrapper = el("div", { style: "position:relative; flex:1; min-width:220px;" });
 
@@ -163,7 +164,6 @@
             `
           });
 
-          let selectedStorageName = "";
           let highlightIndex = -1;
           let visibleItems = [];
 
@@ -173,12 +173,17 @@
             highlightIndex = -1;
 
             const q = query.toLowerCase().trim();
-            const matches = q
-              ? metadataFields.filter(f =>
-                  f.displayName.toLowerCase().includes(q) ||
-                  f.storageName.toLowerCase().includes(q)
-                )
-              : metadataFields;
+            const active = getActiveStorageNames();
+            const currentStorage = input.dataset.storageName || "";
+
+            const matches = metadataFields.filter(f => {
+              // Always show the currently selected field for this row
+              if (f.storageName === currentStorage) return true;
+              // Exclude fields active on other rows
+              if (active.has(f.storageName)) return false;
+              // Filter by query against display name only
+              return q ? f.displayName.toLowerCase().includes(q) : true;
+            });
 
             if (!matches.length) {
               dropdown.style.display = "none";
@@ -188,8 +193,7 @@
             for (const f of matches.slice(0, 80)) {
               const item = el("div", {
                 style: "padding:6px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #f0f0f0;"
-              });
-              item.innerHTML = `<span style="font-weight:600;">${escapeHtml(f.displayName)}</span> <span style="color:#888; font-size:11px;">${escapeHtml(f.storageName)}</span>`;
+              }, f.displayName);
 
               item.onmouseenter = () => {
                 visibleItems.forEach((el, i) => el.style.background = i === visibleItems.indexOf(item) ? "#e8f0fe" : "");
@@ -209,7 +213,6 @@
           };
 
           const selectItem = (f) => {
-            selectedStorageName = f.storageName;
             input.value = f.displayName;
             input.dataset.storageName = f.storageName;
             dropdown.style.display = "none";
@@ -220,13 +223,11 @@
           const clearHighlight = () => visibleItems.forEach(i => i.style.background = "");
 
           input.addEventListener("input", () => {
-            selectedStorageName = "";
             delete input.dataset.storageName;
             renderDropdown(input.value);
           });
 
           input.addEventListener("focus", () => renderDropdown(input.value));
-
           input.addEventListener("blur", () => {
             setTimeout(() => { dropdown.style.display = "none"; }, 150);
           });
@@ -261,7 +262,6 @@
           const getStorageName = () => input.dataset.storageName || "";
           const getDisplayName = () => input.value;
 
-          // Pre-select by storageName (for default filters)
           const preselect = (storageName) => {
             const f = metadataFields.find(x => x.storageName === storageName);
             if (f) {
@@ -275,10 +275,9 @@
           return { wrapper, input, getStorageName, getDisplayName, preselect };
         }
 
-        // --- Dynamic filter rows ---
         const filterRows = [];
 
-        function makeFilterRow(filtersContainer, defaultStorageName, defaultDisplayName) {
+        function makeFilterRow(filtersContainer, defaultStorageName) {
           const rowEl = el("div", {
             style: "display:flex; gap:8px; align-items:flex-end; margin:6px 0; flex-wrap:wrap;"
           });
@@ -318,7 +317,6 @@
           return entry;
         }
 
-        // --- Parsing / normalization ---
         const splitValues = (raw) =>
           String(raw || "")
             .replace(/\r\n/g, "\n")
@@ -329,6 +327,35 @@
 
         const isoStart = (yyyyMmDd) => `${yyyyMmDd}T00:00:00Z`;
         const isoEnd   = (yyyyMmDd) => `${yyyyMmDd}T23:59:59Z`;
+
+        const KEY_TRANSLATIONS = new Map([
+          ["overallsentimentscore", "sentimentScore"],
+          ["recordeddate", "recordedDateTime"],
+          ["mediafileduration", "mediaFileDuration"],
+          ["udfint4", "UDFInt4"],
+          ["experienceid", "experienceId"],
+          ["sitename", "siteName"],
+          ["site", "siteName"],
+          ["supervisor", "supervisorName"],
+          ["supervisorname", "supervisorName"],
+          ["primaryintentcategory", "primaryIntentCategory"],
+          ["primaryintenttopic", "primaryIntentTopic"],
+          ["primaryintentropic", "primaryIntentTopic"],
+          ["primaryintentsubtopic", "primaryIntentSubtopic"],
+          ["agentname", "agentName"]
+        ]);
+
+        const normalizeFieldKeyForExplore = (k) => {
+          const raw = String(k || "").trim();
+          if (!raw) return "";
+          let out = raw
+            .replace(/^UDFvarchar/i, "UDFVarchar")
+            .replace(/^UDFnumeric/i, "UDFNumeric")
+            .replace(/^UDFint/i, "UDFInt");
+          const lower = out.toLowerCase();
+          if (KEY_TRANSLATIONS.has(lower)) out = KEY_TRANSLATIONS.get(lower);
+          return out;
+        };
 
         const normalizeParamName = (p) => {
           if (!p) return p;
@@ -411,7 +438,6 @@
           return "";
         };
 
-        // --- AppInstanceId ---
         function getAppInstanceIdFromCurrentPageSource() {
           const scripts = document.querySelectorAll("script");
           for (let i = 0; i < scripts.length; i++) {
@@ -466,7 +492,7 @@
           const headers = [];
           const seen = new Set();
           for (const p of pairsRaw) {
-            const nk = p.key.trim();
+            const nk = normalizeFieldKeyForExplore(p.key.trim());
             if (!nk) continue;
             if (seen.has(nk)) continue;
             seen.add(nk);
@@ -580,7 +606,7 @@
           return `<colgroup>${cols.join("")}</colgroup>`;
         };
 
-        // --- Build modal ---
+        // --- Modal ---
         const modal = el("div", {
           style: `
             position:fixed; inset:0; background:rgba(0,0,0,.55);
@@ -588,6 +614,18 @@
             font-family:Segoe UI, Arial, sans-serif;
           `
         });
+
+        // Sticky close anchored to overlay, always visible regardless of scroll
+        const stickyClose = el("button", {
+          style: `
+            position:fixed; top:20px; right:20px; z-index:1000000;
+            border:0; background:rgba(30,30,30,.75); color:#fff;
+            width:32px; height:32px; border-radius:50%; font-size:16px;
+            cursor:pointer; display:flex; align-items:center; justify-content:center;
+            box-shadow:0 2px 8px rgba(0,0,0,.4);
+          `
+        }, "✕");
+        stickyClose.onclick = () => { modal.remove(); stickyClose.remove(); };
 
         const card = el("div", {
           style: `
@@ -598,10 +636,8 @@
         });
 
         const header = el("div", { style: "display:flex; align-items:center; justify-content:space-between; gap:10px;" },
-          el("div", { style: "font-size:18px; font-weight:600;" }, "Nexidia Search"),
-          el("button", { style: "border:0; background:#eee; padding:6px 10px; border-radius:6px; cursor:pointer;" }, "✕")
+          el("div", { style: "font-size:18px; font-weight:600;" }, "Nexidia Search")
         );
-        header.lastChild.onclick = () => modal.remove();
 
         modal.appendChild(card);
         card.appendChild(header);
@@ -623,19 +659,10 @@
         const filtersContainer = el("div", {});
         card.appendChild(filtersContainer);
 
-        // Default filters pre-populated
         const DEFAULT_FILTERS = [
-          "UDFVarchar10",
-          "experienceId",
-          "UDFVarchar122",
-          "siteName",
-          "UDFVarchar126",
-          "DNIS",
-          "UDFVarchar120",
-          "UDFVarchar136",
-          "UDFVarchar41",
-          "UDFVarchar115",
-          "UDFVarchar1"
+          "UDFVarchar10", "experienceId", "UDFVarchar122", "siteName",
+          "UDFVarchar126", "DNIS", "UDFVarchar120", "UDFVarchar136",
+          "UDFVarchar41", "UDFVarchar115", "UDFVarchar1"
         ];
 
         for (const storageName of DEFAULT_FILTERS) {
@@ -696,9 +723,11 @@
           style: "padding:10px 16px; border-radius:8px; border:1px solid #bbb; background:#fff; color:#333; font-size:15px; cursor:pointer;"
         }, "Cancel");
 
-        cancelBtn.onclick = () => modal.remove();
+        cancelBtn.onclick = () => { modal.remove(); stickyClose.remove(); };
         card.appendChild(row(runBtn, cancelBtn));
+
         document.body.appendChild(modal);
+        document.body.appendChild(stickyClose);
 
         // --- Run ---
         runBtn.onclick = async () => {
@@ -757,6 +786,7 @@
             };
 
             modal.remove();
+            stickyClose.remove();
             progressUI.show();
             progressUI.set("Preparing export fields...", 5, "");
 
@@ -915,7 +945,7 @@
             }
 
             const exportHeaders = [...phraseHeaders, ...baseHeaders];
-            const exportFields = [...phraseKeys, ...baseFields];
+            const exportFields  = [...phraseKeys,   ...baseFields];
 
             const isDateTimeField  = (key) => String(key || "").toLowerCase() === "recordeddatetime";
             const isDurationField  = (key) => String(key || "").toLowerCase() === "mediafileduration";
