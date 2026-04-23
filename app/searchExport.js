@@ -2,6 +2,12 @@
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
 
+//##> METADATA FIELDS: Fetched once per tool session from the live Explore API. Used to
+//##> populate the Add Filter dropdown with current display names and storage names.
+//##> Filtered to isEnabled !== false. Capped at 80 results per dropdown render for
+//##> performance. storageName from this API is used directly in search payloads — no
+//##> translation needed for filter picker fields (only legacy column prefs need translation).
+  
   function openSearchExport() {
     (async () => {
       try {
@@ -146,6 +152,9 @@
           new Set(filterRows.map(r => r.picker.getStorageName()).filter(Boolean));
 
         // Searchable field picker — shows display names only, excludes already-active fields
+        //##> DUPLICATE FILTER PREVENTION: getActiveStorageNames() is called on every dropdown open
+        //##> so the list always reflects current state. A row's own current selection is exempt from
+        //##> exclusion so users can change their mind without the field disappearing.
         function makeFieldPicker(onSelect) {
           const wrapper = el("div", { style: "position:relative; flex:1; min-width:220px;" });
 
