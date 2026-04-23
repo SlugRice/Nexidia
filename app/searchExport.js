@@ -18,6 +18,7 @@
 
         const BASE = "https://apug01.nxondemand.com";
         const SEARCH_URL = `${BASE}/NxIA/api-gateway/explore/api/v1.0/search`;
+        const METADATA_URL = `${BASE}/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names`;
         const LEGACY_FORMS_URL = `${BASE}/NxIA/Search/ForensicSearch.aspx`;
         const SETTINGS_URL = (appInstanceId) =>
           `${BASE}/NxIA/Search/SettingsDialog.aspx?AppInstanceID=${encodeURIComponent(appInstanceId)}`;
@@ -25,11 +26,22 @@
         const PLACEHOLDER = "Separate multiple values with commas or line breaks, or paste from Excel.";
         const PAGE_SIZE = 1000;
         const MAX_ROWS = 50000;
-
         const FIXED_DT_FORMAT = `m\\/d\\/yyyy\\ h:mm`;
         const FIXED_DURATION_FORMAT = `\\[h\\]\\:mm\\:ss`;
 
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+        // --- Fetch metadata field list ---
+        let metadataFields = [];
+        try {
+          const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
+          if (res.ok) {
+            const json = await res.json();
+            metadataFields = Array.isArray(json)
+              ? json.filter(f => f.isEnabled !== false)
+              : [];
+          }
+        } catch (_) { }
 
         const progressUI = (() => {
           const wrap = document.createElement("div");
@@ -65,8 +77,7 @@
           const set = (msg, pct = null, meta = "") => {
             status.textContent = msg || "";
             if (pct !== null && pct !== undefined) {
-              const clamped = Math.max(0, Math.min(100, pct));
-              barInner.style.width = `${clamped}%`;
+              barInner.style.width = `${Math.max(0, Math.min(100, pct))}%`;
             }
             metrics.textContent = meta || "";
           };
@@ -133,6 +144,181 @@
           return { wrap, input: ta };
         };
 
+        // --- Searchable field picker ---
+        function makeFieldPicker(onSelect) {
+          const wrapper = el("div", { style: "position:relative; flex:1; min-width:220px;" });
+
+          const input = el("input", {
+            type: "text",
+            placeholder: "Search fields...",
+            style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
+          });
+
+          const dropdown = el("div", {
+            style: `
+              display:none; position:absolute; top:100%; left:0; right:0;
+              max-height:200px; overflow-y:auto; background:#fff;
+              border:1px solid #ccc; border-top:none; border-radius:0 0 6px 6px;
+              z-index:10000; box-shadow:0 4px 12px rgba(0,0,0,.15);
+            `
+          });
+
+          let selectedStorageName = "";
+          let highlightIndex = -1;
+          let visibleItems = [];
+
+          const renderDropdown = (query) => {
+            dropdown.innerHTML = "";
+            visibleItems = [];
+            highlightIndex = -1;
+
+            const q = query.toLowerCase().trim();
+            const matches = q
+              ? metadataFields.filter(f =>
+                  f.displayName.toLowerCase().includes(q) ||
+                  f.storageName.toLowerCase().includes(q)
+                )
+              : metadataFields;
+
+            if (!matches.length) {
+              dropdown.style.display = "none";
+              return;
+            }
+
+            for (const f of matches.slice(0, 80)) {
+              const item = el("div", {
+                style: "padding:6px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #f0f0f0;"
+              });
+              item.innerHTML = `<span style="font-weight:600;">${escapeHtml(f.displayName)}</span> <span style="color:#888; font-size:11px;">${escapeHtml(f.storageName)}</span>`;
+
+              item.onmouseenter = () => {
+                visibleItems.forEach((el, i) => el.style.background = i === visibleItems.indexOf(item) ? "#e8f0fe" : "");
+                highlightIndex = visibleItems.indexOf(item);
+              };
+              item.onmouseleave = () => { item.style.background = ""; };
+              item.onmousedown = (e) => {
+                e.preventDefault();
+                selectItem(f);
+              };
+
+              dropdown.appendChild(item);
+              visibleItems.push(item);
+            }
+
+            dropdown.style.display = "block";
+          };
+
+          const selectItem = (f) => {
+            selectedStorageName = f.storageName;
+            input.value = f.displayName;
+            input.dataset.storageName = f.storageName;
+            dropdown.style.display = "none";
+            highlightIndex = -1;
+            if (onSelect) onSelect(f);
+          };
+
+          const clearHighlight = () => visibleItems.forEach(i => i.style.background = "");
+
+          input.addEventListener("input", () => {
+            selectedStorageName = "";
+            delete input.dataset.storageName;
+            renderDropdown(input.value);
+          });
+
+          input.addEventListener("focus", () => renderDropdown(input.value));
+
+          input.addEventListener("blur", () => {
+            setTimeout(() => { dropdown.style.display = "none"; }, 150);
+          });
+
+          input.addEventListener("keydown", (e) => {
+            if (!visibleItems.length) return;
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              clearHighlight();
+              highlightIndex = Math.min(highlightIndex + 1, visibleItems.length - 1);
+              visibleItems[highlightIndex].style.background = "#e8f0fe";
+              visibleItems[highlightIndex].scrollIntoView({ block: "nearest" });
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              clearHighlight();
+              highlightIndex = Math.max(highlightIndex - 1, 0);
+              visibleItems[highlightIndex].style.background = "#e8f0fe";
+              visibleItems[highlightIndex].scrollIntoView({ block: "nearest" });
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              if (highlightIndex >= 0 && visibleItems[highlightIndex]) {
+                visibleItems[highlightIndex].onmousedown(e);
+              }
+            } else if (e.key === "Escape") {
+              dropdown.style.display = "none";
+            }
+          });
+
+          wrapper.appendChild(input);
+          wrapper.appendChild(dropdown);
+
+          const getStorageName = () => input.dataset.storageName || "";
+          const getDisplayName = () => input.value;
+
+          // Pre-select by storageName (for default filters)
+          const preselect = (storageName) => {
+            const f = metadataFields.find(x => x.storageName === storageName);
+            if (f) {
+              selectItem(f);
+            } else {
+              input.value = storageName;
+              input.dataset.storageName = storageName;
+            }
+          };
+
+          return { wrapper, input, getStorageName, getDisplayName, preselect };
+        }
+
+        // --- Dynamic filter rows ---
+        const filterRows = [];
+
+        function makeFilterRow(filtersContainer, defaultStorageName, defaultDisplayName) {
+          const rowEl = el("div", {
+            style: "display:flex; gap:8px; align-items:flex-end; margin:6px 0; flex-wrap:wrap;"
+          });
+
+          const picker = makeFieldPicker();
+
+          const valueWrap = el("div", { style: "flex:2; min-width:220px;" },
+            el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, "Value(s)"),
+            el("input", {
+              type: "text",
+              placeholder: PLACEHOLDER,
+              style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
+            })
+          );
+          const valueInput = valueWrap.lastChild;
+
+          const removeBtn = el("button", {
+            style: "padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; color:#888; cursor:pointer; font-size:13px; white-space:nowrap; align-self:flex-end;"
+          }, "✕ Remove");
+
+          rowEl.appendChild(picker.wrapper);
+          rowEl.appendChild(valueWrap);
+          rowEl.appendChild(removeBtn);
+          filtersContainer.appendChild(rowEl);
+
+          const entry = { rowEl, picker, valueInput };
+          filterRows.push(entry);
+
+          removeBtn.onclick = () => {
+            rowEl.remove();
+            const idx = filterRows.indexOf(entry);
+            if (idx !== -1) filterRows.splice(idx, 1);
+          };
+
+          if (defaultStorageName) picker.preselect(defaultStorageName);
+
+          return entry;
+        }
+
+        // --- Parsing / normalization ---
         const splitValues = (raw) =>
           String(raw || "")
             .replace(/\r\n/g, "\n")
@@ -143,35 +329,6 @@
 
         const isoStart = (yyyyMmDd) => `${yyyyMmDd}T00:00:00Z`;
         const isoEnd   = (yyyyMmDd) => `${yyyyMmDd}T23:59:59Z`;
-
-        const KEY_TRANSLATIONS = new Map([
-          ["overallsentimentscore", "sentimentScore"],
-          ["recordeddate", "recordedDateTime"],
-          ["mediafileduration", "mediaFileDuration"],
-          ["udfint4", "UDFInt4"],
-          ["experienceid", "experienceId"],
-          ["sitename", "siteName"],
-          ["site", "siteName"],
-          ["supervisor", "supervisorName"],
-          ["supervisorname", "supervisorName"],
-          ["primaryintentcategory", "primaryIntentCategory"],
-          ["primaryintenttopic", "primaryIntentTopic"],
-          ["primaryintentropic", "primaryIntentTopic"],
-          ["primaryintentsubtopic", "primaryIntentSubtopic"],
-          ["agentname", "agentName"]
-        ]);
-
-        const normalizeFieldKeyForExplore = (k) => {
-          const raw = String(k || "").trim();
-          if (!raw) return "";
-          let out = raw
-            .replace(/^UDFvarchar/i, "UDFVarchar")
-            .replace(/^UDFnumeric/i, "UDFNumeric")
-            .replace(/^UDFint/i, "UDFInt");
-          const lower = out.toLowerCase();
-          if (KEY_TRANSLATIONS.has(lower)) out = KEY_TRANSLATIONS.get(lower);
-          return out;
-        };
 
         const normalizeParamName = (p) => {
           if (!p) return p;
@@ -254,8 +411,7 @@
           return "";
         };
 
-        // --- AppInstanceId extraction ---
-        // Strategy 1: scan current page scripts
+        // --- AppInstanceId ---
         function getAppInstanceIdFromCurrentPageSource() {
           const scripts = document.querySelectorAll("script");
           for (let i = 0; i < scripts.length; i++) {
@@ -266,7 +422,6 @@
           return null;
         }
 
-        // Strategy 2: fetch the current page HTML and scan it
         async function getAppInstanceIdViaPageFetch() {
           const res = await fetch(location.href, { credentials: "include", cache: "no-store" });
           if (!res.ok) throw new Error("Page fetch failed: " + res.status);
@@ -276,7 +431,6 @@
           throw new Error("appInstanceId not found in page HTML");
         }
 
-        // Strategy 3: fetch ForensicSearch.aspx directly (same-origin fetch, no popup)
         async function getAppInstanceIdViaForensicFetch() {
           const res = await fetch(LEGACY_FORMS_URL, { credentials: "include", cache: "no-store" });
           if (!res.ok) throw new Error("ForensicSearch fetch failed: " + res.status);
@@ -289,10 +443,8 @@
         async function getAppInstanceId() {
           const fromPage = getAppInstanceIdFromCurrentPageSource();
           if (fromPage) return fromPage;
-
           try { return await getAppInstanceIdViaPageFetch(); } catch (_) { }
           try { return await getAppInstanceIdViaForensicFetch(); } catch (_) { }
-
           throw new Error("Could not determine appInstanceId from any source.");
         }
 
@@ -303,8 +455,7 @@
           const doc = new DOMParser().parseFromString(html, "text/html");
           const ctl10 =
             doc.querySelector('input[name="ctl10"]')?.getAttribute("value") ||
-            doc.querySelector('input[name="ctl10"]')?.value ||
-            "";
+            doc.querySelector('input[name="ctl10"]')?.value || "";
           if (!ctl10) throw new Error("ctl10 not found in SettingsDialog response.");
           const pairsRaw = ctl10
             .split(",")
@@ -315,7 +466,7 @@
           const headers = [];
           const seen = new Set();
           for (const p of pairsRaw) {
-            const nk = normalizeFieldKeyForExplore(p.key);
+            const nk = p.key.trim();
             if (!nk) continue;
             if (seen.has(nk)) continue;
             seen.add(nk);
@@ -399,8 +550,7 @@
           if (lk === "mediafileduration") return 8;
           if (lk === "udfint4") return 6;
           if (lk === "sentimentscore" || lk === "overallsentimentscore") return 6;
-          const t = String(rawText ?? "");
-          return clamp(t.length, 1, 60);
+          return clamp(String(rawText ?? "").length, 1, 60);
         };
 
         const buildColGroup = (headers, rows, exportFields) => {
@@ -420,8 +570,7 @@
               } else {
                 rawText = normalizeCellText(getFieldValue(r, k));
               }
-              const dl = estimateDisplayLen(k, rawText);
-              maxLens[c] = Math.max(maxLens[c], dl);
+              maxLens[c] = Math.max(maxLens[c], estimateDisplayLen(k, rawText));
             }
           }
           const cols = maxLens.map((len) => {
@@ -431,6 +580,7 @@
           return `<colgroup>${cols.join("")}</colgroup>`;
         };
 
+        // --- Build modal ---
         const modal = el("div", {
           style: `
             position:fixed; inset:0; background:rgba(0,0,0,.55);
@@ -458,11 +608,9 @@
         card.appendChild(hr());
 
         card.appendChild(section("Date Range"));
-
         const today = new Date();
         const monthAgo = new Date(today);
         monthAgo.setMonth(today.getMonth() - 1);
-
         const fromDate = field("From", "date", "");
         const toDate = field("To", "date", "");
         fromDate.input.valueAsDate = monthAgo;
@@ -470,69 +618,50 @@
         card.appendChild(row(fromDate.wrap, toDate.wrap));
 
         card.appendChild(hr());
-
         card.appendChild(section("Search Filters"));
 
-        const FILTERS = [
-          ["Group ID (Policy ID)", "udfvarchar10"],
-          ["Experience Id", "experienceid"],
-          ["Calluuid", "udfvarchar122"],
-          ["Site", "site"],
-          ["Employee ID", "udfvarchar126"],
-          ["DNIS", "dnis"],
-          ["Node", "udfvarchar120"],
-          ["Provider Tax ID", "udfvarchar136"],
-          ["NPI", "udfvarchar41"],
-          ["Orig ANI", "udfvarchar115"],
-          ["User to User", "udfvarchar1"]
+        const filtersContainer = el("div", {});
+        card.appendChild(filtersContainer);
+
+        // Default filters pre-populated
+        const DEFAULT_FILTERS = [
+          "UDFVarchar10",
+          "experienceId",
+          "UDFVarchar122",
+          "siteName",
+          "UDFVarchar126",
+          "DNIS",
+          "UDFVarchar120",
+          "UDFVarchar136",
+          "UDFVarchar41",
+          "UDFVarchar115",
+          "UDFVarchar1"
         ];
 
-        const filterInputs = FILTERS.map(([label, param]) => {
-          const f = field(label);
-          f.param = param;
-          card.appendChild(row(f.wrap));
-          return f;
-        });
+        for (const storageName of DEFAULT_FILTERS) {
+          makeFilterRow(filtersContainer, storageName);
+        }
 
-        let customVisible = false;
+        const addFilterBtn = el("button", {
+          style: "margin-top:6px; padding:8px 12px; border-radius:8px; border:1px solid #0a66c2; background:#fff; color:#0a66c2; cursor:pointer; font-size:13px;"
+        }, "+ Add Filter");
 
-        const customLink = el("a", {
-          href: "#",
-          style: "color:#0a66c2; font-size:13px; cursor:pointer; display:inline-block; margin-top:6px;"
-        }, "Custom Filter");
-
-        card.appendChild(customLink);
-
-        const customParam = field("Nexidia Field Name");
-        const customValue = field("Value(s)");
-
-        const customBox = el("div", {
-          style: "display:none; margin-top:8px; padding:10px; border:1px dashed #5aa2e6; border-radius:8px; background:#f6fbff;"
-        }, row(customParam.wrap, customValue.wrap));
-
-        card.appendChild(customBox);
-
-        customLink.onclick = (e) => {
-          e.preventDefault();
-          customVisible = !customVisible;
-          customBox.style.display = customVisible ? "block" : "none";
-        };
+        addFilterBtn.onclick = () => makeFilterRow(filtersContainer, "");
+        card.appendChild(addFilterBtn);
 
         card.appendChild(hr());
-
         card.appendChild(section("Phrase Search (Each line = separate search)"));
 
         const searchesWrap = el("div", {});
         card.appendChild(searchesWrap);
-
         const searches = [];
 
         const createSearchBlock = (n) => {
           const box = el("div", {
             style: "border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:10px 0; background:#fafafa;"
           });
-          const title = el("div", { style: "font-weight:600; margin-bottom:8px;" }, `Search ${n}`);
-          box.appendChild(title);
+          const titleEl = el("div", { style: "font-weight:600; margin-bottom:8px;" }, `Search ${n}`);
+          box.appendChild(titleEl);
           const p1 = textareaField("Phrase(s) (each line runs as its own search)", PLACEHOLDER, 4);
           const a2 = textareaField("AND Phrase 2 (optional, single phrase)", PLACEHOLDER, 2);
           const a3 = textareaField("AND Phrase 3 (optional, single phrase)", PLACEHOLDER, 2);
@@ -568,10 +697,10 @@
         }, "Cancel");
 
         cancelBtn.onclick = () => modal.remove();
-
         card.appendChild(row(runBtn, cancelBtn));
         document.body.appendChild(modal);
 
+        // --- Run ---
         runBtn.onclick = async () => {
           try {
             const fromVal = fromDate.input.value;
@@ -582,20 +711,12 @@
             }
 
             const metaFilters = [];
-            for (const f of filterInputs) {
-              const v = f.input.value.trim();
-              if (!v) continue;
-              metaFilters.push(buildKeywordFilter(f.param, splitValues(v)));
+            for (const entry of filterRows) {
+              const storageName = entry.picker.getStorageName();
+              const val = entry.valueInput.value.trim();
+              if (!storageName || !val) continue;
+              metaFilters.push(buildKeywordFilter(storageName, splitValues(val)));
             }
-
-            const cParam = customParam.input.value.trim();
-            const cVal = customValue.input.value.trim();
-            const customUsed = customVisible && (cParam || cVal);
-            if (customUsed && (!cParam || !cVal)) {
-              alert("Custom Filter requires Nexidia Field Name and Value(s).");
-              return;
-            }
-            if (customUsed) metaFilters.push(buildKeywordFilter(cParam, splitValues(cVal)));
 
             if (!metaFilters.length) {
               const ok = confirm("No filters added. Data will be pulled from the entire UMR dataset. Do you want to proceed?");
@@ -612,7 +733,7 @@
               for (const basePhrase of baseLines) {
                 const phraseDisplay = buildPhraseDisplay(basePhrase, andPhrases);
                 const phraseFilters = [buildTextFilter(basePhrase), ...andPhrases.map(buildTextFilter)];
-                const phraseGroup = (phraseFilters.length === 1)
+                const phraseGroup = phraseFilters.length === 1
                   ? phraseFilters[0]
                   : { operator: "AND", invertOperator: false, filters: phraseFilters };
                 expandedSearches.push({ phraseDisplay, phraseGroup });
@@ -645,7 +766,6 @@
             try {
               progressUI.set("Loading column preferences...", 10, "Scanning page for appInstanceId");
               const appInstanceId = await getAppInstanceId();
-              progressUI.set("Loading column preferences...", 14, `appInstanceId: ${appInstanceId}`);
               const prefs = await getLegacyChosenColumns(appInstanceId);
               if (prefs.fields?.length) {
                 baseFields = [...prefs.fields];
@@ -734,17 +854,14 @@
 
                 const basePct = 25 + Math.floor((si / Math.max(1, totalRuns)) * 55);
                 const localPct = Math.min(55 / totalRuns, Math.floor((setRows.length / Math.max(1, MAX_ROWS)) * (55 / totalRuns)));
-                const pct = Math.min(80, basePct + localPct);
-
                 progressUI.set(
                   `Searching (${si + 1}/${totalRuns})...`,
-                  pct,
+                  Math.min(80, basePct + localPct),
                   `Set fetched: ${setRows.length} (page ${from}) | Total fetched: ${totalFetched}`
                 );
 
                 if (setRows.length >= MAX_ROWS) break;
                 if (rows.length < PAGE_SIZE) break;
-
                 from += PAGE_SIZE;
                 await sleep(250);
               }
@@ -773,7 +890,6 @@
 
             const finalRows = [];
             let maxPhraseCols = 1;
-
             for (const [, v] of merged.entries()) {
               if (v.phrases.length > maxPhraseCols) maxPhraseCols = v.phrases.length;
               finalRows.push(v);
@@ -832,57 +948,40 @@
                   const val = normalizeCellText(phrases && phrases[idx] ? phrases[idx] : "0");
                   return `<td class="txt" x:str="${escapeHtml(val)}">${escapeHtml(val)}</td>`;
                 }
-
-                const raw0 = getFieldValue(r, k);
-                const raw = normalizeCellText(raw0);
-
+                const raw = normalizeCellText(getFieldValue(r, k));
                 if (isDateTimeField(k)) {
                   if (raw === "0") return `<td class="dt" x:num="0">0</td>`;
-                  const d = new Date(raw);
-                  const serial = excelSerialFromDate(d);
+                  const serial = excelSerialFromDate(new Date(raw));
                   if (serial === null) return `<td class="txt" x:str="${escapeHtml(raw)}">${escapeHtml(raw)}</td>`;
-                  const n = String(serial);
-                  return `<td class="dt" x:num="${escapeHtml(n)}">${escapeHtml(n)}</td>`;
+                  return `<td class="dt" x:num="${serial}">${serial}</td>`;
                 }
-
                 if (isDurationField(k)) {
                   if (raw === "0") return `<td class="dur" x:num="0">0</td>`;
                   const sec = secondsFromMillisish(raw);
-                  const serial = (sec === null) ? null : excelSerialFromSeconds(sec);
+                  const serial = sec === null ? null : excelSerialFromSeconds(sec);
                   if (serial === null) return `<td class="txt" x:str="${escapeHtml(raw)}">${escapeHtml(raw)}</td>`;
-                  const n = String(serial);
-                  return `<td class="dur" x:num="${escapeHtml(n)}">${escapeHtml(n)}</td>`;
+                  return `<td class="dur" x:num="${serial}">${serial}</td>`;
                 }
-
                 if (isHoldField(k)) {
                   if (raw === "0") return `<td class="int" x:num="0">0</td>`;
                   const sec = secondsFromMillisish(raw);
                   if (sec === null) return `<td class="int" x:num="0">0</td>`;
                   const n = String(Math.round(sec));
-                  return `<td class="int" x:num="${escapeHtml(n)}">${escapeHtml(n)}</td>`;
+                  return `<td class="int" x:num="${n}">${n}</td>`;
                 }
-
                 if (isSentimentField(k)) {
                   if (raw === "0") return `<td class="dec2" x:num="0">0</td>`;
                   const n0 = toNumberOrNull(raw);
                   if (n0 === null) return `<td class="txt" x:str="${escapeHtml(raw)}">${escapeHtml(raw)}</td>`;
-                  const n = String(n0);
-                  return `<td class="dec2" x:num="${escapeHtml(n)}">${escapeHtml(n)}</td>`;
+                  return `<td class="dec2" x:num="${n0}">${n0}</td>`;
                 }
-
                 const n0 = toNumberOrNull(raw);
                 if (n0 !== null && raw !== "0" && /^[+-]?\d+(\.\d+)?$/.test(raw)) {
-                  if (Number.isInteger(n0)) {
-                    const nn = String(n0);
-                    return `<td class="int" x:num="${escapeHtml(nn)}">${escapeHtml(nn)}</td>`;
-                  }
-                  const nn = String(n0);
-                  return `<td class="dec2" x:num="${escapeHtml(nn)}">${escapeHtml(nn)}</td>`;
+                  if (Number.isInteger(n0)) return `<td class="int" x:num="${n0}">${n0}</td>`;
+                  return `<td class="dec2" x:num="${n0}">${n0}</td>`;
                 }
-
                 return `<td class="txt" x:str="${escapeHtml(raw)}">${escapeHtml(raw)}</td>`;
               }).join("");
-
               return `<tr>${tds}</tr>`;
             }).join("\n");
 
@@ -890,27 +989,15 @@
               `<html xmlns:o="urn:schemas-microsoft-com:office:office"
                      xmlns:x="urn:schemas-microsoft-com:office:excel"
                      xmlns="http://www.w3.org/TR/REC-html40">
-                <head>
-                  <meta charset="utf-8" />
-                  <style>${css}</style>
-                </head>
-                <body>
-                  <table>
-                    ${colGroup}
-                    <tr>${headerCells}</tr>
-                    ${bodyRows}
-                  </table>
-                </body>
+                <head><meta charset="utf-8" /><style>${css}</style></head>
+                <body><table>${colGroup}<tr>${headerCells}</tr>${bodyRows}</table></body>
               </html>`;
 
             const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
             const filename = `nexidia_search_export_${stamp}.xls`;
-
-            progressUI.set("Downloading Excel file...", 95, filename);
+            progressUI.set("Downloading...", 95, filename);
             downloadExcelFile(filename, html);
-
             progressUI.set("Done.", 100, `Exported ${finalRows.length} rows | Phrase cols: ${maxPhraseCols}`);
-            console.log(`Exported ${finalRows.length} rows to ${filename}`);
 
           } catch (err) {
             console.error(err);
