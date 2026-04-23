@@ -3,6 +3,7 @@
   "entry": [
     "app/core/registry.js",
     "app/entry.js",
-    "app/searchExport.js"
+    "app/searchExport.js",
+    "app/transcripts/batchBuilder.js"
   ]
 }
