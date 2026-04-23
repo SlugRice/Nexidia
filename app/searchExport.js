@@ -25,15 +25,31 @@
         const SEARCH_URL = `${BASE}/NxIA/api-gateway/explore/api/v1.0/search`;
         const METADATA_URL = `${BASE}/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names`;
         const LEGACY_FORMS_URL = `${BASE}/NxIA/Search/ForensicSearch.aspx`;
-        const SETTINGS_URL = (appInstanceId) =>
-          `${BASE}/NxIA/Search/SettingsDialog.aspx?AppInstanceID=${encodeURIComponent(appInstanceId)}`;
+        const SETTINGS_URL = (id) =>
+          `${BASE}/NxIA/Search/SettingsDialog.aspx?AppInstanceID=${encodeURIComponent(id)}`;
 
-        const PLACEHOLDER = "Separate multiple values with commas or line breaks, or paste from Excel.";
+        const FILTER_PLACEHOLDER = "Enter one value for this filter.";
+        const KEY_PLACEHOLDER = "Separate multiple values with commas or line breaks, or paste from Excel.";
         const PAGE_SIZE = 1000;
         const MAX_ROWS = 50000;
         const FIXED_DT_FORMAT = `m\\/d\\/yyyy\\ h:mm`;
         const FIXED_DURATION_FORMAT = `\\[h\\]\\:mm\\:ss`;
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+        // Fields that default to key type
+        const DEFAULT_KEY_STORAGES = new Set([
+          "UDFVarchar1", "UDFVarchar110", "UDFVarchar113", "UDFVarchar115",
+          "UDFVarchar41", "UDFVarchar136", "experienceId", "UDFVarchar122"
+        ]);
+
+        const DEFAULT_FILTER_STORAGES = [
+          "UDFVarchar10", "UDFVarchar126", "DNIS", "siteName", "UDFVarchar120"
+        ];
+
+        const DEFAULT_KEY_LIST = [
+          "experienceId", "UDFVarchar122", "UDFVarchar41", "UDFVarchar115",
+          "UDFVarchar1", "UDFVarchar110"
+        ];
 
         let metadataFields = [];
         try {
@@ -44,95 +60,75 @@
           }
         } catch (_) {}
 
-        // Fields that default to KEY type (green zone)
-        const DEFAULT_KEY_STORAGES = new Set([
-          "UDFVarchar1", "UDFVarchar110", "UDFVarchar113", "UDFVarchar115",
-          "UDFVarchar41", "UDFVarchar136"
-        ]);
-
-        // Default filter fields per carousel pane
-        const DEFAULT_FILTER_STORAGES = [
-          "UDFVarchar10", "experienceId", "UDFVarchar122", "siteName",
-          "UDFVarchar126", "DNIS", "UDFVarchar120"
-        ];
-
-        // ─── Progress UI ───────────────────────────────────────────────────────────
+        // ── Progress UI ────────────────────────────────────────────────────────────
         const progressUI = (() => {
           const wrap = document.createElement("div");
-          wrap.style.cssText = `
-            position:fixed; top:16px; right:16px; z-index:999999;
-            width:420px; background:#111827; color:#e5e7eb; border:1px solid #374151;
-            border-radius:10px; padding:12px 12px 10px; font-family:Segoe UI, Arial, sans-serif;
-            box-shadow:0 12px 28px rgba(0,0,0,.35);
-          `;
+          wrap.style.cssText = `position:fixed;top:16px;right:16px;z-index:999999;width:420px;
+            background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;
+            padding:12px 12px 10px;font-family:Segoe UI,Arial,sans-serif;
+            box-shadow:0 12px 28px rgba(0,0,0,.35);`;
           const title = document.createElement("div");
-          title.style.cssText = "font-weight:700; font-size:14px; margin-bottom:6px; color:#93c5fd;";
+          title.style.cssText = "font-weight:700;font-size:14px;margin-bottom:6px;color:#93c5fd;";
           title.textContent = "Nexidia Search";
           const status = document.createElement("div");
-          status.style.cssText = "font-size:12px; line-height:1.3; margin-bottom:8px;";
+          status.style.cssText = "font-size:12px;line-height:1.3;margin-bottom:8px;";
           status.textContent = "Ready";
           const barOuter = document.createElement("div");
-          barOuter.style.cssText = "height:10px; background:#1f2937; border-radius:999px; overflow:hidden; border:1px solid #374151;";
+          barOuter.style.cssText = "height:10px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151;";
           const barInner = document.createElement("div");
-          barInner.style.cssText = "height:100%; width:0%; background:#3b82f6;";
+          barInner.style.cssText = "height:100%;width:0%;background:#3b82f6;";
           barOuter.appendChild(barInner);
           const metrics = document.createElement("div");
-          metrics.style.cssText = "margin-top:8px; font-size:12px; color:#cbd5e1;";
-          metrics.textContent = "";
-          const close = document.createElement("div");
-          close.textContent = "✕";
-          close.style.cssText = `position:absolute; top:10px; right:12px; cursor:pointer; color:#9ca3af; font-size:14px;`;
-          close.onclick = () => wrap.remove();
-          wrap.appendChild(close);
+          metrics.style.cssText = "margin-top:8px;font-size:12px;color:#cbd5e1;";
+          const closeBtn = document.createElement("div");
+          closeBtn.textContent = "✕";
+          closeBtn.style.cssText = "position:absolute;top:10px;right:12px;cursor:pointer;color:#9ca3af;font-size:14px;";
+          closeBtn.onclick = () => wrap.remove();
+          wrap.appendChild(closeBtn);
           wrap.appendChild(title);
           wrap.appendChild(status);
           wrap.appendChild(barOuter);
           wrap.appendChild(metrics);
-          const set = (msg, pct = null, meta = "") => {
-            status.textContent = msg || "";
-            if (pct !== null && pct !== undefined) {
-              barInner.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+          return {
+            show: () => document.body.appendChild(wrap),
+            remove: () => wrap.remove(),
+            set: (msg, pct = null, meta = "") => {
+              status.textContent = msg || "";
+              if (pct !== null) barInner.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+              metrics.textContent = meta || "";
             }
-            metrics.textContent = meta || "";
           };
-          const show = () => document.body.appendChild(wrap);
-          const remove = () => wrap.remove();
-          return { show, set, remove };
         })();
 
-        // ─── DOM helpers ───────────────────────────────────────────────────────────
+        // ── DOM helper ─────────────────────────────────────────────────────────────
         const el = (tag, props = {}, ...children) => {
           const node = document.createElement(tag);
           Object.assign(node, props);
-          for (const ch of children) node.appendChild(typeof ch === "string" ? document.createTextNode(ch) : ch);
+          for (const ch of children)
+            node.appendChild(typeof ch === "string" ? document.createTextNode(ch) : ch);
           return node;
         };
-        const row = (...nodes) =>
-          el("div", { style: "display:flex; gap:10px; align-items:flex-end; margin:8px 0; flex-wrap:wrap;" }, ...nodes);
-        const section = (title) =>
-          el("div", {},
-            el("div", { style: "font-size:15px; font-weight:600; margin:10px 0 10px;" }, title)
-          );
-        const hr = () => el("div", { style: "height:1px; background:#eee; margin:14px 0;" });
+        const hr = () => el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" });
+        const section = (text) => el("div", {
+          style: "font-size:15px;font-weight:600;margin:10px 0 10px;"
+        }, text);
 
-        const field = (label, type = "text", placeholder = PLACEHOLDER) => {
+        const field = (label, type = "text", placeholder = "") => {
           const input = el("input", {
-            type,
-            placeholder,
-            style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px;"
+            type, placeholder,
+            style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;"
           });
-          const wrap = el("div", { style: "flex:1; min-width:280px;" },
-            el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, label),
+          const wrap = el("div", { style: "flex:1;min-width:280px;" },
+            el("div", { style: "font-size:12px;color:#444;margin-bottom:4px;" }, label),
             input
           );
           return { wrap, input };
         };
 
-        const textareaField = (label, placeholder = PLACEHOLDER, rowsCount = 3) => {
+        const textareaField = (label, placeholder = "", rowsCount = 3) => {
           const ta = el("textarea", {
-            rows: rowsCount,
-            placeholder,
-            style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; resize:vertical; font-family:Segoe UI, Arial, sans-serif;"
+            rows: rowsCount, placeholder,
+            style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;resize:vertical;font-family:Segoe UI,Arial,sans-serif;box-sizing:border-box;"
           });
           ta.addEventListener("paste", (e) => {
             try {
@@ -144,42 +140,38 @@
                 const start = ta.selectionStart ?? ta.value.length;
                 const end = ta.selectionEnd ?? ta.value.length;
                 ta.value = ta.value.slice(0, start) + normalized + ta.value.slice(end);
-                const caret = start + normalized.length;
-                ta.selectionStart = ta.selectionEnd = caret;
+                ta.selectionStart = ta.selectionEnd = start + normalized.length;
               }
             } catch (_) {}
           });
-          const wrap = el("div", { style: "flex:1; min-width:280px;" },
-            el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, label),
+          const wrap = el("div", { style: "flex:1;min-width:280px;" },
+            el("div", { style: "font-size:12px;color:#444;margin-bottom:4px;" }, label),
             ta
           );
           return { wrap, input: ta };
         };
 
-        // ─── Field type registry ───────────────────────────────────────────────────
-        // Each row entry: { rowEl, picker, valueInput, type ("filter"|"key"), paneIndex, locked }
+        // ── Field registry ─────────────────────────────────────────────────────────
         const allRows = [];
 
         const getActiveStorageNames = (excludeEntry = null) =>
-          new Set(allRows.filter(r => r !== excludeEntry).map(r => r.picker.getStorageName()).filter(Boolean));
+          new Set(allRows
+            .filter(r => r !== excludeEntry)
+            .map(r => r.picker ? r.picker.getStorageName() : "")
+            .filter(Boolean));
 
-        // ─── Field picker ──────────────────────────────────────────────────────────
+        // ── Field picker ───────────────────────────────────────────────────────────
         function makeFieldPicker(onSelect) {
-          const wrapper = el("div", { style: "position:relative; flex:1; min-width:200px;" });
+          const wrapper = el("div", { style: "position:relative;flex:1;min-width:180px;" });
           const input = el("input", {
-            type: "text",
-            placeholder: "Search fields...",
-            style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
+            type: "text", placeholder: "Search fields...",
+            style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;"
           });
           const dropdown = el("div", {
-            style: `
-              display:none; position:absolute; top:100%; left:0; right:0;
-              max-height:200px; overflow-y:auto; background:#fff;
-              border:1px solid #ccc; border-top:none; border-radius:0 0 6px 6px;
-              z-index:10000; box-shadow:0 4px 12px rgba(0,0,0,.15);
-            `
+            style: `display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;
+              overflow-y:auto;background:#fff;border:1px solid #ccc;border-top:none;
+              border-radius:0 0 6px 6px;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,.15);`
           });
-
           let highlightIndex = -1;
           let visibleItems = [];
 
@@ -188,8 +180,8 @@
             visibleItems = [];
             highlightIndex = -1;
             const q = query.toLowerCase().trim();
-            const active = getActiveStorageNames({ picker: { getStorageName: () => input.dataset.storageName || "" } });
             const currentStorage = input.dataset.storageName || "";
+            const active = getActiveStorageNames();
             const matches = metadataFields.filter(f => {
               if (f.storageName === currentStorage) return true;
               if (active.has(f.storageName)) return false;
@@ -198,10 +190,10 @@
             if (!matches.length) { dropdown.style.display = "none"; return; }
             for (const f of matches.slice(0, 80)) {
               const item = el("div", {
-                style: "padding:6px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #f0f0f0;"
+                style: "padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;"
               }, f.displayName);
               item.onmouseenter = () => {
-                visibleItems.forEach((el, i) => el.style.background = i === visibleItems.indexOf(item) ? "#e8f0fe" : "");
+                visibleItems.forEach((v, i) => v.style.background = visibleItems.indexOf(item) === i ? "#e8f0fe" : "");
                 highlightIndex = visibleItems.indexOf(item);
               };
               item.onmouseleave = () => { item.style.background = ""; };
@@ -224,7 +216,7 @@
 
           input.addEventListener("input", () => { delete input.dataset.storageName; renderDropdown(input.value); });
           input.addEventListener("focus", () => renderDropdown(input.value));
-          input.addEventListener("blur", () => { setTimeout(() => { dropdown.style.display = "none"; }, 150); });
+          input.addEventListener("blur", () => setTimeout(() => { dropdown.style.display = "none"; }, 150));
           input.addEventListener("keydown", (e) => {
             if (!visibleItems.length) return;
             if (e.key === "ArrowDown") {
@@ -239,234 +231,304 @@
               visibleItems[highlightIndex].scrollIntoView({ block: "nearest" });
             } else if (e.key === "Enter") {
               e.preventDefault();
-              if (highlightIndex >= 0 && visibleItems[highlightIndex]) visibleItems[highlightIndex].onmousedown(e);
+              if (highlightIndex >= 0 && visibleItems[highlightIndex])
+                visibleItems[highlightIndex].onmousedown(e);
             } else if (e.key === "Escape") { dropdown.style.display = "none"; }
           });
 
           wrapper.appendChild(input);
           wrapper.appendChild(dropdown);
 
-          const getStorageName = () => input.dataset.storageName || "";
-          const getDisplayName = () => input.value;
-          const preselect = (storageName) => {
-            const f = metadataFields.find(x => x.storageName === storageName);
-            if (f) { selectItem(f); } else { input.value = storageName; input.dataset.storageName = storageName; }
+          return {
+            wrapper,
+            input,
+            getStorageName: () => input.dataset.storageName || "",
+            getDisplayName: () => input.value,
+            preselect: (storageName) => {
+              const f = metadataFields.find(x => x.storageName === storageName);
+              if (f) { selectItem(f); }
+              else { input.value = storageName; input.dataset.storageName = storageName; }
+            }
           };
-
-          return { wrapper, input, getStorageName, getDisplayName, preselect };
         }
 
-        // ─── Type toggle (funnel/key pill) ─────────────────────────────────────────
-        function makeTypeToggle(initialType, onChange) {
+        // ── Slide toggle (filter=blue left / key=green right) ──────────────────────
+        // SVG funnel icon (clean, standardized, matches Excel filter aesthetic)
+        const FUNNEL_SVG = `<svg width="11" height="11" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 2h8L6 5.5V8.5L4 7.5V5.5L1 2z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" fill="none"/>
+        </svg>`;
+        const KEY_SVG = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="4.5" cy="5" r="2.5" stroke="currentColor" stroke-width="1.1" fill="none"/>
+          <path d="M6.5 6.5L10 10" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+          <path d="M8.5 8.5L9.5 7.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>`;
+
+        function makeSlideToggle(initialType, onChange) {
+          // pill toggle: left side = filter (blue), right side = key (green)
+          const PILL_W = 34, PILL_H = 18, KNOB = 14;
           const wrap = el("div", {
-            style: "display:flex; align-items:center; gap:0; border-radius:20px; overflow:hidden; border:1px solid #d1d5db; flex-shrink:0; height:30px;"
+            style: "display:flex;align-items:center;gap:5px;flex-shrink:0;cursor:pointer;user-select:none;"
           });
 
-          const filterBtn = el("button", {
-            style: `
-              padding:0 10px; height:100%; border:0; cursor:pointer; font-size:12px;
-              display:flex; align-items:center; gap:4px; transition:background 0.2s, color 0.2s;
-            `
+          // Left icon (funnel)
+          const leftIcon = el("span", {
+            style: "display:flex;align-items:center;opacity:0.55;flex-shrink:0;",
+            title: "Filter"
           });
-          filterBtn.innerHTML = `<span style="font-size:11px;">&#9698;</span> Filter`;
+          leftIcon.innerHTML = FUNNEL_SVG;
 
-          const keyBtn = el("button", {
-            style: `
-              padding:0 10px; height:100%; border:0; cursor:pointer; font-size:12px;
-              display:flex; align-items:center; gap:4px; transition:background 0.2s, color 0.2s;
-            `
+          // Pill
+          const pill = el("div", {
+            style: `position:relative;width:${PILL_W}px;height:${PILL_H}px;border-radius:999px;
+              transition:background 0.22s;flex-shrink:0;`
           });
-          keyBtn.innerHTML = `<span style="font-size:13px;">&#128273;</span> Key`;
+          const knob = el("div", {
+            style: `position:absolute;top:${(PILL_H - KNOB) / 2}px;width:${KNOB}px;height:${KNOB}px;
+              border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.25);
+              transition:left 0.22s;`
+          });
+          pill.appendChild(knob);
 
-          let current = initialType;
+          // Right icon (key)
+          const rightIcon = el("span", {
+            style: "display:flex;align-items:center;opacity:0.55;flex-shrink:0;",
+            title: "Key"
+          });
+          rightIcon.innerHTML = KEY_SVG;
+
+          wrap.appendChild(leftIcon);
+          wrap.appendChild(pill);
+          wrap.appendChild(rightIcon);
+
+          let current = initialType || "filter";
           let locked = false;
 
           const applyState = () => {
             if (current === "filter") {
-              filterBtn.style.background = locked ? "#93c5fd" : "#3b82f6";
-              filterBtn.style.color = "#fff";
-              keyBtn.style.background = "#f3f4f6";
-              keyBtn.style.color = "#6b7280";
+              pill.style.background = locked ? "#93c5fd" : "#3b82f6";
+              knob.style.left = "2px";
+              leftIcon.style.opacity = "0.9";
+              rightIcon.style.opacity = "0.35";
             } else {
-              keyBtn.style.background = locked ? "#6ee7b7" : "#22c55e";
-              keyBtn.style.color = "#fff";
-              filterBtn.style.background = "#f3f4f6";
-              filterBtn.style.color = "#6b7280";
+              pill.style.background = locked ? "#6ee7b7" : "#22c55e";
+              knob.style.left = `${PILL_W - KNOB - 2}px`;
+              leftIcon.style.opacity = "0.35";
+              rightIcon.style.opacity = "0.9";
             }
-            filterBtn.disabled = locked;
-            keyBtn.disabled = locked;
-            filterBtn.style.cursor = locked ? "not-allowed" : "pointer";
-            keyBtn.style.cursor = locked ? "not-allowed" : "pointer";
-            filterBtn.title = locked ? "Clear this field's value to change type" : "";
-            keyBtn.title = locked ? "Clear this field's value to change type" : "";
+            wrap.style.cursor = locked ? "not-allowed" : "pointer";
+            wrap.title = locked
+              ? "Clear this field's value to change type"
+              : current === "filter" ? "Filter — click to switch to Key" : "Key — click to switch to Filter";
           };
 
-          filterBtn.onclick = () => {
-            if (locked || current === "filter") return;
-            current = "filter";
+          wrap.addEventListener("click", () => {
+            if (locked) return;
+            current = current === "filter" ? "key" : "filter";
             applyState();
-            if (onChange) onChange("filter");
-          };
-          keyBtn.onclick = () => {
-            if (locked || current === "key") return;
-            current = "key";
-            applyState();
-            if (onChange) onChange("key");
-          };
-
-          wrap.appendChild(filterBtn);
-          wrap.appendChild(keyBtn);
-          applyState();
-
-          const lock = () => { locked = true; applyState(); };
-          const unlock = () => { locked = false; applyState(); };
-          const getType = () => current;
-          const setType = (t) => { current = t; applyState(); };
-
-          return { wrap, lock, unlock, getType, setType };
-        }
-
-        // ─── Carousel state ────────────────────────────────────────────────────────
-        const panes = [];
-        let activePaneIndex = 0;
-
-        // ─── AND label between rows ────────────────────────────────────────────────
-        const makeAndLabel = () => el("div", {
-          style: `
-            text-align:center; font-size:11px; font-weight:700; letter-spacing:2px;
-            color:rgba(59,130,246,0.22); user-select:none; margin:2px 0; pointer-events:none;
-          `
-        }, "AND");
-
-        // ─── Filter row builder (used inside panes) ────────────────────────────────
-        function makeFilterRow(container, defaultStorageName, initialType, paneIndex, onTypeChange) {
-          const rowEl = el("div", {
-            style: "display:flex; gap:8px; align-items:flex-end; margin:4px 0; flex-wrap:wrap;"
+            if (onChange) onChange(current);
           });
 
-          const picker = makeFieldPicker();
+          applyState();
 
-          const valueWrap = el("div", { style: "flex:2; min-width:180px;" },
-            el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, "Value(s)"),
-            el("input", {
-              type: "text",
-              placeholder: PLACEHOLDER,
-              style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
-            })
-          );
-          const valueInput = valueWrap.lastChild;
+          return {
+            wrap,
+            getType: () => current,
+            setType: (t) => { current = t; applyState(); },
+            lock: () => { locked = true; applyState(); },
+            unlock: () => { locked = false; applyState(); }
+          };
+        }
 
+        // ── AND label ──────────────────────────────────────────────────────────────
+        // Rendered as a flex row so we can center it exactly over the value input column
+        function makeAndLabel() {
+          // Outer row matches the field row layout: [remove btn gap][toggle gap][label col][value col]
+          // We use a flex container that mirrors the row structure so AND sits over the value input
+          const wrap = el("div", {
+            style: "display:flex;align-items:center;margin:0;height:18px;pointer-events:none;user-select:none;"
+          });
+          wrap.dataset.andLabel = "1";
+
+          // Left spacer: accounts for remove button (28px) + toggle (58px) + gaps (8+8px) + field label col (180px)
+          // Total left offset ~282px — mirrors the row layout
+          const spacer = el("div", { style: "flex:0 0 282px;" });
+          // AND text centered over the value input flex area
+          const label = el("div", {
+            style: "flex:1;text-align:center;font-size:10px;font-weight:700;letter-spacing:2px;color:rgba(59,130,246,0.28);"
+          }, "AND");
+
+          wrap.appendChild(spacer);
+          wrap.appendChild(label);
+          return wrap;
+        }
+
+        // ── Pane state ─────────────────────────────────────────────────────────────
+        const panes = [];
+        let activePaneIndex = 0;
+        let carouselTrack, dotsRow, carouselViewport;
+
+        // ── Filter row (inside a carousel pane) ───────────────────────────────────
+        function makeFilterRow(pane, defaultStorageName, initialType, onTypeChange) {
           const entryObj = {
-            rowEl, picker, valueInput,
+            rowEl: null, picker: null, valueInput: null,
             type: initialType || "filter",
-            paneIndex: paneIndex ?? 0,
+            paneIndex: pane.index,
             locked: false,
             toggle: null
           };
 
-          const toggle = makeTypeToggle(entryObj.type, (newType) => {
+          const toggle = makeSlideToggle(entryObj.type, (newType) => {
             entryObj.type = newType;
+            // Update value input placeholder
+            entryObj.valueInput.placeholder = newType === "filter" ? FILTER_PLACEHOLDER : KEY_PLACEHOLDER;
             if (onTypeChange) onTypeChange(entryObj, newType);
           });
           entryObj.toggle = toggle;
 
-          // Lock toggle when value is entered and pane count > 1
+          // Remove button
+          const removeBtn = el("button", {
+            style: `width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;
+              color:#aaa;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;
+              justify-content:center;padding:0;align-self:center;`,
+            title: "Remove this field"
+          }, "✕");
+
+          // Field label (read-only styled)
+          const fieldLabelWrap = el("div", {
+            style: `flex:0 0 180px;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;
+              background:#f3f4f6;font-size:13px;color:#374151;white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis;box-sizing:border-box;`
+          });
+
+          // Value input
+          const valueInput = el("input", {
+            type: "text",
+            placeholder: entryObj.type === "filter" ? FILTER_PLACEHOLDER : KEY_PLACEHOLDER,
+            style: "flex:1;min-width:0;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;"
+          });
+          entryObj.valueInput = valueInput;
+
+          // Field picker (hidden, drives the label)
+          const picker = makeFieldPicker((f) => {
+            fieldLabelWrap.textContent = f.displayName;
+            fieldLabelWrap.title = f.displayName;
+          });
+          picker.wrapper.style.display = "none";
+          entryObj.picker = picker;
+
+          // Row: [remove] [toggle] [field label] [value input] [hidden picker]
+          const rowEl = el("div", {
+            style: "display:flex;gap:8px;align-items:center;margin:4px 0;"
+          });
+          rowEl.appendChild(removeBtn);
+          rowEl.appendChild(toggle.wrap);
+          rowEl.appendChild(fieldLabelWrap);
+          rowEl.appendChild(valueInput);
+          rowEl.appendChild(picker.wrapper);
+          entryObj.rowEl = rowEl;
+
+          allRows.push(entryObj);
+
+          // Lock toggle when value filled and multiple panes exist
           const checkLock = () => {
-            const hasValue = valueInput.value.trim().length > 0;
-            const multiPane = panes.length > 1;
-            if (hasValue && multiPane && entryObj.type === "filter") {
-              toggle.lock();
-              entryObj.locked = true;
+            const hasVal = valueInput.value.trim().length > 0;
+            if (hasVal && panes.length > 1 && entryObj.type === "filter") {
+              toggle.lock(); entryObj.locked = true;
             } else {
-              toggle.unlock();
-              entryObj.locked = false;
+              toggle.unlock(); entryObj.locked = false;
             }
           };
           valueInput.addEventListener("input", checkLock);
 
-          const removeBtn = el("button", {
-            style: "padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; color:#888; cursor:pointer; font-size:13px; white-space:nowrap; align-self:flex-end;"
-          }, "✕");
-
-          rowEl.appendChild(picker.wrapper);
-          rowEl.appendChild(valueWrap);
-          rowEl.appendChild(toggle.wrap);
-          rowEl.appendChild(removeBtn);
-
-          allRows.push(entryObj);
-
           removeBtn.onclick = () => {
+            // Remove AND label above if present
+            const prev = rowEl.previousSibling;
+            if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
+            // Remove AND label below if this was first and next is a label
+            const next = rowEl.nextSibling;
+            if (next && next.dataset && next.dataset.andLabel && !rowEl.previousSibling) next.remove();
             rowEl.remove();
             const idx = allRows.indexOf(entryObj);
             if (idx !== -1) allRows.splice(idx, 1);
-            // Remove AND label immediately before this row if present
-            const prev = rowEl.previousSibling;
-            if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
+            const pi = pane.rows.indexOf(entryObj);
+            if (pi !== -1) pane.rows.splice(pi, 1);
           };
 
-          if (defaultStorageName) picker.preselect(defaultStorageName);
+          if (defaultStorageName) {
+            picker.preselect(defaultStorageName);
+            const f = metadataFields.find(x => x.storageName === defaultStorageName);
+            fieldLabelWrap.textContent = f ? f.displayName : defaultStorageName;
+            fieldLabelWrap.title = f ? f.displayName : defaultStorageName;
+          }
 
           return entryObj;
         }
 
-        // ─── Key row builder (global zone) ─────────────────────────────────────────
-        function makeKeyRow(container, defaultStorageName) {
-          const rowEl = el("div", {
-            style: "display:flex; gap:8px; align-items:flex-end; margin:4px 0; flex-wrap:wrap;"
-          });
+        // ── Key row (global zone) ──────────────────────────────────────────────────
+        let keyRowsContainer;
 
-          const picker = makeFieldPicker();
-
-          const valueWrap = el("div", { style: "flex:2; min-width:180px;" },
-            el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, "Value(s)"),
-            el("input", {
-              type: "text",
-              placeholder: PLACEHOLDER,
-              style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
-            })
-          );
-          const valueInput = valueWrap.lastChild;
-
+        function makeKeyRow(defaultStorageName) {
           const entryObj = {
-            rowEl, picker, valueInput,
-            type: "key",
-            paneIndex: -1,
-            locked: false,
-            toggle: null
+            rowEl: null, picker: null, valueInput: null,
+            type: "key", paneIndex: -1, locked: false, toggle: null
           };
 
-          const toggle = makeTypeToggle("key", (newType) => {
+          const toggle = makeSlideToggle("key", (newType) => {
             if (newType === "filter") {
-              // Move to active pane's filter zone
               entryObj.type = "filter";
               entryObj.paneIndex = activePaneIndex;
-              rowEl.remove();
+              const prev = entryObj.rowEl.previousSibling;
+              if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
+              entryObj.rowEl.remove();
               const idx = allRows.indexOf(entryObj);
               if (idx !== -1) allRows.splice(idx, 1);
-              const pane = panes[activePaneIndex];
-              if (pane) {
-                const andLbl = makeAndLabel();
-                andLbl.dataset.andLabel = "1";
-                pane.rowsContainer.appendChild(andLbl);
-                pane.rowsContainer.appendChild(rowEl);
-                pane.rows.push(entryObj);
-                entryObj.paneIndex = activePaneIndex;
+              const targetPane = panes[activePaneIndex];
+              if (targetPane) {
+                appendRowToPane(targetPane, entryObj, defaultStorageName);
               }
             }
           });
           entryObj.toggle = toggle;
 
           const removeBtn = el("button", {
-            style: "padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; color:#888; cursor:pointer; font-size:13px; white-space:nowrap; align-self:flex-end;"
+            style: `width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;
+              color:#aaa;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;
+              justify-content:center;padding:0;align-self:center;`,
+            title: "Remove this field"
           }, "✕");
 
-          rowEl.appendChild(picker.wrapper);
-          rowEl.appendChild(valueWrap);
-          rowEl.appendChild(toggle.wrap);
-          rowEl.appendChild(removeBtn);
+          const fieldLabelWrap = el("div", {
+            style: `flex:0 0 180px;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;
+              background:#f3f4f6;font-size:13px;color:#374151;white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis;box-sizing:border-box;`
+          });
 
-          container.appendChild(rowEl);
+          const valueInput = el("input", {
+            type: "text",
+            placeholder: KEY_PLACEHOLDER,
+            style: "flex:1;min-width:0;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;"
+          });
+          entryObj.valueInput = valueInput;
+
+          const picker = makeFieldPicker((f) => {
+            fieldLabelWrap.textContent = f.displayName;
+            fieldLabelWrap.title = f.displayName;
+          });
+          picker.wrapper.style.display = "none";
+          entryObj.picker = picker;
+
+          const rowEl = el("div", {
+            style: "display:flex;gap:8px;align-items:center;margin:4px 0;"
+          });
+          rowEl.appendChild(removeBtn);
+          rowEl.appendChild(toggle.wrap);
+          rowEl.appendChild(fieldLabelWrap);
+          rowEl.appendChild(valueInput);
+          rowEl.appendChild(picker.wrapper);
+          entryObj.rowEl = rowEl;
+
           allRows.push(entryObj);
+          keyRowsContainer.appendChild(rowEl);
 
           removeBtn.onclick = () => {
             rowEl.remove();
@@ -474,60 +536,129 @@
             if (idx !== -1) allRows.splice(idx, 1);
           };
 
-          if (defaultStorageName) picker.preselect(defaultStorageName);
+          if (defaultStorageName) {
+            picker.preselect(defaultStorageName);
+            const f = metadataFields.find(x => x.storageName === defaultStorageName);
+            fieldLabelWrap.textContent = f ? f.displayName : defaultStorageName;
+            fieldLabelWrap.title = f ? f.displayName : defaultStorageName;
+          }
+
           return entryObj;
         }
 
-        // ─── Pane builder ──────────────────────────────────────────────────────────
-        function makePaneEl(paneIndex) {
-          const paneWrap = el("div", {
-            style: `
-              min-width:100%; box-sizing:border-box;
-              padding:18px 20px 16px;
-              background:rgba(255,255,255,0.92);
-              border-radius:14px;
-              border:1px solid rgba(59,130,246,0.18);
-              position:relative;
-              flex-shrink:0;
-            `
+        // Append a row entry to a pane's rowsContainer with AND label
+        function appendRowToPane(pane, entryObj, storageName) {
+          if (pane.rows.length > 0) {
+            pane.rowsContainer.appendChild(makeAndLabel());
+          }
+          entryObj.paneIndex = pane.index;
+          pane.rowsContainer.appendChild(entryObj.rowEl);
+          pane.rows.push(entryObj);
+          allRows.push(entryObj);
+        }
+
+        // ── Carousel ───────────────────────────────────────────────────────────────
+        const updateDots = () => {
+          if (!dotsRow) return;
+          dotsRow.innerHTML = "";
+          for (let i = 0; i < panes.length; i++) {
+            const dot = el("div", {
+              style: `width:8px;height:8px;border-radius:50%;cursor:pointer;
+                background:${i === activePaneIndex ? "#3b82f6" : "#d1d5db"};transition:background 0.2s;`,
+              title: `Search ${String.fromCharCode(65 + i)}`
+            });
+            dot.onclick = () => slideTo(i);
+            dotsRow.appendChild(dot);
+          }
+        };
+
+        const slideTo = (index) => {
+          if (index < 0 || index >= panes.length) return;
+          activePaneIndex = index;
+          // Track offset: each pane is (viewport_width - peek) wide, plus gap
+          // We use CSS translate in % of track width; simpler: each pane el is sized via JS
+          const vw = carouselViewport ? carouselViewport.offsetWidth : 900;
+          const PEEK = 72; // px of adjacent pane visible on right
+          const GAP = 12;
+          const paneW = vw - PEEK - GAP;
+          carouselTrack.style.transform = `translateX(-${index * (paneW + GAP)}px)`;
+          updateDots();
+          // Update lock states
+          allRows.forEach(r => {
+            if (r.type === "filter" && r.toggle) {
+              const hasVal = r.valueInput.value.trim().length > 0;
+              if (hasVal && panes.length > 1) { r.toggle.lock(); r.locked = true; }
+              else { r.toggle.unlock(); r.locked = false; }
+            }
+          });
+        };
+
+        const resizePanes = () => {
+          if (!carouselViewport) return;
+          const vw = carouselViewport.offsetWidth;
+          const PEEK = 72;
+          const GAP = 12;
+          const paneW = vw - PEEK - GAP;
+          panes.forEach(p => {
+            p.el.style.width = `${paneW}px`;
+            p.el.style.minWidth = `${paneW}px`;
+            p.el.style.marginRight = `${GAP}px`;
+          });
+          slideTo(activePaneIndex);
+        };
+
+        // Build a single carousel pane element
+        function buildPaneEl(paneIndex) {
+          const paneEl = el("div", {
+            style: `background:#fff;border-radius:14px;border:1px solid rgba(59,130,246,0.18);
+              padding:18px 20px 14px;box-sizing:border-box;flex-shrink:0;position:relative;
+              box-shadow:0 2px 10px rgba(59,130,246,0.06);cursor:default;`
           });
 
-          const paneLabel = el("div", {
-            style: "font-size:11px; font-weight:700; color:#93c5fd; letter-spacing:1px; margin-bottom:10px; text-transform:uppercase;"
-          }, paneIndex === 0 ? "Search A" : `Search ${String.fromCharCode(65 + paneIndex)}`);
-          paneWrap.appendChild(paneLabel);
+          // Pane header
+          const paneHeader = el("div", {
+            style: "font-size:16px;font-weight:700;color:#1e3a5f;margin-bottom:14px;"
+          }, "Search Filters");
+          paneEl.appendChild(paneHeader);
 
+          // Rows container
           const rowsContainer = el("div", {});
-          paneWrap.appendChild(rowsContainer);
+          paneEl.appendChild(rowsContainer);
 
+          // Add filter button
           const addBtn = el("button", {
-            style: "margin-top:10px; padding:6px 12px; border-radius:8px; border:1px solid #3b82f6; background:#fff; color:#3b82f6; cursor:pointer; font-size:12px;"
+            style: "margin-top:12px;padding:6px 12px;border-radius:8px;border:1px solid #3b82f6;background:#fff;color:#3b82f6;cursor:pointer;font-size:12px;"
           }, "+ Add Filter");
+          paneEl.appendChild(addBtn);
 
-          paneWrap.appendChild(addBtn);
+          // Bottom label (Search A / B / C)
+          const bottomLabel = el("div", {
+            style: "text-align:center;font-size:11px;font-weight:600;color:#3b82f6;letter-spacing:1px;margin-top:16px;opacity:0.7;"
+          }, `Search ${String.fromCharCode(65 + paneIndex)}`);
+          paneEl.appendChild(bottomLabel);
 
-          const paneObj = { el: paneWrap, rowsContainer, rows: [], addBtn, index: paneIndex };
+          const paneObj = {
+            el: paneEl,
+            rowsContainer,
+            addBtn,
+            rows: [],
+            index: paneIndex,
+            bottomLabel
+          };
 
           addBtn.onclick = () => {
-            if (rowsContainer.children.length > 0) {
-              const andLbl = makeAndLabel();
-              andLbl.dataset.andLabel = "1";
-              rowsContainer.appendChild(andLbl);
-            }
-            const entry = makeFilterRow(rowsContainer, "", "filter", paneIndex, (e, newType) => {
+            const andLbl = makeAndLabel();
+            rowsContainer.appendChild(andLbl);
+            const entry = makeFilterRow(paneObj, "", "filter", (e, newType) => {
               if (newType === "key") {
+                const prev2 = e.rowEl.previousSibling;
+                if (prev2 && prev2.dataset && prev2.dataset.andLabel) prev2.remove();
                 e.rowEl.remove();
-                const prev = e.rowEl.previousSibling;
-                if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
-                const idx = allRows.indexOf(e);
-                if (idx !== -1) allRows.splice(idx, 1);
-                const kidx = paneObj.rows.indexOf(e);
-                if (kidx !== -1) paneObj.rows.splice(kidx, 1);
-                makeKeyRow(keyRowsContainer, e.picker.getStorageName());
-                if (e.valueInput.value.trim()) {
-                  const newKey = allRows[allRows.length - 1];
-                  if (newKey) newKey.valueInput.value = e.valueInput.value;
-                }
+                const i2 = allRows.indexOf(e);
+                if (i2 !== -1) allRows.splice(i2, 1);
+                const pi2 = paneObj.rows.indexOf(e);
+                if (pi2 !== -1) paneObj.rows.splice(pi2, 1);
+                makeKeyRow(e.picker.getStorageName());
               }
             });
             rowsContainer.appendChild(entry.rowEl);
@@ -537,215 +668,65 @@
           return paneObj;
         }
 
-        // ─── Carousel shell ────────────────────────────────────────────────────────
-        const carouselSection = el("div", { style: "margin:10px 0 0 0;" });
-
-        const carouselViewport = el("div", {
-          style: `
-            position:relative; overflow:hidden; border-radius:14px;
-            box-shadow:0 2px 16px rgba(59,130,246,0.10);
-          `
-        });
-
-        // Gradient fade masks
-        const fadeMaskLeft = el("div", {
-          style: `
-            position:absolute; top:0; left:0; bottom:0; width:60px;
-            background:linear-gradient(to right, rgba(255,255,255,0.97), rgba(255,255,255,0));
-            z-index:5; pointer-events:none; opacity:0; transition:opacity 0.3s;
-          `
-        });
-        const fadeMaskRight = el("div", {
-          style: `
-            position:absolute; top:0; right:0; bottom:0; width:60px;
-            background:linear-gradient(to left, rgba(255,255,255,0.85), rgba(255,255,255,0));
-            z-index:5; pointer-events:none;
-          `
-        });
-
-        const carouselTrack = el("div", {
-          style: `
-            display:flex; flex-direction:row;
-            transition:transform 0.42s cubic-bezier(0.4,0,0.2,1);
-            will-change:transform;
-          `
-        });
-
-        carouselViewport.appendChild(fadeMaskLeft);
-        carouselViewport.appendChild(fadeMaskRight);
-        carouselViewport.appendChild(carouselTrack);
-
-        // OR button container (positioned absolutely over right fade)
-        const orBtnWrap = el("div", {
-          style: `
-            position:absolute; right:-18px; top:50%; transform:translateY(-50%);
-            z-index:10;
-          `
-        });
-
-        const orBtn = el("button", {
-          style: `
-            padding:8px 18px; border-radius:20px; border:0;
-            background:linear-gradient(135deg,#2563eb,#3b82f6);
-            color:#fff; font-size:13px; font-weight:700; cursor:pointer;
-            box-shadow:0 4px 14px rgba(59,130,246,0.45);
-            letter-spacing:1px; white-space:nowrap;
-            transition:box-shadow 0.2s, transform 0.1s;
-          `
-        }, "OR");
-        orBtn.onmouseenter = () => { orBtn.style.boxShadow = "0 6px 20px rgba(59,130,246,0.65)"; orBtn.style.transform = "scale(1.06)"; };
-        orBtn.onmouseleave = () => { orBtn.style.boxShadow = "0 4px 14px rgba(59,130,246,0.45)"; orBtn.style.transform = "scale(1)"; };
-        orBtnWrap.appendChild(orBtn);
-
-        // Wrapper that holds viewport + OR button with relative positioning
-        const carouselOuter = el("div", {
-          style: "position:relative; padding-right:36px;"
-        });
-        carouselOuter.appendChild(carouselViewport);
-        carouselOuter.appendChild(orBtnWrap);
-
-        // Dot indicators
-        const dotsRow = el("div", {
-          style: "display:flex; justify-content:center; gap:6px; margin-top:10px;"
-        });
-
-        const updateDots = () => {
-          dotsRow.innerHTML = "";
-          for (let i = 0; i < panes.length; i++) {
-            const dot = el("div", {
-              style: `
-                width:8px; height:8px; border-radius:50%; cursor:pointer;
-                background:${i === activePaneIndex ? "#3b82f6" : "#d1d5db"};
-                transition:background 0.2s;
-              `
-            });
-            dot.onclick = () => slideTo(i);
-            dotsRow.appendChild(dot);
-          }
-        };
-
-        const slideTo = (index) => {
-          activePaneIndex = index;
-          carouselTrack.style.transform = `translateX(-${index * 100}%)`;
-          fadeMaskLeft.style.opacity = index > 0 ? "1" : "0";
-          updateDots();
-          // Update all row lock states
-          allRows.forEach(r => {
-            if (r.type === "filter" && r.toggle) {
-              const hasValue = r.valueInput.value.trim().length > 0;
-              if (hasValue && panes.length > 1) {
-                r.toggle.lock(); r.locked = true;
-              } else {
-                r.toggle.unlock(); r.locked = false;
-              }
-            }
-          });
-        };
-
-        const addPane = () => {
-          const paneIndex = panes.length;
-          const pane = makePaneEl(paneIndex);
-          // Pre-populate with same default filters as first pane (empty values)
+        // Populate default rows into a pane
+        function populatePaneDefaults(pane) {
           for (let i = 0; i < DEFAULT_FILTER_STORAGES.length; i++) {
-            if (i > 0) {
-              const andLbl = makeAndLabel();
-              andLbl.dataset.andLabel = "1";
-              pane.rowsContainer.appendChild(andLbl);
-            }
-            const entry = makeFilterRow(pane.rowsContainer, DEFAULT_FILTER_STORAGES[i], "filter", paneIndex, (e, newType) => {
+            if (i > 0) pane.rowsContainer.appendChild(makeAndLabel());
+            const sn = DEFAULT_FILTER_STORAGES[i];
+            const entry = makeFilterRow(pane, sn, "filter", (e, newType) => {
               if (newType === "key") {
+                const prev2 = e.rowEl.previousSibling;
+                if (prev2 && prev2.dataset && prev2.dataset.andLabel) prev2.remove();
                 e.rowEl.remove();
-                const prev = e.rowEl.previousSibling;
-                if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
-                const idx = allRows.indexOf(e);
-                if (idx !== -1) allRows.splice(idx, 1);
-                const kidx = pane.rows.indexOf(e);
-                if (kidx !== -1) pane.rows.splice(kidx, 1);
-                makeKeyRow(keyRowsContainer, e.picker.getStorageName());
+                const i2 = allRows.indexOf(e);
+                if (i2 !== -1) allRows.splice(i2, 1);
+                const pi2 = pane.rows.indexOf(e);
+                if (pi2 !== -1) pane.rows.splice(pi2, 1);
+                makeKeyRow(e.picker.getStorageName());
               }
             });
             pane.rows.push(entry);
             pane.rowsContainer.appendChild(entry.rowEl);
           }
+        }
+
+        // Add a new OR pane (pre-built, always present)
+        function addOrPane() {
+          const paneIndex = panes.length;
+          const pane = buildPaneEl(paneIndex);
+          populatePaneDefaults(pane);
           panes.push(pane);
           carouselTrack.appendChild(pane.el);
-          slideTo(paneIndex);
-          // Lock all filter rows with values on existing panes
+          resizePanes();
+          // Re-lock any filter rows that have values
           allRows.forEach(r => {
             if (r.type === "filter" && r.valueInput.value.trim() && r.toggle) {
               r.toggle.lock(); r.locked = true;
             }
           });
-        };
+        }
 
-        orBtn.onclick = () => addPane();
-
-        carouselSection.appendChild(el("div", { style: "font-size:15px; font-weight:600; margin:0 0 10px;" }, "Search Filters"));
-        carouselSection.appendChild(carouselOuter);
-        carouselSection.appendChild(dotsRow);
-
-        // ─── Key zone ──────────────────────────────────────────────────────────────
-        const keySection = el("div", {
-          style: `
-            margin-top:18px;
-            background:rgba(240,253,244,0.85);
-            border:1px solid rgba(34,197,94,0.22);
-            border-radius:14px;
-            padding:16px 20px 14px;
-          `
-        });
-        const keyHeader = el("div", {
-          style: "display:flex; align-items:center; gap:8px; margin-bottom:12px;"
-        },
-          el("span", { style: "font-size:16px;" }, "🔑"),
-          el("span", { style: "font-size:15px; font-weight:600;" }, "Key Fields"),
-          el("span", { style: "font-size:12px; color:#6b7280; font-style:italic;" }, "Multi-value lists — applied across all searches")
-        );
-        keySection.appendChild(keyHeader);
-
-        const keyRowsContainer = el("div", {});
-        keySection.appendChild(keyRowsContainer);
-
-        const addKeyBtn = el("button", {
-          style: "margin-top:8px; padding:6px 12px; border-radius:8px; border:1px solid #22c55e; background:#fff; color:#22c55e; cursor:pointer; font-size:12px;"
-        }, "+ Add Key Field");
-        addKeyBtn.onclick = () => makeKeyRow(keyRowsContainer, "");
-        keySection.appendChild(addKeyBtn);
-
-        // ─── Build modal ───────────────────────────────────────────────────────────
+        // ── Modal construction ─────────────────────────────────────────────────────
         const modal = el("div", {
-          style: `
-            position:fixed; inset:0; background:rgba(0,0,0,.55);
-            z-index:999999; display:flex; align-items:center; justify-content:center;
-            font-family:Segoe UI, Arial, sans-serif;
-          `
+          style: `position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;
+            display:flex;align-items:center;justify-content:center;
+            font-family:Segoe UI,Arial,sans-serif;`
         });
 
         const stickyClose = el("button", {
-          style: `
-            position:fixed; top:20px; right:20px; z-index:1000000;
-            border:0; background:rgba(30,30,30,.75); color:#fff;
-            width:32px; height:32px; border-radius:50%; font-size:16px;
-            cursor:pointer; display:flex; align-items:center; justify-content:center;
-            box-shadow:0 2px 8px rgba(0,0,0,.4);
-          `
+          style: `position:fixed;top:20px;right:20px;z-index:1000000;border:0;
+            background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;
+            border-radius:50%;font-size:16px;cursor:pointer;display:flex;
+            align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);`
         }, "✕");
         stickyClose.onclick = () => { modal.remove(); stickyClose.remove(); };
 
         const card = el("div", {
-          style: `
-            background:#f8fafc; width:1080px; max-height:90vh; overflow:auto;
-            border-radius:14px; padding:18px 18px 22px;
-            box-shadow:0 10px 30px rgba(0,0,0,.35);
-          `
+          style: `background:#f8fafc;width:1080px;max-height:90vh;overflow:auto;
+            border-radius:14px;padding:18px 18px 22px;box-shadow:0 10px 30px rgba(0,0,0,.35);`
         });
 
-        const header = el("div", { style: "display:flex; align-items:center; justify-content:space-between; gap:10px;" },
-          el("div", { style: "font-size:18px; font-weight:600;" }, "Nexidia Search")
-        );
-
-        modal.appendChild(card);
-        card.appendChild(header);
+        card.appendChild(el("div", { style: "font-size:18px;font-weight:600;margin-bottom:4px;" }, "Nexidia Search"));
         card.appendChild(hr());
         card.appendChild(section("Date Range"));
 
@@ -756,46 +737,134 @@
         const toDate = field("To", "date", "");
         fromDate.input.valueAsDate = monthAgo;
         toDate.input.valueAsDate = today;
-        card.appendChild(row(fromDate.wrap, toDate.wrap));
+        const dateRow = el("div", { style: "display:flex;gap:10px;align-items:flex-end;margin:8px 0;flex-wrap:wrap;" },
+          fromDate.wrap, toDate.wrap);
+        card.appendChild(dateRow);
         card.appendChild(hr());
 
-        // Build initial carousel pane
-        const firstPane = makePaneEl(0);
-        for (let i = 0; i < DEFAULT_FILTER_STORAGES.length; i++) {
-          if (i > 0) {
-            const andLbl = makeAndLabel();
-            andLbl.dataset.andLabel = "1";
-            firstPane.rowsContainer.appendChild(andLbl);
-          }
-          const entry = makeFilterRow(firstPane.rowsContainer, DEFAULT_FILTER_STORAGES[i], "filter", 0, (e, newType) => {
-            if (newType === "key") {
-              e.rowEl.remove();
-              const prev = e.rowEl.previousSibling;
-              if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
-              const idx = allRows.indexOf(e);
-              if (idx !== -1) allRows.splice(idx, 1);
-              const kidx = firstPane.rows.indexOf(e);
-              if (kidx !== -1) firstPane.rows.splice(kidx, 1);
-              makeKeyRow(keyRowsContainer, e.picker.getStorageName());
-            }
-          });
-          firstPane.rows.push(entry);
-          firstPane.rowsContainer.appendChild(entry.rowEl);
-        }
-        panes.push(firstPane);
-        carouselTrack.appendChild(firstPane.el);
-        updateDots();
+        // ── Carousel section ───────────────────────────────────────────────────────
+        const carouselSection = el("div", { style: "margin:0 0 0 0;" });
 
+        // Outer container: viewport + OR button overlay
+        const carouselOuter = el("div", { style: "position:relative;" });
+
+        carouselViewport = el("div", {
+          style: `overflow:hidden;border-radius:14px;position:relative;`
+        });
+
+        // Left fade mask
+        const fadeMaskLeft = el("div", {
+          style: `position:absolute;top:0;left:0;bottom:0;width:55px;
+            background:linear-gradient(to right,rgba(248,250,252,0.96),rgba(248,250,252,0));
+            z-index:6;pointer-events:none;opacity:0;transition:opacity 0.3s;`
+        });
+
+        // Right fade mask
+        const fadeMaskRight = el("div", {
+          style: `position:absolute;top:0;right:0;bottom:0;width:80px;
+            background:linear-gradient(to left,rgba(248,250,252,0.6),rgba(248,250,252,0));
+            z-index:6;pointer-events:none;`
+        });
+
+        carouselTrack = el("div", {
+          style: `display:flex;flex-direction:row;transition:transform 0.4s cubic-bezier(0.4,0,0.2,1);will-change:transform;`
+        });
+
+        carouselViewport.appendChild(fadeMaskLeft);
+        carouselViewport.appendChild(fadeMaskRight);
+        carouselViewport.appendChild(carouselTrack);
+
+        // OR button — fixed bridge between panes, always centered vertically
+        // Rendered inside carouselOuter, positioned absolutely over the right edge
+        const orBtnEl = el("button", {
+          style: `position:absolute;right:60px;top:50%;transform:translateY(-50%);z-index:10;
+            padding:7px 16px;border-radius:20px;border:0;
+            background:linear-gradient(135deg,#2563eb,#3b82f6);
+            color:#fff;font-size:12px;font-weight:700;cursor:pointer;
+            box-shadow:0 3px 12px rgba(59,130,246,0.5);letter-spacing:1px;
+            transition:box-shadow 0.2s,transform 0.15s;`
+        }, "OR");
+        orBtnEl.onmouseenter = () => { orBtnEl.style.boxShadow = "0 5px 18px rgba(59,130,246,0.7)"; };
+        orBtnEl.onmouseleave = () => { orBtnEl.style.boxShadow = "0 3px 12px rgba(59,130,246,0.5)"; };
+
+        // OR button navigates: if at last pane, add a new one; otherwise go right one
+        orBtnEl.onclick = () => {
+          if (activePaneIndex < panes.length - 1) {
+            slideTo(activePaneIndex + 1);
+          } else {
+            addOrPane();
+            slideTo(panes.length - 1);
+          }
+        };
+
+        // Click on right peek area to go right
+        fadeMaskRight.style.pointerEvents = "auto";
+        fadeMaskRight.style.cursor = "pointer";
+        fadeMaskRight.onclick = () => {
+          if (activePaneIndex < panes.length - 1) slideTo(activePaneIndex + 1);
+          else { addOrPane(); slideTo(panes.length - 1); }
+        };
+
+        // Click on left peek area to go left
+        fadeMaskLeft.style.pointerEvents = "auto";
+        fadeMaskLeft.style.cursor = "pointer";
+        fadeMaskLeft.onclick = () => { if (activePaneIndex > 0) slideTo(activePaneIndex - 1); };
+
+        carouselOuter.appendChild(carouselViewport);
+        carouselOuter.appendChild(orBtnEl);
+
+        dotsRow = el("div", {
+          style: "display:flex;justify-content:center;gap:6px;margin-top:10px;"
+        });
+
+        carouselSection.appendChild(carouselOuter);
+        carouselSection.appendChild(dotsRow);
         card.appendChild(carouselSection);
 
-        // Build key zone with defaults
-        const DEFAULT_KEY_LIST = ["UDFVarchar41", "UDFVarchar115", "UDFVarchar1", "UDFVarchar110"];
-        for (const sn of DEFAULT_KEY_LIST) makeKeyRow(keyRowsContainer, sn);
+        // Build first pane
+        const firstPane = buildPaneEl(0);
+        populatePaneDefaults(firstPane);
+        panes.push(firstPane);
+        carouselTrack.appendChild(firstPane.el);
+
+        // Pre-build second pane so peek is visible immediately
+        addOrPane();
+        // Start at pane 0
+        activePaneIndex = 0;
+
+        card.appendChild(hr());
+
+        // ── Key Fields section ─────────────────────────────────────────────────────
+        const keySection = el("div", {
+          style: `background:rgba(240,253,244,0.85);border:1px solid rgba(34,197,94,0.22);
+            border-radius:14px;padding:16px 20px 14px;margin-bottom:14px;`
+        });
+
+        const keyHeaderRow = el("div", {
+          style: "display:flex;align-items:center;gap:8px;margin-bottom:6px;"
+        });
+        keyHeaderRow.innerHTML = `<span style="font-size:16px;">&#128273;</span>`;
+        keyHeaderRow.appendChild(el("span", {
+          style: "font-size:16px;font-weight:700;color:#1e3a5f;"
+        }, "Search Keys"));
+        keyHeaderRow.appendChild(el("span", {
+          style: "font-size:12px;color:#6b7280;font-style:italic;"
+        }, "Multiple values accepted in any field."));
+        keySection.appendChild(keyHeaderRow);
+
+        keyRowsContainer = el("div", {});
+        keySection.appendChild(keyRowsContainer);
+
+        const addKeyBtn = el("button", {
+          style: "margin-top:10px;padding:6px 12px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#22c55e;cursor:pointer;font-size:12px;"
+        }, "+ Add Key Field");
+        addKeyBtn.onclick = () => makeKeyRow("");
+        keySection.appendChild(addKeyBtn);
 
         card.appendChild(keySection);
         card.appendChild(hr());
 
-        // ─── Phrase search ─────────────────────────────────────────────────────────
+        // ── Phrase Search ──────────────────────────────────────────────────────────
         card.appendChild(section("Phrase Search (Each line = separate search)"));
         const searchesWrap = el("div", {});
         card.appendChild(searchesWrap);
@@ -803,20 +872,21 @@
 
         const createSearchBlock = (n) => {
           const box = el("div", {
-            style: "border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:10px 0; background:#fafafa;"
+            style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:10px 0;background:#fafafa;"
           });
-          const titleEl = el("div", { style: "font-weight:600; margin-bottom:8px;" }, `Search ${n}`);
-          box.appendChild(titleEl);
-          const p1 = textareaField("Phrase(s) (each line runs as its own search)", PLACEHOLDER, 4);
-          const a2 = textareaField("AND Phrase 2 (optional, single phrase)", PLACEHOLDER, 2);
-          const a3 = textareaField("AND Phrase 3 (optional, single phrase)", PLACEHOLDER, 2);
-          box.appendChild(row(p1.wrap));
-          box.appendChild(row(a2.wrap, a3.wrap));
+          box.appendChild(el("div", { style: "font-weight:600;margin-bottom:8px;" }, `Search ${n}`));
+          const p1 = textareaField("Phrase(s) — each line runs as its own search", KEY_PLACEHOLDER, 4);
+          const a2 = textareaField("AND Phrase 2 (optional)", KEY_PLACEHOLDER, 2);
+          const a3 = textareaField("AND Phrase 3 (optional)", KEY_PLACEHOLDER, 2);
+          const rowA = el("div", { style: "display:flex;gap:10px;align-items:flex-end;margin:8px 0;flex-wrap:wrap;" }, p1.wrap);
+          const rowB = el("div", { style: "display:flex;gap:10px;align-items:flex-end;margin:8px 0;flex-wrap:wrap;" }, a2.wrap, a3.wrap);
+          box.appendChild(rowA);
+          box.appendChild(rowB);
           return { box, p1, a2, a3 };
         };
 
         const addSearchBtn = el("button", {
-          style: "margin-top:6px; padding:8px 12px; border-radius:8px; border:1px solid #0a66c2; background:#fff; color:#0a66c2; cursor:pointer;"
+          style: "margin-top:6px;padding:8px 12px;border-radius:8px;border:1px solid #0a66c2;background:#fff;color:#0a66c2;cursor:pointer;"
         }, "Add Another Search");
         addSearchBtn.onclick = () => {
           if (searches.length >= 20) return alert("Max 20 search blocks.");
@@ -825,35 +895,47 @@
           searchesWrap.appendChild(b.box);
         };
 
-        const first = createSearchBlock(1);
-        searches.push(first);
-        searchesWrap.appendChild(first.box);
+        const firstSearch = createSearchBlock(1);
+        searches.push(firstSearch);
+        searchesWrap.appendChild(firstSearch.box);
         card.appendChild(addSearchBtn);
         card.appendChild(hr());
 
         const runBtn = el("button", {
-          style: "padding:10px 16px; border-radius:8px; border:0; background:#0a66c2; color:#fff; font-size:15px; cursor:pointer;"
+          style: "padding:10px 16px;border-radius:8px;border:0;background:#0a66c2;color:#fff;font-size:15px;cursor:pointer;"
         }, "Run");
         const cancelBtn = el("button", {
-          style: "padding:10px 16px; border-radius:8px; border:1px solid #bbb; background:#fff; color:#333; font-size:15px; cursor:pointer;"
+          style: "padding:10px 16px;border-radius:8px;border:1px solid #bbb;background:#fff;color:#333;font-size:15px;cursor:pointer;"
         }, "Cancel");
         cancelBtn.onclick = () => { modal.remove(); stickyClose.remove(); };
-        card.appendChild(row(runBtn, cancelBtn));
+        const btnRow = el("div", { style: "display:flex;gap:10px;align-items:flex-end;margin:8px 0;flex-wrap:wrap;" },
+          runBtn, cancelBtn);
+        card.appendChild(btnRow);
 
+        modal.appendChild(card);
         document.body.appendChild(modal);
         document.body.appendChild(stickyClose);
 
-        // ─── Normalization / export helpers (unchanged) ────────────────────────────
+        // Size panes after DOM insertion
+        requestAnimationFrame(() => {
+          resizePanes();
+          // Populate key defaults
+          for (const sn of DEFAULT_KEY_LIST) makeKeyRow(sn);
+          updateDots();
+          // Update left fade visibility
+          fadeMaskLeft.style.opacity = "0";
+        });
+
+        window.addEventListener("resize", resizePanes);
+
+        // ── Normalization helpers (unchanged) ──────────────────────────────────────
         const splitValues = (raw) =>
           String(raw || "")
-            .replace(/\r\n/g, "\n")
-            .replace(/\t/g, "\n")
-            .split(/[\n,]+/)
-            .map((s) => s.trim())
-            .filter(Boolean);
+            .replace(/\r\n/g, "\n").replace(/\t/g, "\n")
+            .split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
 
-        const isoStart = (yyyyMmDd) => `${yyyyMmDd}T00:00:00Z`;
-        const isoEnd = (yyyyMmDd) => `${yyyyMmDd}T23:59:59Z`;
+        const isoStart = (d) => `${d}T00:00:00Z`;
+        const isoEnd = (d) => `${d}T23:59:59Z`;
 
         const KEY_TRANSLATIONS = new Map([
           ["overallsentimentscore", "sentimentScore"],
@@ -897,21 +979,18 @@
 
         const normalizeKeywordValues = (paramName, values) => {
           const pn = normalizeParamName(paramName);
-          if (pn === "UDFVarchar120") return values.map((v) => String(v).toLowerCase());
+          if (pn === "UDFVarchar120") return values.map(v => String(v).toLowerCase());
           return values;
         };
 
         const buildKeywordFilter = (paramName, values) => ({
-          operator: "IN",
-          type: "KEYWORD",
+          operator: "IN", type: "KEYWORD",
           parameterName: normalizeParamName(paramName),
           value: normalizeKeywordValues(paramName, values)
         });
 
         const buildTextFilter = (phrase) => ({
-          operator: "IN",
-          type: "TEXT",
-          parameterName: "transcript",
+          operator: "IN", type: "TEXT", parameterName: "transcript",
           value: { phrases: [phrase], anotherPhrases: [], relevance: "Anywhere", position: "Begin" }
         });
 
@@ -1012,21 +1091,16 @@
           const doc = new DOMParser().parseFromString(html, "text/html");
           const ctl10 =
             doc.querySelector('input[name="ctl10"]')?.getAttribute("value") ||
-            doc.querySelector('input[name="ctl10"]')?.value ||
-            "";
+            doc.querySelector('input[name="ctl10"]')?.value || "";
           if (!ctl10) throw new Error("ctl10 not found in SettingsDialog response.");
-          const pairsRaw = ctl10
-            .split(",")
-            .map(s => s.split("\n"))
-            .filter(p => p.length >= 2)
+          const pairsRaw = ctl10.split(",")
+            .map(s => s.split("\n")).filter(p => p.length >= 2)
             .map(([label, key]) => ({ label, key }));
-          const fields = [];
-          const headers = [];
+          const fields = [], headers = [];
           const seen = new Set();
           for (const p of pairsRaw) {
             const nk = normalizeFieldKeyForExplore(p.key.trim());
-            if (!nk) continue;
-            if (seen.has(nk)) continue;
+            if (!nk || seen.has(nk)) continue;
             seen.add(nk);
             fields.push(nk);
             headers.push(p.label);
@@ -1039,17 +1113,14 @@
           const parts = [quote(basePhrase)];
           for (const p of (andPhrases || [])) {
             const t = String(p || "").trim();
-            if (!t) continue;
-            parts.push(quote(t));
+            if (t) parts.push(quote(t));
           }
           return parts.join(" AND ");
         };
 
         const escapeHtml = (s) => String(s ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
         const excelSerialFromDate = (d) => {
           if (!(d instanceof Date) || isNaN(d.getTime())) return null;
@@ -1060,8 +1131,7 @@
           const s = String(raw ?? "").trim();
           if (!s) return null;
           const n = Number(s);
-          if (!isFinite(n)) return null;
-          return n;
+          return isFinite(n) ? n : null;
         };
 
         const secondsFromMillisish = (raw) => {
@@ -1074,28 +1144,22 @@
 
         const excelSerialFromSeconds = (sec) => {
           const n = Number(sec);
-          if (!isFinite(n)) return null;
-          return n / 86400;
+          return isFinite(n) ? n / 86400 : null;
         };
 
         const downloadExcelFile = (filename, html) => {
           const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click(); a.remove();
           URL.revokeObjectURL(url);
         };
 
         const normalizeCellText = (raw) => {
           let s = (raw === null || raw === undefined) ? "" : String(raw);
           s = s.trim();
-          if (!s) return "0";
-          if (s.includes("*")) return "0";
-          if (/^0+$/.test(s)) return "0";
+          if (!s || s.includes("*") || /^0+$/.test(s)) return "0";
           return s;
         };
 
@@ -1111,71 +1175,59 @@
         };
 
         const buildColGroup = (headers, rows, exportFields) => {
-          const maxLens = new Array(headers.length).fill(10);
-          for (let c = 0; c < headers.length; c++) {
-            maxLens[c] = Math.max(maxLens[c], String(headers[c] ?? "").length);
-          }
+          const maxLens = headers.map(h => String(h ?? "").length);
           for (const rr of rows) {
-            const r = rr.row;
             const phrases = rr.phrases || [];
             for (let c = 0; c < exportFields.length; c++) {
               const k = exportFields[c];
-              let rawText = "";
-              if (k.startsWith("__PHRASE_")) {
-                const idx = parseInt(k.replace(/\D/g, ""), 10) - 1;
-                rawText = normalizeCellText(phrases[idx] ? phrases[idx] : "0");
-              } else {
-                rawText = normalizeCellText(getFieldValue(r, k));
-              }
-              maxLens[c] = Math.max(maxLens[c], estimateDisplayLen(k, rawText));
+              let rawText = k.startsWith("__PHRASE_")
+                ? normalizeCellText(phrases[parseInt(k.replace(/\D/g, ""), 10) - 1] || "0")
+                : normalizeCellText(getFieldValue(rr.row, k));
+              maxLens[c] = Math.max(maxLens[c] || 10, estimateDisplayLen(k, rawText));
             }
           }
-          const cols = maxLens.map((len) => {
-            const px = clamp(Math.round(len * 6.2 + 18), 50, 520);
-            return `<col style="width:${px}px">`;
-          });
-          return `<colgroup>${cols.join("")}</colgroup>`;
+          return `<colgroup>${maxLens.map(len =>
+            `<col style="width:${clamp(Math.round(len * 6.2 + 18), 50, 520)}px">`
+          ).join("")}</colgroup>`;
         };
 
-        // ─── Run ───────────────────────────────────────────────────────────────────
+        // ── Run ────────────────────────────────────────────────────────────────────
         runBtn.onclick = async () => {
           try {
             const fromVal = fromDate.input.value;
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
 
-            // Collect key filters (global, applied to every pane search)
+            // Global key filters
             const globalKeyFilters = [];
             for (const entry of allRows) {
               if (entry.type !== "key") continue;
-              const storageName = entry.picker.getStorageName();
+              const sn = entry.picker.getStorageName();
               const val = entry.valueInput.value.trim();
-              if (!storageName || !val) continue;
-              globalKeyFilters.push(buildKeywordFilter(storageName, splitValues(val)));
+              if (!sn || !val) continue;
+              globalKeyFilters.push(buildKeywordFilter(sn, splitValues(val)));
             }
 
-            // Collect per-pane filter sets
-            const paneFilterSets = panes.map((pane) => {
+            // Per-pane filter sets
+            const paneFilterSets = panes.map(pane => {
               const filters = [];
               for (const entry of allRows) {
                 if (entry.type !== "filter" || entry.paneIndex !== pane.index) continue;
-                const storageName = entry.picker.getStorageName();
+                const sn = entry.picker.getStorageName();
                 const val = entry.valueInput.value.trim();
-                if (!storageName || !val) continue;
-                filters.push(buildKeywordFilter(storageName, splitValues(val)));
+                if (!sn || !val) continue;
+                filters.push(buildKeywordFilter(sn, splitValues(val)));
               }
               return filters;
             });
 
-            const anyPaneHasFilters = paneFilterSets.some(f => f.length > 0);
-            const anyKeyFilters = globalKeyFilters.length > 0;
-
-            if (!anyPaneHasFilters && !anyKeyFilters) {
+            const anyFilters = paneFilterSets.some(f => f.length > 0) || globalKeyFilters.length > 0;
+            if (!anyFilters) {
               const ok = confirm("No filters added. Data will be pulled from the entire UMR dataset. Do you want to proceed?");
               if (!ok) return;
             }
 
-            // Phrase expansion
+            // Phrase expansion (phrases are now optional)
             const expandedSearches = [];
             for (const s of searches) {
               const baseLines = splitValues(s.p1.input.value);
@@ -1186,19 +1238,17 @@
               for (const basePhrase of baseLines) {
                 const phraseDisplay = buildPhraseDisplay(basePhrase, andPhrases);
                 const phraseFilters = [buildTextFilter(basePhrase), ...andPhrases.map(buildTextFilter)];
-                const phraseGroup = phraseFilters.length === 1
-                  ? phraseFilters[0]
-                  : { operator: "AND", invertOperator: false, filters: phraseFilters };
-                expandedSearches.push({ phraseDisplay, phraseGroup });
+                expandedSearches.push({
+                  phraseDisplay,
+                  phraseGroup: phraseFilters.length === 1
+                    ? phraseFilters[0]
+                    : { operator: "AND", invertOperator: false, filters: phraseFilters }
+                });
               }
             }
 
-            if (!expandedSearches.length) { alert("Please enter at least one phrase."); return; }
-
             const dateFilter = {
-              parameterName: "recordedDateTime",
-              operator: "BETWEEN",
-              type: "DATE",
+              parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE",
               value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) }
             };
 
@@ -1239,18 +1289,21 @@
               progressUI.set("Using default export fields.", 18, `Fields: ${baseFields.length}`);
             }
 
-            // Build one search run per pane x phrase
-            // If a pane has no filters, it shares behavior with a no-filter run
+            // Build run sets: one per pane per phrase (or one per pane if no phrases)
             const runSets = [];
             for (let pi = 0; pi < panes.length; pi++) {
               const paneFilters = paneFilterSets[pi];
-              const keywordGroup = (() => {
-                const combined = [...paneFilters, ...globalKeyFilters];
-                if (!combined.length) return null;
-                return { operator: "AND", invertOperator: false, filters: combined };
-              })();
-              for (const es of expandedSearches) {
-                runSets.push({ paneIndex: pi, keywordGroup, phraseDisplay: es.phraseDisplay, phraseGroup: es.phraseGroup });
+              const combined = [...paneFilters, ...globalKeyFilters];
+              const keywordGroup = combined.length
+                ? { operator: "AND", invertOperator: false, filters: combined }
+                : null;
+
+              if (expandedSearches.length > 0) {
+                for (const es of expandedSearches) {
+                  runSets.push({ paneIndex: pi, keywordGroup, phraseDisplay: es.phraseDisplay, phraseGroup: es.phraseGroup });
+                }
+              } else {
+                runSets.push({ paneIndex: pi, keywordGroup, phraseDisplay: null, phraseGroup: null });
               }
             }
 
@@ -1260,8 +1313,10 @@
             let totalFetched = 0;
 
             for (let si = 0; si < runSets.length; si++) {
-              const { keywordGroup, phraseDisplay, phraseGroup, paneIndex } = runSets[si];
-              const runLabel = panes.length > 1 ? `Pane ${paneIndex + 1}, search ${si + 1}/${totalRuns}` : `Search ${si + 1}/${totalRuns}`;
+              const { paneIndex, keywordGroup, phraseDisplay, phraseGroup } = runSets[si];
+              const runLabel = panes.length > 1
+                ? `Pane ${paneIndex + 1}, run ${si + 1}/${totalRuns}`
+                : `Run ${si + 1}/${totalRuns}`;
               progressUI.set(`Searching (${runLabel})...`, 25, `Starting at 0`);
 
               const setRows = [];
@@ -1269,37 +1324,32 @@
               while (true) {
                 const interactionFilters = [
                   ...(keywordGroup ? [keywordGroup] : []),
-                  phraseGroup,
+                  ...(phraseGroup ? [phraseGroup] : []),
                   dateFilter
                 ];
                 const payload = {
                   languageFilter: { languages: [] },
                   namedSetId: null,
-                  from,
-                  to: from + PAGE_SIZE,
+                  from, to: from + PAGE_SIZE,
                   fields: baseFields,
                   query: {
-                    operator: "AND",
-                    invertOperator: false,
+                    operator: "AND", invertOperator: false,
                     filters: [{
-                      operator: "AND",
-                      invertOperator: false,
+                      operator: "AND", invertOperator: false,
                       filterType: "interactions",
                       filters: interactionFilters
                     }]
                   }
                 };
                 const res = await fetch(SEARCH_URL, {
-                  method: "POST",
-                  credentials: "include",
+                  method: "POST", credentials: "include",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify(payload)
                 });
                 if (!res.ok) {
                   const { text } = await safeRead(res);
                   const err = new Error(`Search failed: HTTP ${res.status}`);
-                  err.__httpStatus = res.status;
-                  err.__body = text;
+                  err.__httpStatus = res.status; err.__body = text;
                   throw err;
                 }
                 const { json } = await safeRead(res);
@@ -1307,29 +1357,28 @@
                 if (!rows.length) break;
                 setRows.push(...rows);
                 totalFetched += rows.length;
-                const basePct = 25 + Math.floor((si / Math.max(1, totalRuns)) * 55);
                 progressUI.set(
                   `Searching (${runLabel})...`,
-                  Math.min(80, basePct),
-                  `Set fetched: ${setRows.length} (page ${from}) | Total fetched: ${totalFetched}`
+                  Math.min(80, 25 + Math.floor((si / Math.max(1, totalRuns)) * 55)),
+                  `Set: ${setRows.length} (page ${from}) | Total: ${totalFetched}`
                 );
-                if (setRows.length >= MAX_ROWS) break;
-                if (rows.length < PAGE_SIZE) break;
+                if (setRows.length >= MAX_ROWS || rows.length < PAGE_SIZE) break;
                 from += PAGE_SIZE;
                 await sleep(250);
               }
 
+              const label = phraseDisplay || `Pane ${paneIndex + 1}`;
               for (const r of setRows) {
                 const transId = normalizeCellText(getFieldValue(r, "UDFVarchar110"));
                 if (!transId || transId === "0") {
-                  passthroughNoKey.push({ row: r, phrases: [phraseDisplay] });
+                  passthroughNoKey.push({ row: r, phrases: [label] });
                   continue;
                 }
                 const existing = merged.get(transId);
                 if (!existing) {
-                  merged.set(transId, { row: r, phrases: [phraseDisplay] });
+                  merged.set(transId, { row: r, phrases: [label] });
                 } else {
-                  if (!existing.phrases.includes(phraseDisplay)) existing.phrases.push(phraseDisplay);
+                  if (!existing.phrases.includes(label)) existing.phrases.push(label);
                   for (const k of baseFields) {
                     const cur = normalizeCellText(getFieldValue(existing.row, k));
                     if (cur && cur !== "0") continue;
@@ -1358,7 +1407,7 @@
               return;
             }
 
-            progressUI.set("Building Excel export...", 85, `Rows: ${finalRows.length} | Phrase cols: ${maxPhraseCols}`);
+            progressUI.set("Building Excel export...", 85, `Rows: ${finalRows.length}`);
 
             const phraseHeaders = [];
             const phraseKeys = [];
@@ -1370,32 +1419,28 @@
             const exportHeaders = [...phraseHeaders, ...baseHeaders];
             const exportFields = [...phraseKeys, ...baseFields];
 
-            const isDateTimeField = (key) => String(key || "").toLowerCase() === "recordeddatetime";
-            const isDurationField = (key) => String(key || "").toLowerCase() === "mediafileduration";
-            const isHoldField = (key) => String(key || "").toLowerCase() === "udfint4";
-            const isSentimentField = (key) => String(key || "").toLowerCase() === "sentimentscore";
+            const isDateTimeField = (k) => String(k || "").toLowerCase() === "recordeddatetime";
+            const isDurationField = (k) => String(k || "").toLowerCase() === "mediafileduration";
+            const isHoldField = (k) => String(k || "").toLowerCase() === "udfint4";
+            const isSentimentField = (k) => String(k || "").toLowerCase() === "sentimentscore";
 
             const css = `
-              table { border-collapse:collapse; }
-              td, th {
-                border:none; padding:4px 6px;
-                font-family:"Aptos Narrow","Aptos",Calibri,Arial,sans-serif;
-                font-size:10pt; text-align:left; vertical-align:bottom;
-                white-space:nowrap; mso-number-format:"\\@";
-              }
-              th { font-weight:700; background:transparent; }
-              .txt { mso-number-format:"\\@"; }
-              .dt { mso-number-format:"${FIXED_DT_FORMAT}"; }
-              .dur { mso-number-format:"${FIXED_DURATION_FORMAT}"; }
-              .int { mso-number-format:"0"; }
-              .dec2 { mso-number-format:"0.00"; }
+              table{border-collapse:collapse}
+              td,th{border:none;padding:4px 6px;font-family:"Aptos Narrow","Aptos",Calibri,Arial,sans-serif;
+                font-size:10pt;text-align:left;vertical-align:bottom;white-space:nowrap;mso-number-format:"\\@"}
+              th{font-weight:700;background:transparent}
+              .txt{mso-number-format:"\\@"}
+              .dt{mso-number-format:"${FIXED_DT_FORMAT}"}
+              .dur{mso-number-format:"${FIXED_DURATION_FORMAT}"}
+              .int{mso-number-format:"0"}
+              .dec2{mso-number-format:"0.00"}
             `.trim();
 
             const colGroup = buildColGroup(exportHeaders, finalRows, exportFields);
             const headerCells = exportHeaders.map(h => `<th class="txt">${escapeHtml(h)}</th>`).join("");
 
             const bodyRows = finalRows.map(({ row: r, phrases }) => {
-              const tds = exportFields.map((k) => {
+              const tds = exportFields.map(k => {
                 if (k.startsWith("__PHRASE_")) {
                   const idx = parseInt(k.replace(/\D/g, ""), 10) - 1;
                   const val = normalizeCellText(phrases && phrases[idx] ? phrases[idx] : "0");
@@ -1438,19 +1483,18 @@
               return `<tr>${tds}</tr>`;
             }).join("\n");
 
-            const htmlOut =
-              `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-               xmlns:x="urn:schemas-microsoft-com:office:excel"
-               xmlns="http://www.w3.org/TR/REC-html40">
-               <head><meta charset="utf-8" /><style>${css}</style></head>
-               <body><table>${colGroup}<tr>${headerCells}</tr>${bodyRows}</table></body>
-               </html>`;
+            const htmlOut = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+              xmlns:x="urn:schemas-microsoft-com:office:excel"
+              xmlns="http://www.w3.org/TR/REC-html40">
+              <head><meta charset="utf-8"/><style>${css}</style></head>
+              <body><table>${colGroup}<tr>${headerCells}</tr>${bodyRows}</table></body>
+              </html>`;
 
             const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
             const filename = `nexidia_search_export_${stamp}.xls`;
             progressUI.set("Downloading...", 95, filename);
             downloadExcelFile(filename, htmlOut);
-            progressUI.set("Done.", 100, `Exported ${finalRows.length} rows | Phrase cols: ${maxPhraseCols}`);
+            progressUI.set("Done.", 100, `Exported ${finalRows.length} rows`);
 
           } catch (err) {
             console.error(err);
