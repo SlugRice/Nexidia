@@ -473,7 +473,17 @@
           try { return await getAppInstanceIdViaForensicFetch(); } catch (_) { }
           throw new Error("Could not determine appInstanceId from any source.");
         }
-
+        
+//##> LEGACY COLUMN PREFERENCES: This function fetches the user's saved column layout from
+//##> the Nexidia legacy UI via SettingsDialog.aspx and a hidden input (ctl10). This is
+//##> intentionally separate from the Explore API and metadata endpoint used everywhere else.
+//##> The legacy system uses different field key names that require translation via
+//##> KEY_TRANSLATIONS and normalizeFieldKeyForExplore before they can be used in Explore
+//##> API calls. This feature exists so that each user's output matches their own saved column
+//##> format without any manual configuration. This behavior must survive all future changes.
+//##> The appInstanceId retrieval, KEY_TRANSLATIONS map, and normalizeFieldKeyForExplore
+//##> function are all load-bearing for this feature and must not be removed or simplified.
+        
         async function getLegacyChosenColumns(appInstanceId) {
           const res = await fetch(SETTINGS_URL(appInstanceId), { credentials: "include" });
           if (!res.ok) throw new Error("SettingsDialog fetch failed");
