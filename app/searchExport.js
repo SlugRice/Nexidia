@@ -7,7 +7,7 @@
 //##> Filtered to isEnabled !== false. Capped at 80 results per dropdown render for
 //##> performance. storageName from this API is used directly in search payloads — no
 //##> translation needed for filter picker fields (only legacy column prefs need translation).
-  
+
   function openSearchExport() {
     (async () => {
       try {
@@ -16,7 +16,6 @@
           typeof location !== "undefined" &&
           /nxondemand\.com/i.test(location.hostname) &&
           /\/NxIA\//i.test(location.pathname);
-
         if (!isNexidiaPage) {
           alert("Failed to run. Make sure you're running this from an active Nexidia session.");
           return;
@@ -34,7 +33,6 @@
         const MAX_ROWS = 50000;
         const FIXED_DT_FORMAT = `m\\/d\\/yyyy\\ h:mm`;
         const FIXED_DURATION_FORMAT = `\\[h\\]\\:mm\\:ss`;
-
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
         let metadataFields = [];
@@ -44,8 +42,21 @@
             const json = await res.json();
             metadataFields = Array.isArray(json) ? json.filter(f => f.isEnabled !== false) : [];
           }
-        } catch (_) { }
+        } catch (_) {}
 
+        // Fields that default to KEY type (green zone)
+        const DEFAULT_KEY_STORAGES = new Set([
+          "UDFVarchar1", "UDFVarchar110", "UDFVarchar113", "UDFVarchar115",
+          "UDFVarchar41", "UDFVarchar136"
+        ]);
+
+        // Default filter fields per carousel pane
+        const DEFAULT_FILTER_STORAGES = [
+          "UDFVarchar10", "experienceId", "UDFVarchar122", "siteName",
+          "UDFVarchar126", "DNIS", "UDFVarchar120"
+        ];
+
+        // ─── Progress UI ───────────────────────────────────────────────────────────
         const progressUI = (() => {
           const wrap = document.createElement("div");
           wrap.style.cssText = `
@@ -89,21 +100,19 @@
           return { show, set, remove };
         })();
 
+        // ─── DOM helpers ───────────────────────────────────────────────────────────
         const el = (tag, props = {}, ...children) => {
           const node = document.createElement(tag);
           Object.assign(node, props);
           for (const ch of children) node.appendChild(typeof ch === "string" ? document.createTextNode(ch) : ch);
           return node;
         };
-
         const row = (...nodes) =>
           el("div", { style: "display:flex; gap:10px; align-items:flex-end; margin:8px 0; flex-wrap:wrap;" }, ...nodes);
-
         const section = (title) =>
           el("div", {},
             el("div", { style: "font-size:15px; font-weight:600; margin:10px 0 10px;" }, title)
           );
-
         const hr = () => el("div", { style: "height:1px; background:#eee; margin:14px 0;" });
 
         const field = (label, type = "text", placeholder = PLACEHOLDER) => {
@@ -138,7 +147,7 @@
                 const caret = start + normalized.length;
                 ta.selectionStart = ta.selectionEnd = caret;
               }
-            } catch (_) { }
+            } catch (_) {}
           });
           const wrap = el("div", { style: "flex:1; min-width:280px;" },
             el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, label),
@@ -147,23 +156,21 @@
           return { wrap, input: ta };
         };
 
-        // Returns the set of storageNames currently active across all filter rows
-        const getActiveStorageNames = () =>
-          new Set(filterRows.map(r => r.picker.getStorageName()).filter(Boolean));
+        // ─── Field type registry ───────────────────────────────────────────────────
+        // Each row entry: { rowEl, picker, valueInput, type ("filter"|"key"), paneIndex, locked }
+        const allRows = [];
 
-        // Searchable field picker — shows display names only, excludes already-active fields
-        //##> DUPLICATE FILTER PREVENTION: getActiveStorageNames() is called on every dropdown open
-        //##> so the list always reflects current state. A row's own current selection is exempt from
-        //##> exclusion so users can change their mind without the field disappearing.
+        const getActiveStorageNames = (excludeEntry = null) =>
+          new Set(allRows.filter(r => r !== excludeEntry).map(r => r.picker.getStorageName()).filter(Boolean));
+
+        // ─── Field picker ──────────────────────────────────────────────────────────
         function makeFieldPicker(onSelect) {
-          const wrapper = el("div", { style: "position:relative; flex:1; min-width:220px;" });
-
+          const wrapper = el("div", { style: "position:relative; flex:1; min-width:200px;" });
           const input = el("input", {
             type: "text",
             placeholder: "Search fields...",
             style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
           });
-
           const dropdown = el("div", {
             style: `
               display:none; position:absolute; top:100%; left:0; right:0;
@@ -180,44 +187,28 @@
             dropdown.innerHTML = "";
             visibleItems = [];
             highlightIndex = -1;
-
             const q = query.toLowerCase().trim();
-            const active = getActiveStorageNames();
+            const active = getActiveStorageNames({ picker: { getStorageName: () => input.dataset.storageName || "" } });
             const currentStorage = input.dataset.storageName || "";
-
             const matches = metadataFields.filter(f => {
-              // Always show the currently selected field for this row
               if (f.storageName === currentStorage) return true;
-              // Exclude fields active on other rows
               if (active.has(f.storageName)) return false;
-              // Filter by query against display name only
               return q ? f.displayName.toLowerCase().includes(q) : true;
             });
-
-            if (!matches.length) {
-              dropdown.style.display = "none";
-              return;
-            }
-
+            if (!matches.length) { dropdown.style.display = "none"; return; }
             for (const f of matches.slice(0, 80)) {
               const item = el("div", {
                 style: "padding:6px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid #f0f0f0;"
               }, f.displayName);
-
               item.onmouseenter = () => {
                 visibleItems.forEach((el, i) => el.style.background = i === visibleItems.indexOf(item) ? "#e8f0fe" : "");
                 highlightIndex = visibleItems.indexOf(item);
               };
               item.onmouseleave = () => { item.style.background = ""; };
-              item.onmousedown = (e) => {
-                e.preventDefault();
-                selectItem(f);
-              };
-
+              item.onmousedown = (e) => { e.preventDefault(); selectItem(f); };
               dropdown.appendChild(item);
               visibleItems.push(item);
             }
-
             dropdown.style.display = "block";
           };
 
@@ -231,38 +222,25 @@
 
           const clearHighlight = () => visibleItems.forEach(i => i.style.background = "");
 
-          input.addEventListener("input", () => {
-            delete input.dataset.storageName;
-            renderDropdown(input.value);
-          });
-
+          input.addEventListener("input", () => { delete input.dataset.storageName; renderDropdown(input.value); });
           input.addEventListener("focus", () => renderDropdown(input.value));
-          input.addEventListener("blur", () => {
-            setTimeout(() => { dropdown.style.display = "none"; }, 150);
-          });
-
+          input.addEventListener("blur", () => { setTimeout(() => { dropdown.style.display = "none"; }, 150); });
           input.addEventListener("keydown", (e) => {
             if (!visibleItems.length) return;
             if (e.key === "ArrowDown") {
-              e.preventDefault();
-              clearHighlight();
+              e.preventDefault(); clearHighlight();
               highlightIndex = Math.min(highlightIndex + 1, visibleItems.length - 1);
               visibleItems[highlightIndex].style.background = "#e8f0fe";
               visibleItems[highlightIndex].scrollIntoView({ block: "nearest" });
             } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              clearHighlight();
+              e.preventDefault(); clearHighlight();
               highlightIndex = Math.max(highlightIndex - 1, 0);
               visibleItems[highlightIndex].style.background = "#e8f0fe";
               visibleItems[highlightIndex].scrollIntoView({ block: "nearest" });
             } else if (e.key === "Enter") {
               e.preventDefault();
-              if (highlightIndex >= 0 && visibleItems[highlightIndex]) {
-                visibleItems[highlightIndex].onmousedown(e);
-              }
-            } else if (e.key === "Escape") {
-              dropdown.style.display = "none";
-            }
+              if (highlightIndex >= 0 && visibleItems[highlightIndex]) visibleItems[highlightIndex].onmousedown(e);
+            } else if (e.key === "Escape") { dropdown.style.display = "none"; }
           });
 
           wrapper.appendChild(input);
@@ -270,30 +248,105 @@
 
           const getStorageName = () => input.dataset.storageName || "";
           const getDisplayName = () => input.value;
-
           const preselect = (storageName) => {
             const f = metadataFields.find(x => x.storageName === storageName);
-            if (f) {
-              selectItem(f);
-            } else {
-              input.value = storageName;
-              input.dataset.storageName = storageName;
-            }
+            if (f) { selectItem(f); } else { input.value = storageName; input.dataset.storageName = storageName; }
           };
 
           return { wrapper, input, getStorageName, getDisplayName, preselect };
         }
 
-        const filterRows = [];
+        // ─── Type toggle (funnel/key pill) ─────────────────────────────────────────
+        function makeTypeToggle(initialType, onChange) {
+          const wrap = el("div", {
+            style: "display:flex; align-items:center; gap:0; border-radius:20px; overflow:hidden; border:1px solid #d1d5db; flex-shrink:0; height:30px;"
+          });
 
-        function makeFilterRow(filtersContainer, defaultStorageName) {
+          const filterBtn = el("button", {
+            style: `
+              padding:0 10px; height:100%; border:0; cursor:pointer; font-size:12px;
+              display:flex; align-items:center; gap:4px; transition:background 0.2s, color 0.2s;
+            `
+          });
+          filterBtn.innerHTML = `<span style="font-size:11px;">&#9698;</span> Filter`;
+
+          const keyBtn = el("button", {
+            style: `
+              padding:0 10px; height:100%; border:0; cursor:pointer; font-size:12px;
+              display:flex; align-items:center; gap:4px; transition:background 0.2s, color 0.2s;
+            `
+          });
+          keyBtn.innerHTML = `<span style="font-size:13px;">&#128273;</span> Key`;
+
+          let current = initialType;
+          let locked = false;
+
+          const applyState = () => {
+            if (current === "filter") {
+              filterBtn.style.background = locked ? "#93c5fd" : "#3b82f6";
+              filterBtn.style.color = "#fff";
+              keyBtn.style.background = "#f3f4f6";
+              keyBtn.style.color = "#6b7280";
+            } else {
+              keyBtn.style.background = locked ? "#6ee7b7" : "#22c55e";
+              keyBtn.style.color = "#fff";
+              filterBtn.style.background = "#f3f4f6";
+              filterBtn.style.color = "#6b7280";
+            }
+            filterBtn.disabled = locked;
+            keyBtn.disabled = locked;
+            filterBtn.style.cursor = locked ? "not-allowed" : "pointer";
+            keyBtn.style.cursor = locked ? "not-allowed" : "pointer";
+            filterBtn.title = locked ? "Clear this field's value to change type" : "";
+            keyBtn.title = locked ? "Clear this field's value to change type" : "";
+          };
+
+          filterBtn.onclick = () => {
+            if (locked || current === "filter") return;
+            current = "filter";
+            applyState();
+            if (onChange) onChange("filter");
+          };
+          keyBtn.onclick = () => {
+            if (locked || current === "key") return;
+            current = "key";
+            applyState();
+            if (onChange) onChange("key");
+          };
+
+          wrap.appendChild(filterBtn);
+          wrap.appendChild(keyBtn);
+          applyState();
+
+          const lock = () => { locked = true; applyState(); };
+          const unlock = () => { locked = false; applyState(); };
+          const getType = () => current;
+          const setType = (t) => { current = t; applyState(); };
+
+          return { wrap, lock, unlock, getType, setType };
+        }
+
+        // ─── Carousel state ────────────────────────────────────────────────────────
+        const panes = [];
+        let activePaneIndex = 0;
+
+        // ─── AND label between rows ────────────────────────────────────────────────
+        const makeAndLabel = () => el("div", {
+          style: `
+            text-align:center; font-size:11px; font-weight:700; letter-spacing:2px;
+            color:rgba(59,130,246,0.22); user-select:none; margin:2px 0; pointer-events:none;
+          `
+        }, "AND");
+
+        // ─── Filter row builder (used inside panes) ────────────────────────────────
+        function makeFilterRow(container, defaultStorageName, initialType, paneIndex, onTypeChange) {
           const rowEl = el("div", {
-            style: "display:flex; gap:8px; align-items:flex-end; margin:6px 0; flex-wrap:wrap;"
+            style: "display:flex; gap:8px; align-items:flex-end; margin:4px 0; flex-wrap:wrap;"
           });
 
           const picker = makeFieldPicker();
 
-          const valueWrap = el("div", { style: "flex:2; min-width:220px;" },
+          const valueWrap = el("div", { style: "flex:2; min-width:180px;" },
             el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, "Value(s)"),
             el("input", {
               type: "text",
@@ -303,29 +356,494 @@
           );
           const valueInput = valueWrap.lastChild;
 
+          const entryObj = {
+            rowEl, picker, valueInput,
+            type: initialType || "filter",
+            paneIndex: paneIndex ?? 0,
+            locked: false,
+            toggle: null
+          };
+
+          const toggle = makeTypeToggle(entryObj.type, (newType) => {
+            entryObj.type = newType;
+            if (onTypeChange) onTypeChange(entryObj, newType);
+          });
+          entryObj.toggle = toggle;
+
+          // Lock toggle when value is entered and pane count > 1
+          const checkLock = () => {
+            const hasValue = valueInput.value.trim().length > 0;
+            const multiPane = panes.length > 1;
+            if (hasValue && multiPane && entryObj.type === "filter") {
+              toggle.lock();
+              entryObj.locked = true;
+            } else {
+              toggle.unlock();
+              entryObj.locked = false;
+            }
+          };
+          valueInput.addEventListener("input", checkLock);
+
           const removeBtn = el("button", {
             style: "padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; color:#888; cursor:pointer; font-size:13px; white-space:nowrap; align-self:flex-end;"
-          }, "✕ Remove");
+          }, "✕");
 
           rowEl.appendChild(picker.wrapper);
           rowEl.appendChild(valueWrap);
+          rowEl.appendChild(toggle.wrap);
           rowEl.appendChild(removeBtn);
-          filtersContainer.appendChild(rowEl);
 
-          const entry = { rowEl, picker, valueInput };
-          filterRows.push(entry);
+          allRows.push(entryObj);
 
           removeBtn.onclick = () => {
             rowEl.remove();
-            const idx = filterRows.indexOf(entry);
-            if (idx !== -1) filterRows.splice(idx, 1);
+            const idx = allRows.indexOf(entryObj);
+            if (idx !== -1) allRows.splice(idx, 1);
+            // Remove AND label immediately before this row if present
+            const prev = rowEl.previousSibling;
+            if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
           };
 
           if (defaultStorageName) picker.preselect(defaultStorageName);
 
-          return entry;
+          return entryObj;
         }
 
+        // ─── Key row builder (global zone) ─────────────────────────────────────────
+        function makeKeyRow(container, defaultStorageName) {
+          const rowEl = el("div", {
+            style: "display:flex; gap:8px; align-items:flex-end; margin:4px 0; flex-wrap:wrap;"
+          });
+
+          const picker = makeFieldPicker();
+
+          const valueWrap = el("div", { style: "flex:2; min-width:180px;" },
+            el("div", { style: "font-size:12px; color:#444; margin-bottom:4px;" }, "Value(s)"),
+            el("input", {
+              type: "text",
+              placeholder: PLACEHOLDER,
+              style: "width:100%; padding:7px 8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;"
+            })
+          );
+          const valueInput = valueWrap.lastChild;
+
+          const entryObj = {
+            rowEl, picker, valueInput,
+            type: "key",
+            paneIndex: -1,
+            locked: false,
+            toggle: null
+          };
+
+          const toggle = makeTypeToggle("key", (newType) => {
+            if (newType === "filter") {
+              // Move to active pane's filter zone
+              entryObj.type = "filter";
+              entryObj.paneIndex = activePaneIndex;
+              rowEl.remove();
+              const idx = allRows.indexOf(entryObj);
+              if (idx !== -1) allRows.splice(idx, 1);
+              const pane = panes[activePaneIndex];
+              if (pane) {
+                const andLbl = makeAndLabel();
+                andLbl.dataset.andLabel = "1";
+                pane.rowsContainer.appendChild(andLbl);
+                pane.rowsContainer.appendChild(rowEl);
+                pane.rows.push(entryObj);
+                entryObj.paneIndex = activePaneIndex;
+              }
+            }
+          });
+          entryObj.toggle = toggle;
+
+          const removeBtn = el("button", {
+            style: "padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; color:#888; cursor:pointer; font-size:13px; white-space:nowrap; align-self:flex-end;"
+          }, "✕");
+
+          rowEl.appendChild(picker.wrapper);
+          rowEl.appendChild(valueWrap);
+          rowEl.appendChild(toggle.wrap);
+          rowEl.appendChild(removeBtn);
+
+          container.appendChild(rowEl);
+          allRows.push(entryObj);
+
+          removeBtn.onclick = () => {
+            rowEl.remove();
+            const idx = allRows.indexOf(entryObj);
+            if (idx !== -1) allRows.splice(idx, 1);
+          };
+
+          if (defaultStorageName) picker.preselect(defaultStorageName);
+          return entryObj;
+        }
+
+        // ─── Pane builder ──────────────────────────────────────────────────────────
+        function makePaneEl(paneIndex) {
+          const paneWrap = el("div", {
+            style: `
+              min-width:100%; box-sizing:border-box;
+              padding:18px 20px 16px;
+              background:rgba(255,255,255,0.92);
+              border-radius:14px;
+              border:1px solid rgba(59,130,246,0.18);
+              position:relative;
+              flex-shrink:0;
+            `
+          });
+
+          const paneLabel = el("div", {
+            style: "font-size:11px; font-weight:700; color:#93c5fd; letter-spacing:1px; margin-bottom:10px; text-transform:uppercase;"
+          }, paneIndex === 0 ? "Search A" : `Search ${String.fromCharCode(65 + paneIndex)}`);
+          paneWrap.appendChild(paneLabel);
+
+          const rowsContainer = el("div", {});
+          paneWrap.appendChild(rowsContainer);
+
+          const addBtn = el("button", {
+            style: "margin-top:10px; padding:6px 12px; border-radius:8px; border:1px solid #3b82f6; background:#fff; color:#3b82f6; cursor:pointer; font-size:12px;"
+          }, "+ Add Filter");
+
+          paneWrap.appendChild(addBtn);
+
+          const paneObj = { el: paneWrap, rowsContainer, rows: [], addBtn, index: paneIndex };
+
+          addBtn.onclick = () => {
+            if (rowsContainer.children.length > 0) {
+              const andLbl = makeAndLabel();
+              andLbl.dataset.andLabel = "1";
+              rowsContainer.appendChild(andLbl);
+            }
+            const entry = makeFilterRow(rowsContainer, "", "filter", paneIndex, (e, newType) => {
+              if (newType === "key") {
+                e.rowEl.remove();
+                const prev = e.rowEl.previousSibling;
+                if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
+                const idx = allRows.indexOf(e);
+                if (idx !== -1) allRows.splice(idx, 1);
+                const kidx = paneObj.rows.indexOf(e);
+                if (kidx !== -1) paneObj.rows.splice(kidx, 1);
+                makeKeyRow(keyRowsContainer, e.picker.getStorageName());
+                if (e.valueInput.value.trim()) {
+                  const newKey = allRows[allRows.length - 1];
+                  if (newKey) newKey.valueInput.value = e.valueInput.value;
+                }
+              }
+            });
+            rowsContainer.appendChild(entry.rowEl);
+            paneObj.rows.push(entry);
+          };
+
+          return paneObj;
+        }
+
+        // ─── Carousel shell ────────────────────────────────────────────────────────
+        const carouselSection = el("div", { style: "margin:10px 0 0 0;" });
+
+        const carouselViewport = el("div", {
+          style: `
+            position:relative; overflow:hidden; border-radius:14px;
+            box-shadow:0 2px 16px rgba(59,130,246,0.10);
+          `
+        });
+
+        // Gradient fade masks
+        const fadeMaskLeft = el("div", {
+          style: `
+            position:absolute; top:0; left:0; bottom:0; width:60px;
+            background:linear-gradient(to right, rgba(255,255,255,0.97), rgba(255,255,255,0));
+            z-index:5; pointer-events:none; opacity:0; transition:opacity 0.3s;
+          `
+        });
+        const fadeMaskRight = el("div", {
+          style: `
+            position:absolute; top:0; right:0; bottom:0; width:60px;
+            background:linear-gradient(to left, rgba(255,255,255,0.85), rgba(255,255,255,0));
+            z-index:5; pointer-events:none;
+          `
+        });
+
+        const carouselTrack = el("div", {
+          style: `
+            display:flex; flex-direction:row;
+            transition:transform 0.42s cubic-bezier(0.4,0,0.2,1);
+            will-change:transform;
+          `
+        });
+
+        carouselViewport.appendChild(fadeMaskLeft);
+        carouselViewport.appendChild(fadeMaskRight);
+        carouselViewport.appendChild(carouselTrack);
+
+        // OR button container (positioned absolutely over right fade)
+        const orBtnWrap = el("div", {
+          style: `
+            position:absolute; right:-18px; top:50%; transform:translateY(-50%);
+            z-index:10;
+          `
+        });
+
+        const orBtn = el("button", {
+          style: `
+            padding:8px 18px; border-radius:20px; border:0;
+            background:linear-gradient(135deg,#2563eb,#3b82f6);
+            color:#fff; font-size:13px; font-weight:700; cursor:pointer;
+            box-shadow:0 4px 14px rgba(59,130,246,0.45);
+            letter-spacing:1px; white-space:nowrap;
+            transition:box-shadow 0.2s, transform 0.1s;
+          `
+        }, "OR");
+        orBtn.onmouseenter = () => { orBtn.style.boxShadow = "0 6px 20px rgba(59,130,246,0.65)"; orBtn.style.transform = "scale(1.06)"; };
+        orBtn.onmouseleave = () => { orBtn.style.boxShadow = "0 4px 14px rgba(59,130,246,0.45)"; orBtn.style.transform = "scale(1)"; };
+        orBtnWrap.appendChild(orBtn);
+
+        // Wrapper that holds viewport + OR button with relative positioning
+        const carouselOuter = el("div", {
+          style: "position:relative; padding-right:36px;"
+        });
+        carouselOuter.appendChild(carouselViewport);
+        carouselOuter.appendChild(orBtnWrap);
+
+        // Dot indicators
+        const dotsRow = el("div", {
+          style: "display:flex; justify-content:center; gap:6px; margin-top:10px;"
+        });
+
+        const updateDots = () => {
+          dotsRow.innerHTML = "";
+          for (let i = 0; i < panes.length; i++) {
+            const dot = el("div", {
+              style: `
+                width:8px; height:8px; border-radius:50%; cursor:pointer;
+                background:${i === activePaneIndex ? "#3b82f6" : "#d1d5db"};
+                transition:background 0.2s;
+              `
+            });
+            dot.onclick = () => slideTo(i);
+            dotsRow.appendChild(dot);
+          }
+        };
+
+        const slideTo = (index) => {
+          activePaneIndex = index;
+          carouselTrack.style.transform = `translateX(-${index * 100}%)`;
+          fadeMaskLeft.style.opacity = index > 0 ? "1" : "0";
+          updateDots();
+          // Update all row lock states
+          allRows.forEach(r => {
+            if (r.type === "filter" && r.toggle) {
+              const hasValue = r.valueInput.value.trim().length > 0;
+              if (hasValue && panes.length > 1) {
+                r.toggle.lock(); r.locked = true;
+              } else {
+                r.toggle.unlock(); r.locked = false;
+              }
+            }
+          });
+        };
+
+        const addPane = () => {
+          const paneIndex = panes.length;
+          const pane = makePaneEl(paneIndex);
+          // Pre-populate with same default filters as first pane (empty values)
+          for (let i = 0; i < DEFAULT_FILTER_STORAGES.length; i++) {
+            if (i > 0) {
+              const andLbl = makeAndLabel();
+              andLbl.dataset.andLabel = "1";
+              pane.rowsContainer.appendChild(andLbl);
+            }
+            const entry = makeFilterRow(pane.rowsContainer, DEFAULT_FILTER_STORAGES[i], "filter", paneIndex, (e, newType) => {
+              if (newType === "key") {
+                e.rowEl.remove();
+                const prev = e.rowEl.previousSibling;
+                if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
+                const idx = allRows.indexOf(e);
+                if (idx !== -1) allRows.splice(idx, 1);
+                const kidx = pane.rows.indexOf(e);
+                if (kidx !== -1) pane.rows.splice(kidx, 1);
+                makeKeyRow(keyRowsContainer, e.picker.getStorageName());
+              }
+            });
+            pane.rows.push(entry);
+            pane.rowsContainer.appendChild(entry.rowEl);
+          }
+          panes.push(pane);
+          carouselTrack.appendChild(pane.el);
+          slideTo(paneIndex);
+          // Lock all filter rows with values on existing panes
+          allRows.forEach(r => {
+            if (r.type === "filter" && r.valueInput.value.trim() && r.toggle) {
+              r.toggle.lock(); r.locked = true;
+            }
+          });
+        };
+
+        orBtn.onclick = () => addPane();
+
+        carouselSection.appendChild(el("div", { style: "font-size:15px; font-weight:600; margin:0 0 10px;" }, "Search Filters"));
+        carouselSection.appendChild(carouselOuter);
+        carouselSection.appendChild(dotsRow);
+
+        // ─── Key zone ──────────────────────────────────────────────────────────────
+        const keySection = el("div", {
+          style: `
+            margin-top:18px;
+            background:rgba(240,253,244,0.85);
+            border:1px solid rgba(34,197,94,0.22);
+            border-radius:14px;
+            padding:16px 20px 14px;
+          `
+        });
+        const keyHeader = el("div", {
+          style: "display:flex; align-items:center; gap:8px; margin-bottom:12px;"
+        },
+          el("span", { style: "font-size:16px;" }, "🔑"),
+          el("span", { style: "font-size:15px; font-weight:600;" }, "Key Fields"),
+          el("span", { style: "font-size:12px; color:#6b7280; font-style:italic;" }, "Multi-value lists — applied across all searches")
+        );
+        keySection.appendChild(keyHeader);
+
+        const keyRowsContainer = el("div", {});
+        keySection.appendChild(keyRowsContainer);
+
+        const addKeyBtn = el("button", {
+          style: "margin-top:8px; padding:6px 12px; border-radius:8px; border:1px solid #22c55e; background:#fff; color:#22c55e; cursor:pointer; font-size:12px;"
+        }, "+ Add Key Field");
+        addKeyBtn.onclick = () => makeKeyRow(keyRowsContainer, "");
+        keySection.appendChild(addKeyBtn);
+
+        // ─── Build modal ───────────────────────────────────────────────────────────
+        const modal = el("div", {
+          style: `
+            position:fixed; inset:0; background:rgba(0,0,0,.55);
+            z-index:999999; display:flex; align-items:center; justify-content:center;
+            font-family:Segoe UI, Arial, sans-serif;
+          `
+        });
+
+        const stickyClose = el("button", {
+          style: `
+            position:fixed; top:20px; right:20px; z-index:1000000;
+            border:0; background:rgba(30,30,30,.75); color:#fff;
+            width:32px; height:32px; border-radius:50%; font-size:16px;
+            cursor:pointer; display:flex; align-items:center; justify-content:center;
+            box-shadow:0 2px 8px rgba(0,0,0,.4);
+          `
+        }, "✕");
+        stickyClose.onclick = () => { modal.remove(); stickyClose.remove(); };
+
+        const card = el("div", {
+          style: `
+            background:#f8fafc; width:1080px; max-height:90vh; overflow:auto;
+            border-radius:14px; padding:18px 18px 22px;
+            box-shadow:0 10px 30px rgba(0,0,0,.35);
+          `
+        });
+
+        const header = el("div", { style: "display:flex; align-items:center; justify-content:space-between; gap:10px;" },
+          el("div", { style: "font-size:18px; font-weight:600;" }, "Nexidia Search")
+        );
+
+        modal.appendChild(card);
+        card.appendChild(header);
+        card.appendChild(hr());
+        card.appendChild(section("Date Range"));
+
+        const today = new Date();
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(today.getMonth() - 1);
+        const fromDate = field("From", "date", "");
+        const toDate = field("To", "date", "");
+        fromDate.input.valueAsDate = monthAgo;
+        toDate.input.valueAsDate = today;
+        card.appendChild(row(fromDate.wrap, toDate.wrap));
+        card.appendChild(hr());
+
+        // Build initial carousel pane
+        const firstPane = makePaneEl(0);
+        for (let i = 0; i < DEFAULT_FILTER_STORAGES.length; i++) {
+          if (i > 0) {
+            const andLbl = makeAndLabel();
+            andLbl.dataset.andLabel = "1";
+            firstPane.rowsContainer.appendChild(andLbl);
+          }
+          const entry = makeFilterRow(firstPane.rowsContainer, DEFAULT_FILTER_STORAGES[i], "filter", 0, (e, newType) => {
+            if (newType === "key") {
+              e.rowEl.remove();
+              const prev = e.rowEl.previousSibling;
+              if (prev && prev.dataset && prev.dataset.andLabel) prev.remove();
+              const idx = allRows.indexOf(e);
+              if (idx !== -1) allRows.splice(idx, 1);
+              const kidx = firstPane.rows.indexOf(e);
+              if (kidx !== -1) firstPane.rows.splice(kidx, 1);
+              makeKeyRow(keyRowsContainer, e.picker.getStorageName());
+            }
+          });
+          firstPane.rows.push(entry);
+          firstPane.rowsContainer.appendChild(entry.rowEl);
+        }
+        panes.push(firstPane);
+        carouselTrack.appendChild(firstPane.el);
+        updateDots();
+
+        card.appendChild(carouselSection);
+
+        // Build key zone with defaults
+        const DEFAULT_KEY_LIST = ["UDFVarchar41", "UDFVarchar115", "UDFVarchar1", "UDFVarchar110"];
+        for (const sn of DEFAULT_KEY_LIST) makeKeyRow(keyRowsContainer, sn);
+
+        card.appendChild(keySection);
+        card.appendChild(hr());
+
+        // ─── Phrase search ─────────────────────────────────────────────────────────
+        card.appendChild(section("Phrase Search (Each line = separate search)"));
+        const searchesWrap = el("div", {});
+        card.appendChild(searchesWrap);
+        const searches = [];
+
+        const createSearchBlock = (n) => {
+          const box = el("div", {
+            style: "border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:10px 0; background:#fafafa;"
+          });
+          const titleEl = el("div", { style: "font-weight:600; margin-bottom:8px;" }, `Search ${n}`);
+          box.appendChild(titleEl);
+          const p1 = textareaField("Phrase(s) (each line runs as its own search)", PLACEHOLDER, 4);
+          const a2 = textareaField("AND Phrase 2 (optional, single phrase)", PLACEHOLDER, 2);
+          const a3 = textareaField("AND Phrase 3 (optional, single phrase)", PLACEHOLDER, 2);
+          box.appendChild(row(p1.wrap));
+          box.appendChild(row(a2.wrap, a3.wrap));
+          return { box, p1, a2, a3 };
+        };
+
+        const addSearchBtn = el("button", {
+          style: "margin-top:6px; padding:8px 12px; border-radius:8px; border:1px solid #0a66c2; background:#fff; color:#0a66c2; cursor:pointer;"
+        }, "Add Another Search");
+        addSearchBtn.onclick = () => {
+          if (searches.length >= 20) return alert("Max 20 search blocks.");
+          const b = createSearchBlock(searches.length + 1);
+          searches.push(b);
+          searchesWrap.appendChild(b.box);
+        };
+
+        const first = createSearchBlock(1);
+        searches.push(first);
+        searchesWrap.appendChild(first.box);
+        card.appendChild(addSearchBtn);
+        card.appendChild(hr());
+
+        const runBtn = el("button", {
+          style: "padding:10px 16px; border-radius:8px; border:0; background:#0a66c2; color:#fff; font-size:15px; cursor:pointer;"
+        }, "Run");
+        const cancelBtn = el("button", {
+          style: "padding:10px 16px; border-radius:8px; border:1px solid #bbb; background:#fff; color:#333; font-size:15px; cursor:pointer;"
+        }, "Cancel");
+        cancelBtn.onclick = () => { modal.remove(); stickyClose.remove(); };
+        card.appendChild(row(runBtn, cancelBtn));
+
+        document.body.appendChild(modal);
+        document.body.appendChild(stickyClose);
+
+        // ─── Normalization / export helpers (unchanged) ────────────────────────────
         const splitValues = (raw) =>
           String(raw || "")
             .replace(/\r\n/g, "\n")
@@ -335,7 +853,7 @@
             .filter(Boolean);
 
         const isoStart = (yyyyMmDd) => `${yyyyMmDd}T00:00:00Z`;
-        const isoEnd   = (yyyyMmDd) => `${yyyyMmDd}T23:59:59Z`;
+        const isoEnd = (yyyyMmDd) => `${yyyyMmDd}T23:59:59Z`;
 
         const KEY_TRANSLATIONS = new Map([
           ["overallsentimentscore", "sentimentScore"],
@@ -394,12 +912,7 @@
           operator: "IN",
           type: "TEXT",
           parameterName: "transcript",
-          value: {
-            phrases: [phrase],
-            anotherPhrases: [],
-            relevance: "Anywhere",
-            position: "Begin"
-          }
+          value: { phrases: [phrase], anotherPhrases: [], relevance: "Anywhere", position: "Begin" }
         });
 
         const safeRead = async (res) => {
@@ -478,11 +991,11 @@
         async function getAppInstanceId() {
           const fromPage = getAppInstanceIdFromCurrentPageSource();
           if (fromPage) return fromPage;
-          try { return await getAppInstanceIdViaPageFetch(); } catch (_) { }
-          try { return await getAppInstanceIdViaForensicFetch(); } catch (_) { }
+          try { return await getAppInstanceIdViaPageFetch(); } catch (_) {}
+          try { return await getAppInstanceIdViaForensicFetch(); } catch (_) {}
           throw new Error("Could not determine appInstanceId from any source.");
         }
-        
+
 //##> LEGACY COLUMN PREFERENCES: This function fetches the user's saved column layout from
 //##> the Nexidia legacy UI via SettingsDialog.aspx and a hidden input (ctl10). This is
 //##> intentionally separate from the Explore API and metadata endpoint used everywhere else.
@@ -492,7 +1005,6 @@
 //##> format without any manual configuration. This behavior must survive all future changes.
 //##> The appInstanceId retrieval, KEY_TRANSLATIONS map, and normalizeFieldKeyForExplore
 //##> function are all load-bearing for this feature and must not be removed or simplified.
-        
         async function getLegacyChosenColumns(appInstanceId) {
           const res = await fetch(SETTINGS_URL(appInstanceId), { credentials: "include" });
           if (!res.ok) throw new Error("SettingsDialog fetch failed");
@@ -500,11 +1012,12 @@
           const doc = new DOMParser().parseFromString(html, "text/html");
           const ctl10 =
             doc.querySelector('input[name="ctl10"]')?.getAttribute("value") ||
-            doc.querySelector('input[name="ctl10"]')?.value || "";
+            doc.querySelector('input[name="ctl10"]')?.value ||
+            "";
           if (!ctl10) throw new Error("ctl10 not found in SettingsDialog response.");
           const pairsRaw = ctl10
             .split(",")
-            .map(s => s.split("|"))
+            .map(s => s.split("\n"))
             .filter(p => p.length >= 2)
             .map(([label, key]) => ({ label, key }));
           const fields = [];
@@ -522,7 +1035,6 @@
         }
 
         const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
-
         const buildPhraseDisplay = (basePhrase, andPhrases) => {
           const parts = [quote(basePhrase)];
           for (const p of (andPhrases || [])) {
@@ -625,152 +1137,45 @@
           return `<colgroup>${cols.join("")}</colgroup>`;
         };
 
-        // --- Modal ---
-        const modal = el("div", {
-          style: `
-            position:fixed; inset:0; background:rgba(0,0,0,.55);
-            z-index:999999; display:flex; align-items:center; justify-content:center;
-            font-family:Segoe UI, Arial, sans-serif;
-          `
-        });
-
-        // Sticky close anchored to overlay, always visible regardless of scroll
-        const stickyClose = el("button", {
-          style: `
-            position:fixed; top:20px; right:20px; z-index:1000000;
-            border:0; background:rgba(30,30,30,.75); color:#fff;
-            width:32px; height:32px; border-radius:50%; font-size:16px;
-            cursor:pointer; display:flex; align-items:center; justify-content:center;
-            box-shadow:0 2px 8px rgba(0,0,0,.4);
-          `
-        }, "✕");
-        stickyClose.onclick = () => { modal.remove(); stickyClose.remove(); };
-
-        const card = el("div", {
-          style: `
-            background:#fff; width:1080px; max-height:90vh; overflow:auto;
-            border-radius:10px; padding:18px 18px 22px;
-            box-shadow:0 10px 30px rgba(0,0,0,.35);
-          `
-        });
-
-        const header = el("div", { style: "display:flex; align-items:center; justify-content:space-between; gap:10px;" },
-          el("div", { style: "font-size:18px; font-weight:600;" }, "Nexidia Search")
-        );
-
-        modal.appendChild(card);
-        card.appendChild(header);
-        card.appendChild(hr());
-
-        card.appendChild(section("Date Range"));
-        const today = new Date();
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(today.getMonth() - 1);
-        const fromDate = field("From", "date", "");
-        const toDate = field("To", "date", "");
-        fromDate.input.valueAsDate = monthAgo;
-        toDate.input.valueAsDate = today;
-        card.appendChild(row(fromDate.wrap, toDate.wrap));
-
-        card.appendChild(hr());
-        card.appendChild(section("Search Filters"));
-
-        const filtersContainer = el("div", {});
-        card.appendChild(filtersContainer);
-
-        const DEFAULT_FILTERS = [
-          "UDFVarchar10", "experienceId", "UDFVarchar122", "siteName",
-          "UDFVarchar126", "DNIS", "UDFVarchar120", "UDFVarchar136",
-          "UDFVarchar41", "UDFVarchar115", "UDFVarchar1"
-        ];
-
-        for (const storageName of DEFAULT_FILTERS) {
-          makeFilterRow(filtersContainer, storageName);
-        }
-
-        const addFilterBtn = el("button", {
-          style: "margin-top:6px; padding:8px 12px; border-radius:8px; border:1px solid #0a66c2; background:#fff; color:#0a66c2; cursor:pointer; font-size:13px;"
-        }, "+ Add Filter");
-
-        addFilterBtn.onclick = () => makeFilterRow(filtersContainer, "");
-        card.appendChild(addFilterBtn);
-
-        card.appendChild(hr());
-        card.appendChild(section("Phrase Search (Each line = separate search)"));
-
-        const searchesWrap = el("div", {});
-        card.appendChild(searchesWrap);
-        const searches = [];
-
-        const createSearchBlock = (n) => {
-          const box = el("div", {
-            style: "border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin:10px 0; background:#fafafa;"
-          });
-          const titleEl = el("div", { style: "font-weight:600; margin-bottom:8px;" }, `Search ${n}`);
-          box.appendChild(titleEl);
-          const p1 = textareaField("Phrase(s) (each line runs as its own search)", PLACEHOLDER, 4);
-          const a2 = textareaField("AND Phrase 2 (optional, single phrase)", PLACEHOLDER, 2);
-          const a3 = textareaField("AND Phrase 3 (optional, single phrase)", PLACEHOLDER, 2);
-          box.appendChild(row(p1.wrap));
-          box.appendChild(row(a2.wrap, a3.wrap));
-          return { box, p1, a2, a3 };
-        };
-
-        const addSearchBtn = el("button", {
-          style: "margin-top:6px; padding:8px 12px; border-radius:8px; border:1px solid #0a66c2; background:#fff; color:#0a66c2; cursor:pointer;"
-        }, "Add Another Search");
-
-        addSearchBtn.onclick = () => {
-          if (searches.length >= 20) return alert("Max 20 search blocks.");
-          const b = createSearchBlock(searches.length + 1);
-          searches.push(b);
-          searchesWrap.appendChild(b.box);
-        };
-
-        const first = createSearchBlock(1);
-        searches.push(first);
-        searchesWrap.appendChild(first.box);
-        card.appendChild(addSearchBtn);
-
-        card.appendChild(hr());
-
-        const runBtn = el("button", {
-          style: "padding:10px 16px; border-radius:8px; border:0; background:#0a66c2; color:#fff; font-size:15px; cursor:pointer;"
-        }, "Run");
-
-        const cancelBtn = el("button", {
-          style: "padding:10px 16px; border-radius:8px; border:1px solid #bbb; background:#fff; color:#333; font-size:15px; cursor:pointer;"
-        }, "Cancel");
-
-        cancelBtn.onclick = () => { modal.remove(); stickyClose.remove(); };
-        card.appendChild(row(runBtn, cancelBtn));
-
-        document.body.appendChild(modal);
-        document.body.appendChild(stickyClose);
-
-        // --- Run ---
+        // ─── Run ───────────────────────────────────────────────────────────────────
         runBtn.onclick = async () => {
           try {
             const fromVal = fromDate.input.value;
             const toVal = toDate.input.value;
-            if (!fromVal || !toVal) {
-              alert("Please select both From and To dates.");
-              return;
-            }
+            if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
 
-            const metaFilters = [];
-            for (const entry of filterRows) {
+            // Collect key filters (global, applied to every pane search)
+            const globalKeyFilters = [];
+            for (const entry of allRows) {
+              if (entry.type !== "key") continue;
               const storageName = entry.picker.getStorageName();
               const val = entry.valueInput.value.trim();
               if (!storageName || !val) continue;
-              metaFilters.push(buildKeywordFilter(storageName, splitValues(val)));
+              globalKeyFilters.push(buildKeywordFilter(storageName, splitValues(val)));
             }
 
-            if (!metaFilters.length) {
+            // Collect per-pane filter sets
+            const paneFilterSets = panes.map((pane) => {
+              const filters = [];
+              for (const entry of allRows) {
+                if (entry.type !== "filter" || entry.paneIndex !== pane.index) continue;
+                const storageName = entry.picker.getStorageName();
+                const val = entry.valueInput.value.trim();
+                if (!storageName || !val) continue;
+                filters.push(buildKeywordFilter(storageName, splitValues(val)));
+              }
+              return filters;
+            });
+
+            const anyPaneHasFilters = paneFilterSets.some(f => f.length > 0);
+            const anyKeyFilters = globalKeyFilters.length > 0;
+
+            if (!anyPaneHasFilters && !anyKeyFilters) {
               const ok = confirm("No filters added. Data will be pulled from the entire UMR dataset. Do you want to proceed?");
               if (!ok) return;
             }
 
+            // Phrase expansion
             const expandedSearches = [];
             for (const s of searches) {
               const baseLines = splitValues(s.p1.input.value);
@@ -788,14 +1193,7 @@
               }
             }
 
-            if (!expandedSearches.length) {
-              alert("Please enter at least one phrase.");
-              return;
-            }
-
-            const keywordGroup = metaFilters.length
-              ? { operator: "AND", invertOperator: false, filters: metaFilters }
-              : null;
+            if (!expandedSearches.length) { alert("Please enter at least one phrase."); return; }
 
             const dateFilter = {
               parameterName: "recordedDateTime",
@@ -811,7 +1209,6 @@
 
             let baseHeaders = ["Trans_Id"];
             let baseFields = ["UDFVarchar110"];
-
             try {
               progressUI.set("Loading column preferences...", 10, "Scanning page for appInstanceId");
               const appInstanceId = await getAppInstanceId();
@@ -842,25 +1239,39 @@
               progressUI.set("Using default export fields.", 18, `Fields: ${baseFields.length}`);
             }
 
-            const totalRuns = expandedSearches.length;
+            // Build one search run per pane x phrase
+            // If a pane has no filters, it shares behavior with a no-filter run
+            const runSets = [];
+            for (let pi = 0; pi < panes.length; pi++) {
+              const paneFilters = paneFilterSets[pi];
+              const keywordGroup = (() => {
+                const combined = [...paneFilters, ...globalKeyFilters];
+                if (!combined.length) return null;
+                return { operator: "AND", invertOperator: false, filters: combined };
+              })();
+              for (const es of expandedSearches) {
+                runSets.push({ paneIndex: pi, keywordGroup, phraseDisplay: es.phraseDisplay, phraseGroup: es.phraseGroup });
+              }
+            }
+
+            const totalRuns = runSets.length;
             const merged = new Map();
             const passthroughNoKey = [];
             let totalFetched = 0;
 
-            for (let si = 0; si < expandedSearches.length; si++) {
-              const { phraseDisplay, phraseGroup } = expandedSearches[si];
-              progressUI.set(`Searching (${si + 1}/${totalRuns})...`, 25, `Starting at 0`);
+            for (let si = 0; si < runSets.length; si++) {
+              const { keywordGroup, phraseDisplay, phraseGroup, paneIndex } = runSets[si];
+              const runLabel = panes.length > 1 ? `Pane ${paneIndex + 1}, search ${si + 1}/${totalRuns}` : `Search ${si + 1}/${totalRuns}`;
+              progressUI.set(`Searching (${runLabel})...`, 25, `Starting at 0`);
 
               const setRows = [];
               let from = 0;
-
               while (true) {
                 const interactionFilters = [
                   ...(keywordGroup ? [keywordGroup] : []),
                   phraseGroup,
                   dateFilter
                 ];
-
                 const payload = {
                   languageFilter: { languages: [] },
                   namedSetId: null,
@@ -878,14 +1289,12 @@
                     }]
                   }
                 };
-
                 const res = await fetch(SEARCH_URL, {
                   method: "POST",
                   credentials: "include",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify(payload)
                 });
-
                 if (!res.ok) {
                   const { text } = await safeRead(res);
                   const err = new Error(`Search failed: HTTP ${res.status}`);
@@ -893,22 +1302,17 @@
                   err.__body = text;
                   throw err;
                 }
-
                 const { json } = await safeRead(res);
                 const rows = pickRows(json);
                 if (!rows.length) break;
-
                 setRows.push(...rows);
                 totalFetched += rows.length;
-
                 const basePct = 25 + Math.floor((si / Math.max(1, totalRuns)) * 55);
-                const localPct = Math.min(55 / totalRuns, Math.floor((setRows.length / Math.max(1, MAX_ROWS)) * (55 / totalRuns)));
                 progressUI.set(
-                  `Searching (${si + 1}/${totalRuns})...`,
-                  Math.min(80, basePct + localPct),
+                  `Searching (${runLabel})...`,
+                  Math.min(80, basePct),
                   `Set fetched: ${setRows.length} (page ${from}) | Total fetched: ${totalFetched}`
                 );
-
                 if (setRows.length >= MAX_ROWS) break;
                 if (rows.length < PAGE_SIZE) break;
                 from += PAGE_SIZE;
@@ -964,11 +1368,11 @@
             }
 
             const exportHeaders = [...phraseHeaders, ...baseHeaders];
-            const exportFields  = [...phraseKeys,   ...baseFields];
+            const exportFields = [...phraseKeys, ...baseFields];
 
-            const isDateTimeField  = (key) => String(key || "").toLowerCase() === "recordeddatetime";
-            const isDurationField  = (key) => String(key || "").toLowerCase() === "mediafileduration";
-            const isHoldField      = (key) => String(key || "").toLowerCase() === "udfint4";
+            const isDateTimeField = (key) => String(key || "").toLowerCase() === "recordeddatetime";
+            const isDurationField = (key) => String(key || "").toLowerCase() === "mediafileduration";
+            const isHoldField = (key) => String(key || "").toLowerCase() === "udfint4";
             const isSentimentField = (key) => String(key || "").toLowerCase() === "sentimentscore";
 
             const css = `
@@ -981,7 +1385,7 @@
               }
               th { font-weight:700; background:transparent; }
               .txt { mso-number-format:"\\@"; }
-              .dt  { mso-number-format:"${FIXED_DT_FORMAT}"; }
+              .dt { mso-number-format:"${FIXED_DT_FORMAT}"; }
               .dur { mso-number-format:"${FIXED_DURATION_FORMAT}"; }
               .int { mso-number-format:"0"; }
               .dec2 { mso-number-format:"0.00"; }
@@ -1034,23 +1438,23 @@
               return `<tr>${tds}</tr>`;
             }).join("\n");
 
-            const html =
+            const htmlOut =
               `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-                     xmlns:x="urn:schemas-microsoft-com:office:excel"
-                     xmlns="http://www.w3.org/TR/REC-html40">
-                <head><meta charset="utf-8" /><style>${css}</style></head>
-                <body><table>${colGroup}<tr>${headerCells}</tr>${bodyRows}</table></body>
-              </html>`;
+               xmlns:x="urn:schemas-microsoft-com:office:excel"
+               xmlns="http://www.w3.org/TR/REC-html40">
+               <head><meta charset="utf-8" /><style>${css}</style></head>
+               <body><table>${colGroup}<tr>${headerCells}</tr>${bodyRows}</table></body>
+               </html>`;
 
             const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
             const filename = `nexidia_search_export_${stamp}.xls`;
             progressUI.set("Downloading...", 95, filename);
-            downloadExcelFile(filename, html);
+            downloadExcelFile(filename, htmlOut);
             progressUI.set("Done.", 100, `Exported ${finalRows.length} rows | Phrase cols: ${maxPhraseCols}`);
 
           } catch (err) {
             console.error(err);
-            try { progressUI.remove(); } catch (_) { }
+            try { progressUI.remove(); } catch (_) {}
             alert("Failed to run. Make sure you're running this from an active Nexidia session.");
           }
         };
