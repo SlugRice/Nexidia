@@ -37,9 +37,10 @@
 
         function uniq(arr) { return [...new Set(arr)]; }
 
-        // Auto-detect:
-        // - length 20 => userToUser
-        // - length 8-10 => transIds
+        //##> ID DETECTION: UCIDs are always exactly 20 digits. Trans_Ids are 8-10 digits.
+        //##> These length rules are load-bearing for auto-routing pasted IDs to the correct
+        //##> search parameter (UDFVarchar1 vs UDFVarchar110). Do not change without verifying
+        //##> against actual Nexidia data conventions.
         function parseMixed(raw) {
           const tokens = uniq(
             raw.split(/[\s,]+/g)
@@ -460,6 +461,11 @@
         const batchFiles = [];
         let bn = 1;
 
+//##> BATCHING CONFIG: targetTokens drives how transcripts are grouped into batch files
+//##> for downstream LLM processing. charsPerToken is a heuristic (3.5 chars = 1 token).
+//##> A UI for selecting batch size presets (Copilot Heavy/Medium/Light) is explicitly
+//##> deferred per project roadmap - do not implement without discussion.
+        
         for (const b of batches) {
           const outName = `batch-${String(bn).padStart(3, "0")}.txt`;
           const totalChars = b.reduce((a, x) => a + (x.charCount || 0), 0);
