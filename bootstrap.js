@@ -117,6 +117,12 @@
     ui.set("Manifest loaded", 15, "Version: " + version);
     window.__NEXIDIA_TOOLS_VERSION__ = version;
 
+//##> VERSION / CACHE BUSTING: The version string from manifest.json is appended as a query
+//##> parameter to every module URL. This forces browsers to re-fetch updated files instead
+//##> of serving cached copies. Bump the version in manifest.json with every commit that
+//##> changes any module. This does not affect GitHub CDN propagation delay (typically
+//##> 2-10 min) but ensures users get updates as soon as CDN clears.
+    
     for (let i = 0; i < entry.length; i++) {
       const rel = entry[i];
       const full = REPO_BASE + rel + "?v=" + encodeURIComponent(version);
