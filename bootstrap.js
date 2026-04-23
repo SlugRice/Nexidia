@@ -2,11 +2,9 @@
   const REPO_BASE = "https://raw.githubusercontent.com/SlugRice/Nexidia/main/";
   const MANIFEST_URL = REPO_BASE + "manifest.json";
 
-  // Guard: don’t double-run
   if (window.__NEXIDIA_BOOTSTRAP_RUNNING__) return;
   window.__NEXIDIA_BOOTSTRAP_RUNNING__ = true;
 
-  // Must be on Nexidia
   const isNexidiaPage =
     typeof location !== "undefined" &&
     /nxondemand\.com/i.test(location.hostname) &&
@@ -18,22 +16,16 @@
     return;
   }
 
-  // Tiny UI
   const ui = (() => {
     const wrap = document.createElement("div");
     wrap.style.cssText = [
-      "position:fixed",
-      "top:16px",
-      "right:16px",
-      "z-index:999999",
-      "width:420px",
-      "background:#111827",
-      "color:#e5e7eb",
-      "border:1px solid #374151",
-      "border-radius:10px",
+      "position:fixed", "top:16px", "right:16px", "z-index:999999",
+      "width:420px", "background:#111827", "color:#e5e7eb",
+      "border:1px solid #374151", "border-radius:10px",
       "padding:12px 12px 10px",
       "font-family:Segoe UI, Arial, sans-serif",
-      "box-shadow:0 12px 28px rgba(0,0,0,.35)"
+      "box-shadow:0 12px 28px rgba(0,0,0,.35)",
+      "transition:opacity 0.4s ease"
     ].join(";");
 
     const title = document.createElement("div");
@@ -66,16 +58,23 @@
     wrap.appendChild(meta);
 
     const show = () => document.body.appendChild(wrap);
+
     const set = (msg, pct, extra) => {
       status.textContent = msg || "";
       if (pct !== null && pct !== undefined) {
-        const clamped = Math.max(0, Math.min(100, pct));
-        barInner.style.width = clamped + "%";
+        barInner.style.width = Math.max(0, Math.min(100, pct)) + "%";
       }
       meta.textContent = extra || "";
     };
 
-    return { show, set };
+    const dismiss = () => {
+      setTimeout(() => {
+        wrap.style.opacity = "0";
+        setTimeout(() => wrap.remove(), 400);
+      }, 2000);
+    };
+
+    return { show, set, dismiss };
   })();
 
   ui.show();
@@ -94,9 +93,8 @@
 
   async function fetchJson(url) {
     const txt = await fetchText(url);
-    try {
-      return JSON.parse(txt);
-    } catch (e) {
+    try { return JSON.parse(txt); }
+    catch (e) {
       const err = new Error("Manifest JSON parse failed");
       err.__body = txt;
       throw err;
@@ -105,37 +103,31 @@
 
   async function loadAndEval(url) {
     const code = await fetchText(url);
-    // Execute in page context (same method your working bookmarklet uses)
     (0, eval)(code);
   }
 
   try {
     ui.set("Loading manifest...", 5, "manifest.json");
-
     const manifest = await fetchJson(MANIFEST_URL + "?v=" + Date.now());
     const version = String(manifest.version || Date.now());
     const entry = Array.isArray(manifest.entry) ? manifest.entry : [];
 
-    if (!entry.length) {
-      throw new Error("Manifest has no entry files");
-    }
+    if (!entry.length) throw new Error("Manifest has no entry files");
 
     ui.set("Manifest loaded", 15, "Version: " + version);
-
-    // Optional: expose version for quick support checks
     window.__NEXIDIA_TOOLS_VERSION__ = version;
 
     for (let i = 0; i < entry.length; i++) {
       const rel = entry[i];
       const full = REPO_BASE + rel + "?v=" + encodeURIComponent(version);
-
       const pct = 15 + Math.round(((i + 1) / entry.length) * 80);
       ui.set("Loading " + rel + "...", pct, full);
-
       await loadAndEval(full);
     }
 
     ui.set("Done", 100, "Loaded " + entry.length + " module(s) | v " + version);
+    ui.dismiss();
+
   } catch (err) {
     console.error("Bootstrap failed", err);
     ui.set("Failed", 100, String(err && err.message ? err.message : err));
