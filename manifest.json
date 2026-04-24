@@ -1,5 +1,5 @@
 {
-  "version": "0.0.45",
+  "version": "0.0.46",
   "entry": [
     "app/core/registry.js",
     "app/searchExport.js",
