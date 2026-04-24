@@ -1,10 +1,29 @@
-{
-  "version": "0.0.5",
-  "entry": [
-    "app/core/registry.js",
-    "app/searchExport.js",
-    "app/transcripts/batchBuilder.js",
-    "app/grid/resultsGrid.js",
-    "app/entry.js"
-  ]
-}
+(() => {
+  if (window.NEXIDIA_TOOLS) return;
+
+  const tools = [];
+  const shared = Object.create(null);
+
+  window.NEXIDIA_TOOLS = {
+    registerTool(tool) {
+      if (!tool || !tool.id || !tool.label || typeof tool.open !== "function") return;
+      if (tools.some(t => t.id === tool.id)) return;
+      tools.push(tool);
+    },
+    listTools() {
+      return tools.slice();
+    },
+    setShared(key, value) {
+      if (!key) return;
+      shared[String(key)] = value;
+    },
+    getShared(key) {
+      if (!key) return undefined;
+      return shared[String(key)];
+    },
+    clearShared(key) {
+      if (!key) return;
+      delete shared[String(key)];
+    }
+  };
+})();
