@@ -939,50 +939,54 @@
         }
 
         // ── Search executor ────────────────────────────────────────────────────────
-        async function executeSearch(runSets,baseFields,baseHeaders,dateFilter,labelPrefix){
-          const merged=new Map(),passthroughNoKey=[];
-          let totalFetched=0;
-          const totalRuns=runSets.length;
-          for(let si=0;si<runSets.length;si++){
-            const{keywordGroup,phraseGroups,label}=runSets[si];
-            const phraseExpansions=phraseGroups.length>0?phraseGroups:[{group:null,display:label}];
-            for(const{group:phraseGroup,display:phraseDisplay}of phraseExpansions){
-              progressUI.set(`Searching (${labelPrefix} ${si+1}/${totalRuns})...`,25,"");
-              let from=0;const setRows=[];
-              while(true){
-                const interactionFilters=[
-                  ...(keywordGroup?[]),
-                  ...(phraseGroup?[]),
-                  dateFilter
-                ];
-                const payload={languageFilter:{languages:[]},namedSetId:null,from,to:from+PAGE_SIZE,fields:baseFields,
-                  query:{operator:"AND",invertOperator:false,filters:[{operator:"AND",invertOperator:false,filterType:"interactions",filters:interactionFilters}]}};
-                const res=await fetch(SEARCH_URL,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-                if(!res.ok){const{text}=await safeRead(res);throw new Error(`Search failed: HTTP ${res.status}\n${text.slice(0,300)}`);}
-                const{json}=await safeRead(res);
-                const rows=pickRows(json);
-                if(!rows.length) break;
-                setRows.push(...rows);totalFetched+=rows.length;
-                progressUI.set(`Searching (${labelPrefix} ${si+1}/${totalRuns})...`,Math.min(80,25+Math.floor((si/Math.max(1,totalRuns))*55)),`Set: ${setRows.length} | Total: ${totalFetched}`);
-                if(setRows.length>=MAX_ROWS||rows.length<PAGE_SIZE) break;
-                from+=PAGE_SIZE;await sleep(250);
-              }
-              const rowLabel=phraseDisplay||label;
-              for(const r of setRows){
-                const transId=normalizeCellText(getFieldValue(r,"UDFVarchar110"));
-                if(!transId){passthroughNoKey.push({row:r,phrases:[rowLabel]});continue;}
-                const existing=merged.get(transId);
-                if(!existing){merged.set(transId,{row:r,phrases:[rowLabel]});}
-                else{
-                  if(!existing.phrases.includes(rowLabel)) existing.phrases.push(rowLabel);
-                  for(const k of baseFields){
-                    const cur=normalizeCellText(getFieldValue(existing.row,k));if(cur) continue;
-                    const nxt=normalizeCellText(getFieldValue(r,k));if(nxt) existing.row[k]=nxt;
-                  }
-                }
-              }
-            }
+       async function executeSearch(runSets,baseFields,baseHeaders,dateFilter,labelPrefix){
+  const merged=new Map(),passthroughNoKey=[];
+  let totalFetched=0;
+  const totalRuns=runSets.length;
+  for(let si=0;si<runSets.length;si++){
+    const{keywordGroup,phraseGroups,label}=runSets[si];
+    const phraseExpansions=phraseGroups.length>0?phraseGroups:[{group:null,display:label}];
+    for(const{group:phraseGroup,display:phraseDisplay}of phraseExpansions){
+      progressUI.set(`Searching (${labelPrefix} ${si+1}/${totalRuns})...`,25,"");
+      let from=0;const setRows=[];
+      while(true){
+        const interactionFilters=[];
+        if(keywordGroup) interactionFilters.push(keywordGroup);
+        if(phraseGroup) interactionFilters.push(phraseGroup);
+        interactionFilters.push(dateFilter);
+        const payload={languageFilter:{languages:[]},namedSetId:null,from,to:from+PAGE_SIZE,fields:baseFields,
+          query:{operator:"AND",invertOperator:false,filters:[{operator:"AND",invertOperator:false,filterType:"interactions",filters:interactionFilters}]}};
+        const res=await fetch(SEARCH_URL,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        if(!res.ok){const{text}=await safeRead(res);throw new Error(`Search failed: HTTP ${res.status}\n${text.slice(0,300)}`);}
+        const{json}=await safeRead(res);
+        const rows=pickRows(json);
+        if(!rows.length) break;
+        setRows.push(...rows);totalFetched+=rows.length;
+        progressUI.set(`Searching (${labelPrefix} ${si+1}/${totalRuns})...`,Math.min(80,25+Math.floor((si/Math.max(1,totalRuns))*55)),`Set: ${setRows.length} | Total: ${totalFetched}`);
+        if(setRows.length>=MAX_ROWS||rows.length<PAGE_SIZE) break;
+        from+=PAGE_SIZE;await sleep(250);
+      }
+      const rowLabel=phraseDisplay||label;
+      for(const r of setRows){
+        const transId=normalizeCellText(getFieldValue(r,"UDFVarchar110"));
+        if(!transId){passthroughNoKey.push({row:r,phrases:[rowLabel]});continue;}
+        const existing=merged.get(transId);
+        if(!existing){merged.set(transId,{row:r,phrases:[rowLabel]});}
+        else{
+          if(!existing.phrases.includes(rowLabel)) existing.phrases.push(rowLabel);
+          for(const k of baseFields){
+            const cur=normalizeCellText(getFieldValue(existing.row,k));if(cur) continue;
+            const nxt=normalizeCellText(getFieldValue(r,k));if(nxt) existing.row[k]=nxt;
           }
+        }
+      }
+    }
+  }
+  const finalRows=[];let maxPhraseCols=1;
+  for(const[,v]of merged.entries()){if(v.phrases.length>maxPhraseCols)maxPhraseCols=v.phrases.length;finalRows.push(v);}
+  for(const p of passthroughNoKey){if(p.phrases.length>maxPhraseCols)maxPhraseCols=p.phrases.length;finalRows.push(p);}
+  return{finalRows,maxPhraseCols};
+}
           const finalRows=[];let maxPhraseCols=1;
           for(const[,v]of merged.entries()){if(v.phrases.length>maxPhraseCols)maxPhraseCols=v.phrases.length;finalRows.push(v);}
           for(const p of passthroughNoKey){if(p.phrases.length>maxPhraseCols)maxPhraseCols=p.phrases.length;finalRows.push(p);}
