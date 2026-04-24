@@ -23,16 +23,19 @@
         }
 
         const BASE = "https://apug01.nxondemand.com";
-        const SEARCH_URL = `${BASE}/NxIA/api-gateway/explore/api/v1.0/search`;
-        const METADATA_URL = `${BASE}/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names`;
-        const LEGACY_FORMS_URL = `${BASE}/NxIA/Search/ForensicSearch.aspx`;
-        const SETTINGS_URL = (id) => `${BASE}/NxIA/Search/SettingsDialog.aspx?AppInstanceID=${encodeURIComponent(id)}`;
+        const SEARCH_URL = BASE + "/NxIA/api-gateway/explore/api/v1.0/search";
+        const METADATA_URL = BASE + "/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
+        const LEGACY_FORMS_URL = BASE + "/NxIA/Search/ForensicSearch.aspx";
+        const SETTINGS_URL = function(id) { return BASE + "/NxIA/Search/SettingsDialog.aspx?AppInstanceID=" + encodeURIComponent(id); };
 
         const FILTER_PLACEHOLDER = "Enter one value for this filter.";
         const KEY_PLACEHOLDER = "Separate multiple values with commas or line breaks, or paste from Excel.";
         const PAGE_SIZE = 1000;
         const MAX_ROWS = 50000;
-        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const sleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+
+        // Fields that are always forced to text output (prevent scientific notation)
+        const FORCE_TEXT_FIELDS = new Set(["UDFVarchar1","UDFVarchar122","UDFVarchar110","UDFVarchar41","UDFVarchar115","UDFVarchar136","UDFVarchar50","UDFVarchar104","UDFVarchar105"]);
 
         const DEFAULT_FILTER_STORAGES = ["UDFVarchar10", "UDFVarchar126", "DNIS", "siteName", "UDFVarchar120"];
         const DEFAULT_KEY_LIST = ["experienceId", "UDFVarchar122", "UDFVarchar41", "UDFVarchar115", "UDFVarchar1", "UDFVarchar110"];
@@ -42,12 +45,12 @@
           const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
           if (res.ok) {
             const json = await res.json();
-            metadataFields = Array.isArray(json) ? json.filter(f => f.isEnabled !== false) : [];
+            metadataFields = Array.isArray(json) ? json.filter(function(f) { return f.isEnabled !== false; }) : [];
           }
         } catch (_) {}
 
         // ── Progress UI ────────────────────────────────────────────────────────────
-        const progressUI = (() => {
+        const progressUI = (function() {
           const wrap = document.createElement("div");
           wrap.style.cssText = "position:fixed;top:16px;right:16px;z-index:999999;width:420px;background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:12px 12px 10px;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 12px 28px rgba(0,0,0,.35);";
           const title = document.createElement("div");
@@ -66,16 +69,16 @@
           const closeBtn = document.createElement("div");
           closeBtn.textContent = "✕";
           closeBtn.style.cssText = "position:absolute;top:10px;right:12px;cursor:pointer;color:#9ca3af;font-size:14px;";
-          closeBtn.onclick = () => wrap.remove();
+          closeBtn.onclick = function() { wrap.remove(); };
           wrap.appendChild(closeBtn);
           wrap.appendChild(title);
           wrap.appendChild(status);
           wrap.appendChild(barOuter);
           wrap.appendChild(metrics);
           return {
-            show: () => document.body.appendChild(wrap),
-            remove: () => { try { wrap.remove(); } catch (_) {} },
-            set: (msg, pct, meta) => {
+            show: function() { document.body.appendChild(wrap); },
+            remove: function() { try { wrap.remove(); } catch (_) {} },
+            set: function(msg, pct, meta) {
               status.textContent = msg || "";
               if (pct !== null && pct !== undefined) {
                 barInner.style.width = Math.max(0, Math.min(100, pct)) + "%";
@@ -86,11 +89,12 @@
         })();
 
         // ── DOM helpers ────────────────────────────────────────────────────────────
-        function el(tag, props, ...children) {
+        function el(tag, props) {
           props = props || {};
           const node = document.createElement(tag);
           Object.assign(node, props);
-          for (const ch of children) {
+          for (let i = 2; i < arguments.length; i++) {
+            const ch = arguments[i];
             node.appendChild(typeof ch === "string" ? document.createTextNode(ch) : ch);
           }
           return node;
@@ -148,7 +152,8 @@
 
         function getActiveStorageNames(excludeEntry) {
           const set = new Set();
-          for (const r of allRows) {
+          for (let i = 0; i < allRows.length; i++) {
+            const r = allRows[i];
             if (r === excludeEntry) continue;
             if (!r.picker) continue;
             const sn = r.picker.getStorageName();
@@ -178,14 +183,17 @@
               return ql ? f.displayName.toLowerCase().includes(ql) : true;
             });
             if (!matches.length) { dropdown.style.display = "none"; return; }
-            for (const f of matches.slice(0, 80)) {
+            for (let i = 0; i < Math.min(matches.length, 80); i++) {
+              const f = matches[i];
               const item = el("div", { style: "padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;" }, f.displayName);
-              item.onmouseenter = function() {
-                vis.forEach(function(v, i) { v.style.background = i === vis.indexOf(item) ? "#e8f0fe" : ""; });
-                hi = vis.indexOf(item);
-              };
-              item.onmouseleave = function() { item.style.background = ""; };
-              item.onmousedown = function(e) { e.preventDefault(); pick(f); };
+              (function(fi) {
+                item.onmouseenter = function() {
+                  for (let j = 0; j < vis.length; j++) vis[j].style.background = vis[j] === item ? "#e8f0fe" : "";
+                  hi = vis.indexOf(item);
+                };
+                item.onmouseleave = function() { item.style.background = ""; };
+                item.onmousedown = function(e) { e.preventDefault(); pick(fi); };
+              })(f);
               dropdown.appendChild(item);
               vis.push(item);
             }
@@ -207,13 +215,13 @@
             if (!vis.length) return;
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              vis.forEach(function(v) { v.style.background = ""; });
+              for (let i = 0; i < vis.length; i++) vis[i].style.background = "";
               hi = Math.min(hi + 1, vis.length - 1);
               vis[hi].style.background = "#e8f0fe";
               vis[hi].scrollIntoView({ block: "nearest" });
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
-              vis.forEach(function(v) { v.style.background = ""; });
+              for (let i = 0; i < vis.length; i++) vis[i].style.background = "";
               hi = Math.max(hi - 1, 0);
               vis[hi].style.background = "#e8f0fe";
               vis[hi].scrollIntoView({ block: "nearest" });
@@ -409,9 +417,9 @@
             rowEl.remove();
             const idx = allRows.indexOf(entry);
             if (idx !== -1) allRows.splice(idx, 1);
-            for (const p of panes) {
-              const pi = p.rows.indexOf(entry);
-              if (pi !== -1) p.rows.splice(pi, 1);
+            for (let i = 0; i < panes.length; i++) {
+              const pi = panes[i].rows.indexOf(entry);
+              if (pi !== -1) panes[i].rows.splice(pi, 1);
             }
           };
 
@@ -427,11 +435,16 @@
 
         function syncFieldAcrossPanes(changedEntry, storageName, displayName) {
           if (changedEntry.type !== "filter" || changedEntry.isPhrase) return;
-          const srcPane = panes.find(function(p) { return p.index === changedEntry.paneIndex; });
-          if (!srcPane) return;
-          const rowIdx = srcPane.rows.indexOf(changedEntry);
+          const srcPane = null;
+          let srcPaneObj = null;
+          for (let i = 0; i < panes.length; i++) {
+            if (panes[i].index === changedEntry.paneIndex) { srcPaneObj = panes[i]; break; }
+          }
+          if (!srcPaneObj) return;
+          const rowIdx = srcPaneObj.rows.indexOf(changedEntry);
           if (rowIdx === -1) return;
-          for (const pane of panes) {
+          for (let i = 0; i < panes.length; i++) {
+            const pane = panes[i];
             if (pane.index === changedEntry.paneIndex) continue;
             const parallel = pane.rows[rowIdx];
             if (!parallel || parallel.isPhrase) continue;
@@ -446,16 +459,19 @@
             const firstChild = keyRowsContainer.firstChild;
             removeAdjacentAndLabel(entry.rowEl);
             entry.rowEl.remove();
-            for (const p of panes) {
-              const pi = p.rows.indexOf(entry);
-              if (pi !== -1) p.rows.splice(pi, 1);
+            for (let i = 0; i < panes.length; i++) {
+              const pi = panes[i].rows.indexOf(entry);
+              if (pi !== -1) panes[i].rows.splice(pi, 1);
             }
             entry.paneIndex = -1;
             flipAnimate(entry.rowEl, keyRowsContainer, firstChild, 260);
           } else {
             entry.rowEl.remove();
             entry.paneIndex = activePaneIndex;
-            const targetPane = panes[activePaneIndex];
+            let targetPane = null;
+            for (let i = 0; i < panes.length; i++) {
+              if (panes[i].index === activePaneIndex) { targetPane = panes[i]; break; }
+            }
             if (targetPane) {
               const firstRow = targetPane.rowsContainer.firstChild;
               if (firstRow) {
@@ -466,7 +482,8 @@
                 flipAnimate(entry.rowEl, targetPane.rowsContainer, null, 260);
               }
               targetPane.rows.unshift(entry);
-              for (const pane of panes) {
+              for (let i = 0; i < panes.length; i++) {
+                const pane = panes[i];
                 if (pane.index === activePaneIndex) continue;
                 const newEntry = buildRowEntry(entry.picker ? entry.picker.getStorageName() : "", "filter", entry.isPhrase);
                 newEntry.paneIndex = pane.index;
@@ -604,9 +621,13 @@
           while (panes.length > 1) {
             const last = panes[panes.length - 1];
             if (last.index === activePaneIndex) break;
-            if (last.rows.some(function(r) { return r.valueInput.value.trim().length > 0; })) break;
-            for (const r of last.rows) {
-              const idx = allRows.indexOf(r);
+            let hasVal = false;
+            for (let i = 0; i < last.rows.length; i++) {
+              if (last.rows[i].valueInput.value.trim().length > 0) { hasVal = true; break; }
+            }
+            if (hasVal) break;
+            for (let i = 0; i < last.rows.length; i++) {
+              const idx = allRows.indexOf(last.rows[i]);
               if (idx !== -1) allRows.splice(idx, 1);
             }
             if (last.el.parentNode) last.el.parentNode.removeChild(last.el);
@@ -626,10 +647,10 @@
         function resizePanes() {
           if (!carouselViewport) return;
           const pw = getPaneWidth();
-          for (const p of panes) {
-            p.el.style.width = pw + "px";
-            p.el.style.minWidth = pw + "px";
-            p.el.style.marginRight = GAP + "px";
+          for (let i = 0; i < panes.length; i++) {
+            panes[i].el.style.width = pw + "px";
+            panes[i].el.style.minWidth = pw + "px";
+            panes[i].el.style.marginRight = GAP + "px";
           }
           if (ghostPaneEl) {
             ghostPaneEl.style.width = pw + "px";
@@ -651,7 +672,8 @@
 
         function applySlideTransform(index, animate) {
           const pw = getPaneWidth();
-          const leftPeekOffset = index > 0 ? Math.round(PEEK / 2) : 0;
+          // Shift right by PEEK*0.75 when not on pane 0 to show left peek symmetrically
+          const leftPeekOffset = index > 0 ? Math.round(PEEK * 0.75) : 0;
           const tx = -(index * (pw + GAP)) + leftPeekOffset;
           carouselTrack.style.transition = animate ? "transform 0.4s cubic-bezier(0.4,0,0.2,1)" : "none";
           carouselTrack.style.transform = "translateX(" + tx + "px)";
@@ -674,6 +696,54 @@
               else { r.toggle.unlock(); r.locked = false; }
             }
           });
+        }
+
+        // ── Date focus animation ───────────────────────────────────────────────────
+        // Translucent mask over whole card, gold border slams down over date section.
+        // Clears on first click anywhere.
+        function attachDateFocusAnimation(card, dateWrap) {
+          // Overlay dims everything
+          const overlay = el("div", { style: "position:absolute;inset:0;background:rgba(15,23,42,0.38);border-radius:14px;z-index:500;pointer-events:auto;transition:opacity 0.35s ease;" });
+          // Cutout: a transparent hole over the date region is faked by a highlight box
+          const highlight = el("div", { style: "position:absolute;left:0;right:0;border-radius:8px;z-index:501;pointer-events:none;box-sizing:border-box;border:0px solid #f59e0b;box-shadow:0 0 0 0 rgba(245,158,11,0);transition:border-width 0.18s cubic-bezier(0.2,1.6,0.4,1),box-shadow 0.22s ease,opacity 0.35s ease;" });
+          card.style.position = "relative";
+          card.appendChild(overlay);
+          card.appendChild(highlight);
+
+          // Position highlight over date section after layout
+          requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+              const cardRect = card.getBoundingClientRect();
+              const dateRect = dateWrap.getBoundingClientRect();
+              const top = dateRect.top - cardRect.top - 4;
+              const height = dateRect.height + 8;
+              highlight.style.top = top + "px";
+              highlight.style.height = height + "px";
+              highlight.style.left = "12px";
+              highlight.style.right = "12px";
+              // Slam animation: border shoots in
+              requestAnimationFrame(function() {
+                highlight.style.border = "2.5px solid #f59e0b";
+                highlight.style.boxShadow = "0 0 18px 4px rgba(245,158,11,0.28)";
+              });
+            });
+          });
+
+          function dismiss() {
+            overlay.style.opacity = "0";
+            highlight.style.opacity = "0";
+            setTimeout(function() {
+              try { overlay.remove(); } catch (_) {}
+              try { highlight.remove(); } catch (_) {}
+            }, 360);
+            card.removeEventListener("click", dismiss);
+            card.removeEventListener("mousedown", dismiss);
+          }
+
+          // Small delay so it doesn't dismiss on the same click that opened the modal
+          setTimeout(function() {
+            card.addEventListener("mousedown", dismiss);
+          }, 400);
         }
 
         // ── Modal ──────────────────────────────────────────────────────────────────
@@ -754,12 +824,14 @@
 
         requestAnimationFrame(function() {
           resizePanes();
-          for (const sn of DEFAULT_KEY_LIST) {
-            const e = buildRowEntry(sn, "key", false);
+          for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
+            const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
             e.paneIndex = -1;
             keyRowsContainer.appendChild(e.rowEl);
           }
           updateDots();
+          // Attach date focus animation after layout
+          attachDateFocusAnimation(card, dateRow);
         });
 
         window.addEventListener("resize", resizePanes);
@@ -878,7 +950,9 @@
         }
 
         function normalizeKeywordValues(pn, vals) {
-          if (normalizeParamName(pn) === "UDFVarchar120") return vals.map(function(v) { return String(v).toLowerCase(); });
+          if (normalizeParamName(pn) === "UDFVarchar120") {
+            return vals.map(function(v) { return String(v).toLowerCase(); });
+          }
           return vals;
         }
 
@@ -915,22 +989,27 @@
           if (!want) return "";
           if (rowObj[want] !== undefined && rowObj[want] !== null) return String(rowObj[want]);
           const lower = want.toLowerCase();
-          for (const k of Object.keys(rowObj)) {
-            if (k.toLowerCase() === lower && rowObj[k] !== null) return String(rowObj[k]);
+          const keys1 = Object.keys(rowObj);
+          for (let i = 0; i < keys1.length; i++) {
+            if (keys1[i].toLowerCase() === lower && rowObj[keys1[i]] !== null) return String(rowObj[keys1[i]]);
           }
-          for (const c of [rowObj.fields, rowObj.values, rowObj.data]) {
+          const containers = [rowObj.fields, rowObj.values, rowObj.data];
+          for (let ci = 0; ci < containers.length; ci++) {
+            const c = containers[ci];
             if (!c || typeof c !== "object") continue;
             if (c[want] !== undefined && c[want] !== null) return String(c[want]);
-            for (const k of Object.keys(c)) {
-              if (k.toLowerCase() === lower && c[k] !== null) return String(c[k]);
+            const keys2 = Object.keys(c);
+            for (let i = 0; i < keys2.length; i++) {
+              if (keys2[i].toLowerCase() === lower && c[keys2[i]] !== null) return String(c[keys2[i]]);
             }
           }
           return "";
         }
 
         function getAppInstanceIdFromCurrentPageSource() {
-          for (const s of document.querySelectorAll("script")) {
-            const m = (s.textContent || "").match(/"appInstanceId"\s*:\s*"([^"]+)"/);
+          const scripts = document.querySelectorAll("script");
+          for (let i = 0; i < scripts.length; i++) {
+            const m = (scripts[i].textContent || "").match(/"appInstanceId"\s*:\s*"([^"]+)"/);
             if (m) return m[1];
           }
           return null;
@@ -970,11 +1049,13 @@
           if (!res.ok) throw new Error("SettingsDialog fetch failed");
           const html = await res.text();
           const doc = new DOMParser().parseFromString(html, "text/html");
-          const ctl10 = doc.querySelector('input[name="ctl10"]') ? (doc.querySelector('input[name="ctl10"]').getAttribute("value") || doc.querySelector('input[name="ctl10"]').value || "") : "";
+          const inp = doc.querySelector('input[name="ctl10"]');
+          const ctl10 = inp ? (inp.getAttribute("value") || inp.value || "") : "";
           if (!ctl10) throw new Error("ctl10 not found");
           const fields = [], headers = [], seen = new Set();
-          for (const entry of ctl10.split(",")) {
-            const parts = entry.split("|");
+          const entries = ctl10.split(",");
+          for (let i = 0; i < entries.length; i++) {
+            const parts = entries[i].split("|");
             if (parts.length < 2) continue;
             const label = parts[0].trim();
             const rawKey = parts[1].trim();
@@ -993,12 +1074,13 @@
           return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         }
 
+        // normalizeCellText: blank/asterisk/all-zeros → "0"; otherwise return raw value
         function normalizeCellText(raw) {
           let s = (raw === null || raw === undefined) ? "" : String(raw);
           s = s.trim();
-          if (!s) return "";
-          if (s.includes("*")) return "";
-          if (/^0+$/.test(s)) return "";
+          if (!s) return "0";
+          if (s.includes("*")) return "0";
+          if (/^0+$/.test(s)) return "0";
           return s;
         }
 
@@ -1006,7 +1088,7 @@
 
         function toNumberOrNull(raw) {
           const s = String(raw == null ? "" : raw).trim();
-          if (!s) return null;
+          if (!s || s === "0") return null;
           const n = Number(s);
           return isFinite(n) ? n : null;
         }
@@ -1040,20 +1122,22 @@
 
         function buildColGroup(headers, rows, exportFields) {
           const maxLens = headers.map(function(h) { return String(h == null ? "" : h).length; });
-          for (const rr of rows) {
-            const phrases = rr.phrases || [];
+          for (let ri = 0; ri < rows.length; ri++) {
+            const phrases = rows[ri].phrases || [];
             for (let c = 0; c < exportFields.length; c++) {
               const k = exportFields[c];
               let raw;
               if (k.startsWith("__PHRASE_")) {
                 raw = normalizeCellText(phrases[parseInt(k.replace(/\D/g, ""), 10) - 1] || "");
               } else {
-                raw = normalizeCellText(getFieldValue(rr.row, k));
+                raw = normalizeCellText(getFieldValue(rows[ri].row, k));
               }
               maxLens[c] = Math.max(maxLens[c] || 8, estimateDisplayLen(k, raw));
             }
           }
-          return "<colgroup>" + maxLens.map(function(len) { return '<col style="width:' + clamp(Math.round(len * 6.5 + 16), 50, 520) + 'px">'; }).join("") + "</colgroup>";
+          return "<colgroup>" + maxLens.map(function(len) {
+            return '<col style="width:' + clamp(Math.round(len * 6.5 + 16), 50, 520) + 'px">';
+          }).join("") + "</colgroup>";
         }
 
         function downloadExcelFile(filename, html) {
@@ -1071,17 +1155,35 @@
         function isDateTimeField(k) { return String(k || "").toLowerCase() === "recordeddatetime"; }
         function isDurationField(k) { return String(k || "").toLowerCase() === "mediafileduration"; }
         function isHoldField(k) { return String(k || "").toLowerCase() === "udfint4"; }
-        function isSentimentField(k) { const lk = String(k || "").toLowerCase(); return lk === "sentimentscore" || lk === "overallsentimentscore"; }
+        function isSentimentField(k) {
+          const lk = String(k || "").toLowerCase();
+          return lk === "sentimentscore" || lk === "overallsentimentscore";
+        }
+        function isForceTextField(k) { return FORCE_TEXT_FIELDS.has(String(k || "")); }
 
-//##> EXCEL EXPORT: HTML-table XLS format. Date/Time uses Excel serial + mso-number-format
-//##> for m/d/yyyy h:mm display. Duration uses serial seconds/86400 + [h]:mm:ss format.
-//##> Freeze pane on row 1 via MSO XML workbook instructions. Plain <td> cells only —
-//##> no formula markup, no hidden sheets. normalizeCellText strips asterisks and all-zero
-//##> values to empty string before output.
+//##> EXCEL EXPORT: HTML-table XLS format.
+//##> Date/Time: Excel serial number + mso-number-format m/d/yyyy h:mm
+//##> Duration: serial (seconds/86400) + mso-number-format h:mm:ss (no brackets — calls never exceed 24h)
+//##> Hold Time: integer seconds, plain number format
+//##> Sentiment: decimal 2dp
+//##> Force-text fields (UDFVarchar1 etc): x:str attribute prevents scientific notation
+//##> normalizeCellText: blank/asterisk/all-zeros → "0"; no empty cells
+//##> Freeze pane row 1 via MSO XML workbook block
+//##> Search column prepended only when 2+ distinct phrase labels exist in results
         function buildExcelHtml(exportHeaders, exportFields, finalRows, phraseKeys) {
-          const css = "table{border-collapse:collapse}td,th{padding:4px 8px;font-family:\"Aptos Narrow\",\"Aptos\",Calibri,Arial,sans-serif;font-size:10pt;text-align:left;vertical-align:bottom;white-space:nowrap;border:none}th{font-weight:700}.dt{mso-number-format:\"m\\\\/d\\\\/yyyy\\\\ h\\\\:mm\"}.dur{mso-number-format:\"\\\\[h\\\\]\\\\:mm\\\\:ss\"}.int{mso-number-format:\"0\"}.dec2{mso-number-format:\"0.00\"}";
+          const css = [
+            "table{border-collapse:collapse}",
+            "td,th{padding:4px 8px;font-family:\"Aptos Narrow\",\"Aptos\",Calibri,Arial,sans-serif;font-size:10pt;text-align:left;vertical-align:bottom;white-space:nowrap;border:none}",
+            "th{font-weight:700}",
+            ".dt{mso-number-format:\"m\\/d\\/yyyy\\ h\\:mm\"}",
+            ".dur{mso-number-format:\"h\\:mm\\:ss\"}",
+            ".int{mso-number-format:\"0\"}",
+            ".dec2{mso-number-format:\"0.00\"}"
+          ].join("");
+
           const colGroup = buildColGroup(exportHeaders, finalRows, exportFields);
           const headerCells = exportHeaders.map(function(h) { return "<th>" + escapeHtml(h) + "</th>"; }).join("");
+
           const bodyRows = finalRows.map(function(item) {
             const r = item.row;
             const phrases = item.phrases;
@@ -1089,40 +1191,59 @@
               if (k.startsWith("__PHRASE_")) {
                 const idx = parseInt(k.replace(/\D/g, ""), 10) - 1;
                 const val = normalizeCellText(phrases && phrases[idx] ? phrases[idx] : "");
-                return "<td>" + escapeHtml(val) + "</td>";
+                return '<td x:str="' + escapeHtml(val) + '">' + escapeHtml(val) + "</td>";
               }
+
               const raw = normalizeCellText(getFieldValue(r, k));
+
               if (isDateTimeField(k)) {
-                if (!raw) return '<td class="dt"></td>';
+                if (raw === "0") return '<td class="dt" x:num="0">0</td>';
                 const serial = excelSerialFromDate(new Date(raw));
-                if (serial === null) return '<td class="dt">' + escapeHtml(raw) + "</td>";
+                if (serial === null) return '<td class="dt" x:str="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</td>";
                 return '<td class="dt" x:num="' + serial + '">' + serial + "</td>";
               }
+
               if (isDurationField(k)) {
-                if (!raw) return '<td class="dur"></td>';
+                if (raw === "0") return '<td class="dur" x:num="0">0</td>';
                 const sec = secondsFromMillisish(raw);
                 const serial = sec === null ? null : excelSerialFromSeconds(sec);
-                if (serial === null) return '<td class="dur">' + escapeHtml(raw) + "</td>";
+                if (serial === null) return '<td class="dur" x:str="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</td>";
                 return '<td class="dur" x:num="' + serial + '">' + serial + "</td>";
               }
+
               if (isHoldField(k)) {
-                if (!raw) return '<td class="int"></td>';
+                if (raw === "0") return '<td class="int" x:num="0">0</td>';
                 const sec = secondsFromMillisish(raw);
-                if (sec === null) return '<td class="int"></td>';
+                if (sec === null) return '<td class="int" x:num="0">0</td>';
                 const n = String(Math.round(sec));
                 return '<td class="int" x:num="' + n + '">' + n + "</td>";
               }
+
               if (isSentimentField(k)) {
-                if (!raw) return '<td class="dec2"></td>';
+                if (raw === "0") return '<td class="dec2" x:num="0">0</td>';
                 const n0 = toNumberOrNull(raw);
-                if (n0 === null) return "<td>" + escapeHtml(raw) + "</td>";
+                if (n0 === null) return '<td x:str="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</td>";
                 return '<td class="dec2" x:num="' + n0 + '">' + n0 + "</td>";
               }
+
+              if (isForceTextField(k)) {
+                return '<td x:str="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</td>";
+              }
+
               return "<td>" + escapeHtml(raw) + "</td>";
             }).join("");
+
             return "<tr>" + tds + "</tr>";
           }).join("\n");
-          return '<?mso-application progid="Excel.Sheet"?><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"/><style>' + css + '</style><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Results</x:Name><x:WorksheetOptions><x:FreezePanes/><x:FrozenNoSplit/><x:SplitHorizontal>1</x:SplitHorizontal><x:TopRowBottomPane>1</x:TopRowBottomPane><x:ActivePane>2</x:ActivePane></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml></head><body><table>' + colGroup + "<tr>" + headerCells + "</tr>" + bodyRows + "</table></body></html>";
+
+          return '<?mso-application progid="Excel.Sheet"?>' +
+            '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">' +
+            '<head><meta charset="utf-8"/><style>' + css + '</style>' +
+            '<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Results</x:Name>' +
+            '<x:WorksheetOptions><x:FreezePanes/><x:FrozenNoSplit/><x:SplitHorizontal>1</x:SplitHorizontal>' +
+            '<x:TopRowBottomPane>1</x:TopRowBottomPane><x:ActivePane>2</x:ActivePane>' +
+            '</x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>' +
+            '</head><body><table>' + colGroup + "<tr>" + headerCells + "</tr>" + bodyRows + "</table></body></html>";
         }
 
         // ── Column prefs ───────────────────────────────────────────────────────────
@@ -1148,7 +1269,7 @@
         }
 
         // ── Search executor ────────────────────────────────────────────────────────
-        async function executeSearch(runSets, baseFields, baseHeaders, dateFilter, labelPrefix) {
+        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix) {
           const merged = new Map();
           const passthroughNoKey = [];
           let totalFetched = 0;
@@ -1161,7 +1282,8 @@
             const label = runSet.label;
             const phraseExpansions = phraseGroups.length > 0 ? phraseGroups : [{ group: null, display: label }];
 
-            for (const expansion of phraseExpansions) {
+            for (let ei = 0; ei < phraseExpansions.length; ei++) {
+              const expansion = phraseExpansions[ei];
               const phraseGroup = expansion.group;
               const phraseDisplay = expansion.display;
               progressUI.set("Searching (" + labelPrefix + " " + (si + 1) + "/" + totalRuns + ")...", 25, "");
@@ -1209,7 +1331,7 @@
                 const rows = pickRows(sr.json);
                 if (!rows.length) break;
 
-                setRows.push.apply(setRows, rows);
+                for (let ri = 0; ri < rows.length; ri++) setRows.push(rows[ri]);
                 totalFetched += rows.length;
                 progressUI.set(
                   "Searching (" + labelPrefix + " " + (si + 1) + "/" + totalRuns + ")...",
@@ -1223,9 +1345,10 @@
               }
 
               const rowLabel = phraseDisplay || label;
-              for (const r of setRows) {
+              for (let ri = 0; ri < setRows.length; ri++) {
+                const r = setRows[ri];
                 const transId = normalizeCellText(getFieldValue(r, "UDFVarchar110"));
-                if (!transId) {
+                if (!transId || transId === "0") {
                   passthroughNoKey.push({ row: r, phrases: [rowLabel] });
                   continue;
                 }
@@ -1234,11 +1357,12 @@
                   merged.set(transId, { row: r, phrases: [rowLabel] });
                 } else {
                   if (!existing.phrases.includes(rowLabel)) existing.phrases.push(rowLabel);
-                  for (const k of baseFields) {
+                  for (let fi = 0; fi < baseFields.length; fi++) {
+                    const k = baseFields[fi];
                     const cur = normalizeCellText(getFieldValue(existing.row, k));
-                    if (cur) continue;
+                    if (cur && cur !== "0") continue;
                     const nxt = normalizeCellText(getFieldValue(r, k));
-                    if (nxt) existing.row[k] = nxt;
+                    if (nxt && nxt !== "0") existing.row[k] = nxt;
                   }
                 }
               }
@@ -1247,37 +1371,50 @@
 
           const finalRows = [];
           let maxPhraseCols = 1;
+          // Count distinct phrase labels across all rows
+          let distinctLabels = new Set();
           for (const v of merged.values()) {
+            for (let i = 0; i < v.phrases.length; i++) distinctLabels.add(v.phrases[i]);
             if (v.phrases.length > maxPhraseCols) maxPhraseCols = v.phrases.length;
             finalRows.push(v);
           }
-          for (const p of passthroughNoKey) {
+          for (let i = 0; i < passthroughNoKey.length; i++) {
+            const p = passthroughNoKey[i];
+            for (let j = 0; j < p.phrases.length; j++) distinctLabels.add(p.phrases[j]);
             if (p.phrases.length > maxPhraseCols) maxPhraseCols = p.phrases.length;
             finalRows.push(p);
           }
-          return { finalRows: finalRows, maxPhraseCols: maxPhraseCols };
+
+          // Only include phrase columns if there are 2+ distinct phrase labels
+          const includePhraseCol = distinctLabels.size >= 2;
+
+          return { finalRows: finalRows, maxPhraseCols: maxPhraseCols, includePhraseCol: includePhraseCol };
         }
 
         function buildPhraseGroups(phraseEntries) {
           const groups = [];
-          for (const entry of phraseEntries) {
-            const lines = splitValues(entry.valueInput.value);
-            for (const line of lines) {
-              groups.push({ group: buildTextFilter(line), display: '"' + line + '"' });
+          for (let i = 0; i < phraseEntries.length; i++) {
+            const lines = splitValues(phraseEntries[i].valueInput.value);
+            for (let j = 0; j < lines.length; j++) {
+              groups.push({ group: buildTextFilter(lines[j]), display: '"' + lines[j] + '"' });
             }
           }
           return groups;
         }
 
-        function buildRunOutput(finalRows, maxPhraseCols, baseHeaders, baseFields) {
-          const phraseHeaders = [];
-          const phraseKeys = [];
-          for (let i = 1; i <= maxPhraseCols; i++) {
-            phraseHeaders.push(i === 1 ? "Search" : "Search" + i);
-            phraseKeys.push("__PHRASE_" + i + "__");
+        function buildRunOutput(finalRows, maxPhraseCols, includePhraseCol, baseHeaders, baseFields) {
+          let exportHeaders = baseHeaders;
+          let exportFields = baseFields;
+          let phraseKeys = [];
+          if (includePhraseCol) {
+            const phraseHeaders = [];
+            for (let i = 1; i <= maxPhraseCols; i++) {
+              phraseHeaders.push(i === 1 ? "Search" : "Search" + i);
+              phraseKeys.push("__PHRASE_" + i + "__");
+            }
+            exportHeaders = phraseHeaders.concat(baseHeaders);
+            exportFields = phraseKeys.concat(baseFields);
           }
-          const exportHeaders = phraseHeaders.concat(baseHeaders);
-          const exportFields = phraseKeys.concat(baseFields);
           return buildExcelHtml(exportHeaders, exportFields, finalRows, phraseKeys);
         }
 
@@ -1288,14 +1425,19 @@
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
 
-            const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
-            const runSets = [];
+            const dateFilter = {
+              parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE",
+              value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) }
+            };
 
-            for (const pane of panes) {
+            const runSets = [];
+            for (let pi = 0; pi < panes.length; pi++) {
+              const pane = panes[pi];
               const filterEntries = allRows.filter(function(r) { return r.type === "filter" && !r.isPhrase && r.paneIndex === pane.index; });
               const phraseEntries = allRows.filter(function(r) { return r.type === "filter" && r.isPhrase && r.paneIndex === pane.index; });
               const kwFilters = [];
-              for (const e of filterEntries) {
+              for (let i = 0; i < filterEntries.length; i++) {
+                const e = filterEntries[i];
                 const sn = e.picker ? e.picker.getStorageName() : "";
                 const val = e.valueInput.value.trim();
                 if (sn && val) kwFilters.push(buildKeywordFilter(sn, splitValues(val)));
@@ -1321,17 +1463,14 @@
             const baseFields = colPrefs.fields;
             const baseHeaders = colPrefs.headers;
 
-            const result = await executeSearch(runSets, baseFields, baseHeaders, dateFilter, "Filter");
-            const finalRows = result.finalRows;
-            const maxPhraseCols = result.maxPhraseCols;
+            const result = await executeSearch(runSets, baseFields, dateFilter, "Filter");
+            if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
 
-            if (!finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
-
-            progressUI.set("Building export...", 85, "Rows: " + finalRows.length);
-            const htmlOut = buildRunOutput(finalRows, maxPhraseCols, baseHeaders, baseFields);
+            progressUI.set("Building export...", 85, "Rows: " + result.finalRows.length);
+            const htmlOut = buildRunOutput(result.finalRows, result.maxPhraseCols, result.includePhraseCol, baseHeaders, baseFields);
             const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
             downloadExcelFile("nexidia_filter_search_" + stamp + ".xls", htmlOut);
-            progressUI.set("Done.", 100, "Exported " + finalRows.length + " rows");
+            progressUI.set("Done.", 100, "Exported " + result.finalRows.length + " rows");
 
           } catch (err) {
             console.error(err);
@@ -1347,12 +1486,17 @@
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
 
-            const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
+            const dateFilter = {
+              parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE",
+              value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) }
+            };
+
             const keyEntries = allRows.filter(function(r) { return r.type === "key" && !r.isPhrase; });
             const keyPhraseEntries = allRows.filter(function(r) { return r.type === "key" && r.isPhrase; });
             const kwFilters = [];
 
-            for (const e of keyEntries) {
+            for (let i = 0; i < keyEntries.length; i++) {
+              const e = keyEntries[i];
               const sn = e.picker ? e.picker.getStorageName() : "";
               const val = e.valueInput.value.trim();
               if (sn && val) kwFilters.push(buildKeywordFilter(sn, splitValues(val)));
@@ -1376,17 +1520,14 @@
             const baseHeaders = colPrefs.headers;
 
             const runSets = [{ keywordGroup: keywordGroup, phraseGroups: phraseGroups, label: "Key Search" }];
-            const result = await executeSearch(runSets, baseFields, baseHeaders, dateFilter, "Key");
-            const finalRows = result.finalRows;
-            const maxPhraseCols = result.maxPhraseCols;
+            const result = await executeSearch(runSets, baseFields, dateFilter, "Key");
+            if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
 
-            if (!finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
-
-            progressUI.set("Building export...", 85, "Rows: " + finalRows.length);
-            const htmlOut = buildRunOutput(finalRows, maxPhraseCols, baseHeaders, baseFields);
+            progressUI.set("Building export...", 85, "Rows: " + result.finalRows.length);
+            const htmlOut = buildRunOutput(result.finalRows, result.maxPhraseCols, result.includePhraseCol, baseHeaders, baseFields);
             const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
             downloadExcelFile("nexidia_key_search_" + stamp + ".xls", htmlOut);
-            progressUI.set("Done.", 100, "Exported " + finalRows.length + " rows");
+            progressUI.set("Done.", 100, "Exported " + result.finalRows.length + " rows");
 
           } catch (err) {
             console.error(err);
