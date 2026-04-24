@@ -4,6 +4,7 @@
     "app/core/registry.js",
     "app/searchExport.js",
     "app/transcripts/batchBuilder.js",
+    "app/grid/resultsGrid.js",
     "app/entry.js"
   ]
 }
