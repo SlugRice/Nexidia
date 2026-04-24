@@ -153,7 +153,15 @@
 
           var overlay = document.createElement("div");
           overlay.setAttribute("data-date-overlay", "1");
-          overlay.style.cssText = "position:absolute;inset:0;background:rgba(15,23,42,0.42);border-radius:14px;z-index:500;pointer-events:auto;transition:opacity 0.32s ease;opacity:0;";
+          overlay.style.cssText = "position:absolute;inset:0;background:transparent;border-radius:14px;z-index:500;pointer-events:auto;transition:opacity 0.32s ease;opacity:0;";
+          var overlayTop = document.createElement("div");
+          overlayTop.setAttribute("data-date-overlay","1");
+          overlayTop.style.cssText = "position:absolute;left:0;right:0;top:0;background:rgba(15,23,42,0.42);z-index:500;pointer-events:none;transition:opacity 0.32s ease;";
+          var overlayBottom = document.createElement("div");
+          overlayBottom.setAttribute("data-date-overlay","1");
+          overlayBottom.style.cssText = "position:absolute;left:0;right:0;bottom:0;background:rgba(15,23,42,0.42);z-index:500;pointer-events:none;transition:opacity 0.32s ease;";
+          card.appendChild(overlayTop);
+          card.appendChild(overlayBottom);
 
           var highlight = document.createElement("div");
           highlight.setAttribute("data-date-overlay", "1");
@@ -163,18 +171,26 @@
           card.appendChild(highlight);
 
           function position() {
-            var cardRect = card.getBoundingClientRect();
-            var secRect = dateSectionEl.getBoundingClientRect();
-            var pad = 10;
-            highlight.style.top = (secRect.top - cardRect.top + card.scrollTop - pad) + "px";
-            highlight.style.left = (secRect.left - cardRect.left - pad) + "px";
-            highlight.style.width = (secRect.width + pad * 2) + "px";
-            highlight.style.height = (secRect.height + pad * 2) + "px";
+              var cardRect = card.getBoundingClientRect();
+              var secRect = dateSectionEl.getBoundingClientRect();
+              var pad = 10;
+              var topPx = secRect.top - cardRect.top + card.scrollTop - pad;
+              var heightPx = secRect.height + pad * 2;
+              highlight.style.top = topPx + "px";
+              highlight.style.left = (secRect.left - cardRect.left - pad) + "px";
+              highlight.style.width = (secRect.width + pad * 2) + "px";
+              highlight.style.height = heightPx + "px";
+              overlayTop.style.top = "0px";
+              overlayTop.style.height = topPx + "px";
+              overlayBottom.style.top = (topPx + heightPx) + "px";
+              overlayBottom.style.height = "calc(100% - " + (topPx + heightPx) + "px)";
           }
 
           function dismiss() {
             overlay.style.opacity = "0";
             highlight.style.opacity = "0";
+            overlayTop.style.opacity = "0";
+            overlayBottom.style.opacity = "0";
             setTimeout(function() {
               try { overlay.remove(); } catch (_) {}
               try { highlight.remove(); } catch (_) {}
