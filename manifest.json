@@ -1,8 +1,11 @@
 {
-  "version": "0.0.5",
+  "version": "0.0.6",
   "entry": [
     "app/core/registry.js",
-    "app/searchExport.js",
+    "app/core/columnPrefs.js",
+    "app/search.js",
+    "app/dispatcher.js",
+    "app/export.js",
     "app/transcripts/batchBuilder.js",
     "app/grid/resultsGrid.js",
     "app/entry.js"
