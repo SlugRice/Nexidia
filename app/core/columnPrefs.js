@@ -8,7 +8,7 @@
 
   const HIDDEN_FIELDS = new Set(["sourceMediaId"]);
 
-  //##> KEY_TRANSLATIONS: Full ctl10 source-to-API field name map (168 entries).
+  //##> KEY_TRANSLATIONS: Full ctl10 source-to-API field name map (239 entries).
   //##> Source: ctl10.csv. Covers all known UDF and named fields.
   //##> This is the authoritative translation layer between legacy storage keys
   //##> and Explore API field names. Do not remove or simplify entries.
@@ -285,20 +285,26 @@
     return out;
   }
 
+  function ensureRequiredFields(fields, headers) {
+    if (!fields.includes("sourceMediaId")) { fields.push("sourceMediaId"); headers.push("sourceMediaId"); }
+    if (!fields.includes("UDFVarchar110")) { fields.push("UDFVarchar110"); headers.push("Trans_Id"); }
+  }
+
   function getDefaults() {
     const fields = DEFAULT_FIELDS.slice();
     const headers = DEFAULT_HEADERS.slice();
-    if (!fields.includes("sourceMediaId")) {
-      fields.push("sourceMediaId");
-      headers.push("sourceMediaId");
-    }
-    if (!fields.includes("UDFVarchar110")) {
-      fields.push("UDFVarchar110");
-      headers.push("Trans_Id");
-    }
+    ensureRequiredFields(fields, headers);
     return { fields, headers, source: "default" };
   }
 
+  // ── appInstanceId resolution ─────────────────────────────────────────────
+  // Tries DOM first (fast), then page fetch, then legacy forms page.
+  // DOM read is retried with a short delay to handle cases where the page
+  // scripts haven't fully rendered by the time columnPrefs evals.
+  //##> TIMING FIX: bootstrap evals columnPrefs.js before the Nexidia page
+  //##> scripts finish rendering, so the first DOM read often finds nothing.
+  //##> The 300ms retry gives the page time to settle before falling back to
+  //##> a full page fetch. Do not remove the retry without testing on a cold load.
   function getAppInstanceIdFromDOM() {
     const scripts = document.querySelectorAll("script");
     for (let i = 0; i < scripts.length; i++) {
@@ -317,13 +323,25 @@
   }
 
   async function getAppInstanceId() {
-    const fromDOM = getAppInstanceIdFromDOM();
-    if (fromDOM) return fromDOM;
+    // First attempt — DOM, immediate
+    const first = getAppInstanceIdFromDOM();
+    if (first) return first;
+
+    // Second attempt — DOM after short delay to let page scripts settle
+    await new Promise((r) => setTimeout(r, 300));
+    const second = getAppInstanceIdFromDOM();
+    if (second) return second;
+
+    // Third attempt — fetch current page HTML
     try { return await getAppInstanceIdViaFetch(location.href); } catch (_) {}
+
+    // Fourth attempt — fetch legacy search page directly
     try { return await getAppInstanceIdViaFetch(LEGACY_FORMS_URL); } catch (_) {}
-    throw new Error("Could not determine appInstanceId. Launch from the legacy Nexidia search page.");
+
+    throw new Error("Could not determine appInstanceId.");
   }
 
+  // ── ctl10 fetch and parse ────────────────────────────────────────────────
   async function fetchLegacyColumns(appInstanceId) {
     const res = await fetch(SETTINGS_URL(appInstanceId), { credentials: "include" });
     if (!res.ok) throw new Error("SettingsDialog fetch failed: " + res.status);
@@ -346,17 +364,11 @@
       headers.push(label);
     }
     if (!fields.length) throw new Error("ctl10 parsed but yielded no valid fields.");
-    if (!fields.includes("sourceMediaId")) {
-      fields.push("sourceMediaId");
-      headers.push("sourceMediaId");
-    }
-    if (!fields.includes("UDFVarchar110")) {
-      fields.push("UDFVarchar110");
-      headers.push("Trans_Id");
-    }
+    ensureRequiredFields(fields, headers);
     return { fields, headers, source: "legacy" };
   }
 
+  // ── Load ─────────────────────────────────────────────────────────────────
   async function load() {
     try {
       const appInstanceId = await getAppInstanceId();
