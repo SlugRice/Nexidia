@@ -13,6 +13,7 @@
 
         const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
         const hiddenFields = api.getShared("hiddenFields") || new Set(["sourceMediaId"]);
+        const xls = api.getShared("xlsBuilder");
 
         const BASE_SEARCH_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search";
         const PLAYER_URL = (smid) => `https://apug01.nxondemand.com/NxIA/ui/explore/(search//player:player/${encodeURIComponent(smid)})`;
@@ -30,26 +31,28 @@
         };
 
         function getFieldValue(rowObj, key) {
+          if (xls) return xls.getFieldValue(rowObj, key);
           if (!rowObj) return "";
           const want = String(key || "");
           if (!want) return "";
           if (rowObj[want] !== undefined && rowObj[want] !== null) return String(rowObj[want]);
           const lower = want.toLowerCase();
-          const keys1 = Object.keys(rowObj);
-          for (let i = 0; i < keys1.length; i++) {
-            if (keys1[i].toLowerCase() === lower && rowObj[keys1[i]] !== null) return String(rowObj[keys1[i]]);
-          }
-          const containers = [rowObj.fields, rowObj.values, rowObj.data];
-          for (let ci = 0; ci < containers.length; ci++) {
-            const c = containers[ci];
-            if (!c || typeof c !== "object") continue;
-            if (c[want] !== undefined && c[want] !== null) return String(c[want]);
-            const keys2 = Object.keys(c);
-            for (let i = 0; i < keys2.length; i++) {
-              if (keys2[i].toLowerCase() === lower && c[keys2[i]] !== null) return String(c[keys2[i]]);
-            }
+          for (const k of Object.keys(rowObj)) {
+            if (k.toLowerCase() === lower && rowObj[k] !== null) return String(rowObj[k]);
           }
           return "";
+        }
+
+        function normalizeCellText(raw) {
+          if (xls) return xls.normalizeCellText(raw);
+          let s = (raw === null || raw === undefined) ? "" : String(raw);
+          return s.trim();
+        }
+
+        function formatDisplay(fieldKey, raw) {
+          if (!raw || raw === "0") return raw || "";
+          if (xls && xls.formatDisplayValue) return xls.formatDisplayValue(fieldKey, raw);
+          return raw;
         }
 
         function getSourceMediaId(item) {
@@ -60,19 +63,26 @@
           return getFieldValue(r, "sourceMediaId") || null;
         }
 
-        function normalizeCellText(raw) {
-          let s = (raw === null || raw === undefined) ? "" : String(raw);
-          s = s.trim();
-          if (!s) return "";
-          return s;
+        function getCellValue(item, field) {
+          if (field.startsWith("__PHRASE_")) {
+            const idx = parseInt(field.replace(/\D/g, ""), 10) - 1;
+            return (item.phrases && item.phrases[idx]) ? item.phrases[idx] : "";
+          }
+          const r = item.row || item;
+          return normalizeCellText(getFieldValue(r, field));
+        }
+
+        function getCellDisplay(item, field) {
+          if (field.startsWith("__PHRASE_")) return getCellValue(item, field);
+          const r = item.row || item;
+          const raw = normalizeCellText(getFieldValue(r, field));
+          return formatDisplay(field, raw);
         }
 
         // ── State ────────────────────────────────────────────────────────────
-        // Build initial visible fields from colPrefs, excluding hidden
         const allFields = colPrefs.fields.filter((f) => !hiddenFields.has(f));
         const allHeaders = colPrefs.headers.filter((_, i) => !hiddenFields.has(colPrefs.fields[i]));
 
-        // Add phrase columns if present
         const phraseFields = [];
         const phraseHeaders = [];
         if (data.includePhraseCol) {
@@ -87,25 +97,20 @@
           fields: [...phraseFields, ...allFields],
           headers: [...phraseHeaders, ...allHeaders],
           visible: new Set([...phraseFields, ...allFields]),
-          sorts: [],        // [{ field, dir }] — index = tier (0 = primary)
-          columnFilters: {}, // { field: { op, value } }
+          sorts: [],
+          columnFilters: {},
           globalFilter: "",
           adHocPending: false
         };
 
-        // ── Sort logic ───────────────────────────────────────────────────────
-        // Clicking a new header promotes it to primary, cascades others down.
-        // Clicking the current primary reverses its direction.
-        // Badge X removes that sort tier entirely.
+        // ── Sort ─────────────────────────────────────────────────────────────
         function applySort(rows) {
           if (!state.sorts.length) return rows;
           return rows.slice().sort((a, b) => {
-            const ra = a.row || a;
-            const rb = b.row || b;
             for (let i = 0; i < state.sorts.length; i++) {
               const { field, dir } = state.sorts[i];
-              const va = normalizeCellText(getCellValue(a, field));
-              const vb = normalizeCellText(getCellValue(b, field));
+              const va = getCellValue(a, field);
+              const vb = getCellValue(b, field);
               if (va === vb) continue;
               const na = Number(va), nb = Number(vb);
               if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
@@ -118,17 +123,13 @@
         function handleHeaderClick(field) {
           const existing = state.sorts.findIndex((s) => s.field === field);
           if (existing === 0) {
-            // Already primary — flip direction
             state.sorts[0].dir *= -1;
           } else if (existing > 0) {
-            // Already a lower tier — promote to primary
             const [removed] = state.sorts.splice(existing, 1);
             removed.dir = 1;
             state.sorts.unshift(removed);
           } else {
-            // New field — promote to primary, cascade others down
             state.sorts.unshift({ field, dir: 1 });
-            // Cap at 3 tiers
             if (state.sorts.length > 3) state.sorts.length = 3;
           }
           renderSortBadges();
@@ -141,21 +142,12 @@
           renderTable();
         }
 
-        // ── Filter logic ─────────────────────────────────────────────────────
-        function getCellValue(item, field) {
-          if (field.startsWith("__PHRASE_")) {
-            const idx = parseInt(field.replace(/\D/g, ""), 10) - 1;
-            return (item.phrases && item.phrases[idx]) ? item.phrases[idx] : "";
-          }
-          const r = item.row || item;
-          return normalizeCellText(getFieldValue(r, field));
-        }
-
+        // ── Filters ──────────────────────────────────────────────────────────
         function applyColumnFilters(rows) {
-          const activeFilters = Object.entries(state.columnFilters).filter(([, f]) => f && f.value && f.value.trim());
-          if (!activeFilters.length) return rows;
+          const active = Object.entries(state.columnFilters).filter(([, f]) => f && f.value && f.value.trim());
+          if (!active.length) return rows;
           return rows.filter((item) => {
-            for (const [field, filter] of activeFilters) {
+            for (const [field, filter] of active) {
               const cell = getCellValue(item, field).toLowerCase();
               const val = filter.value.trim().toLowerCase();
               if (filter.op === "contains" && !cell.includes(val)) return false;
@@ -169,13 +161,8 @@
         function applyGlobalFilter(rows) {
           const q = state.globalFilter.trim().toLowerCase();
           if (!q) return rows;
-          const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
-          return rows.filter((item) => {
-            for (const f of visibleFieldList) {
-              if (getCellValue(item, f).toLowerCase().includes(q)) return true;
-            }
-            return false;
-          });
+          const vis = state.fields.filter((f) => state.visible.has(f));
+          return rows.filter((item) => vis.some((f) => getCellValue(item, f).toLowerCase().includes(q)));
         }
 
         function getFilteredSortedRows() {
@@ -190,65 +177,47 @@
         async function fetchAdHocColumn(storageName, displayName) {
           if (state.adHocPending) { alert("A column fetch is already in progress."); return; }
           if (state.fields.includes(storageName)) { alert("That column is already in the grid."); return; }
-
           state.adHocPending = true;
           adHocBtn.disabled = true;
           adHocBtn.textContent = "Fetching...";
-
           try {
             const smids = state.rows.map((item) => getSourceMediaId(item)).filter(Boolean);
             if (!smids.length) throw new Error("No sourceMediaId values found in current results.");
-
-            // Search by SMID set to pull just this field
             const payload = {
-              from: 0,
-              to: smids.length,
+              from: 0, to: smids.length,
               fields: ["sourceMediaId", storageName],
               query: {
-                operator: "AND",
-                invertOperator: false,
+                operator: "AND", invertOperator: false,
                 filters: [{
-                  operator: "AND",
-                  invertOperator: false,
-                  filterType: "interactions",
+                  operator: "AND", invertOperator: false, filterType: "interactions",
                   filters: [{ operator: "IN", type: "KEYWORD", parameterName: "sourceMediaId", value: smids }]
                 }]
               }
             };
-
             const res = await fetch(BASE_SEARCH_URL, {
-              method: "POST",
-              credentials: "include",
+              method: "POST", credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
             if (!res.ok) throw new Error("API returned " + res.status);
             const json = await res.json();
             const results = Array.isArray(json.results) ? json.results : [];
-
-            // Map smid -> value
             const valueMap = new Map();
             for (const r of results) {
               const smid = String(r.sourceMediaId || "").trim();
               if (smid) valueMap.set(smid, getFieldValue(r, storageName));
             }
-
-            // Patch into existing rows
             for (const item of state.rows) {
               const smid = String(getSourceMediaId(item) || "").trim();
               const r = item.row || item;
               r[storageName] = valueMap.get(smid) || "";
             }
-
-            // Register field
             state.fields.push(storageName);
             state.headers.push(displayName);
             state.visible.add(storageName);
-
             rebuildColumnPanel();
             renderSortBadges();
             renderTable();
-
           } catch (err) {
             console.error(err);
             alert("Column fetch failed: " + (err.message || err));
@@ -259,61 +228,32 @@
           }
         }
 
-        // ── Ad hoc column picker modal ────────────────────────────────────────
+        // ── Ad hoc picker ─────────────────────────────────────────────────────
         function openAdHocPicker() {
           const metaFields = api.getShared("metadataFields") || [];
-
-          const overlay = el("div", {
-            style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000001;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;"
-          });
-          const box = el("div", {
-            style: "background:#fff;width:380px;border-radius:12px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,.3);"
-          });
+          const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000001;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+          const box = el("div", { style: "background:#fff;width:380px;border-radius:12px;padding:18px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
           box.appendChild(el("div", { style: "font-size:14px;font-weight:700;margin-bottom:10px;color:#111827;" }, "Add Column"));
-
-          const input = el("input", {
-            type: "text",
-            placeholder: "Search fields...",
-            style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:8px;"
-          });
+          const input = el("input", { type: "text", placeholder: "Search fields...", style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:8px;" });
           const list = el("div", { style: "max-height:240px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;" });
-
-          // Build from colPrefs full translation map via metadataFields if available,
-          // otherwise fall back to a combined list of known fields not already in grid
-          const allKnown = metaFields.length
-            ? metaFields.filter((f) => f.isEnabled !== false && !state.fields.includes(f.storageName))
-            : [];
-
+          const allKnown = metaFields.filter((f) => f.isEnabled !== false && !state.fields.includes(f.storageName));
           function renderList(q) {
             list.innerHTML = "";
             const ql = q.toLowerCase().trim();
             const matches = allKnown.filter((f) => !ql || f.displayName.toLowerCase().includes(ql) || f.storageName.toLowerCase().includes(ql));
-            if (!matches.length) {
-              list.appendChild(el("div", { style: "padding:10px;font-size:12px;color:#6b7280;" }, "No fields found."));
-              return;
-            }
+            if (!matches.length) { list.appendChild(el("div", { style: "padding:10px;font-size:12px;color:#6b7280;" }, "No fields found.")); return; }
             for (const f of matches.slice(0, 100)) {
-              const row = el("div", {
-                style: "padding:8px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;color:#111827;"
-              }, f.displayName);
+              const row = el("div", { style: "padding:8px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;color:#111827;" }, f.displayName);
               row.onmouseenter = () => { row.style.background = "#e8f0fe"; };
               row.onmouseleave = () => { row.style.background = ""; };
-              row.onclick = () => {
-                overlay.remove();
-                fetchAdHocColumn(f.storageName, f.displayName);
-              };
+              row.onclick = () => { overlay.remove(); fetchAdHocColumn(f.storageName, f.displayName); };
               list.appendChild(row);
             }
           }
-
           input.addEventListener("input", () => renderList(input.value));
           renderList("");
-
-          const cancelBtn = el("button", {
-            style: "margin-top:10px;width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;"
-          }, "Cancel");
+          const cancelBtn = el("button", { style: "margin-top:10px;width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;" }, "Cancel");
           cancelBtn.onclick = () => overlay.remove();
-
           box.appendChild(input);
           box.appendChild(list);
           box.appendChild(cancelBtn);
@@ -325,10 +265,8 @@
         // ── Column filter popover ─────────────────────────────────────────────
         function openColumnFilterPopover(field, anchorEl) {
           document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
-
           const existing = state.columnFilters[field] || { op: "contains", value: "" };
           const rect = anchorEl.getBoundingClientRect();
-
           const pop = el("div", {
             style: [
               "position:fixed",
@@ -345,101 +283,44 @@
             ].join(";")
           });
           pop.setAttribute("data-col-filter-popover", "1");
-
-          const opSelect = el("select", {
-            style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;"
-          });
-          [
-            ["contains", "Contains"],
-            ["notcontains", "Does not contain"],
-            ["exact", "Exact match"]
-          ].forEach(([val, label]) => {
+          const opSelect = el("select", { style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;" });
+          [["contains","Contains"],["notcontains","Does not contain"],["exact","Exact match"]].forEach(([val, label]) => {
             const opt = el("option", { value: val }, label);
             if (val === existing.op) opt.selected = true;
             opSelect.appendChild(opt);
           });
-
-          const valInput = el("input", {
-            type: "text",
-            placeholder: "Filter value...",
-            value: existing.value,
-            style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;"
-          });
-
+          const valInput = el("input", { type: "text", placeholder: "Filter value...", value: existing.value, style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;" });
           const btnRow = el("div", { style: "display:flex;gap:6px;" });
-
-          const applyBtn = el("button", {
-            style: "flex:1;padding:6px;border-radius:6px;border:0;background:#3b82f6;color:#fff;font-size:12px;cursor:pointer;font-weight:600;"
-          }, "Apply");
-          applyBtn.onclick = () => {
-            state.columnFilters[field] = { op: opSelect.value, value: valInput.value };
-            pop.remove();
-            renderTable();
-            rebuildColumnPanel();
-          };
-
-          const clearBtn = el("button", {
-            style: "flex:1;padding:6px;border-radius:6px;border:1px solid #e5e7eb;background:#f9fafb;font-size:12px;cursor:pointer;"
-          }, "Clear");
-          clearBtn.onclick = () => {
-            delete state.columnFilters[field];
-            pop.remove();
-            renderTable();
-            rebuildColumnPanel();
-          };
-
+          const applyBtn = el("button", { style: "flex:1;padding:6px;border-radius:6px;border:0;background:#3b82f6;color:#fff;font-size:12px;cursor:pointer;font-weight:600;" }, "Apply");
+          applyBtn.onclick = () => { state.columnFilters[field] = { op: opSelect.value, value: valInput.value }; pop.remove(); renderTable(); rebuildColumnPanel(); };
+          const clearBtn = el("button", { style: "flex:1;padding:6px;border-radius:6px;border:1px solid #e5e7eb;background:#f9fafb;font-size:12px;cursor:pointer;" }, "Clear");
+          clearBtn.onclick = () => { delete state.columnFilters[field]; pop.remove(); renderTable(); rebuildColumnPanel(); };
           btnRow.appendChild(applyBtn);
           btnRow.appendChild(clearBtn);
           pop.appendChild(opSelect);
           pop.appendChild(valInput);
           pop.appendChild(btnRow);
           document.body.appendChild(pop);
-
           setTimeout(() => valInput.focus(), 30);
-
-          // Close on outside click
           function onOutside(e) {
-            if (!pop.contains(e.target) && e.target !== anchorEl) {
-              pop.remove();
-              document.removeEventListener("mousedown", onOutside);
-            }
+            if (!pop.contains(e.target) && e.target !== anchorEl) { pop.remove(); document.removeEventListener("mousedown", onOutside); }
           }
           setTimeout(() => document.addEventListener("mousedown", onOutside), 100);
         }
 
-        // ── Export current view ───────────────────────────────────────────────
+        // ── Export current view as XLS ────────────────────────────────────────
         function exportCurrentView() {
+          if (!xls) { alert("Export builder not loaded."); return; }
           const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
           const visibleHeaderList = state.fields
             .map((f, i) => ({ f, h: state.headers[i] }))
             .filter(({ f }) => state.visible.has(f))
             .map(({ h }) => h);
-
           const rows = getFilteredSortedRows();
           if (!rows.length) { alert("No rows to export."); return; }
-
-          // Build simple CSV
-          const escape = (v) => {
-            const s = String(v == null ? "" : v);
-            if (s.includes(",") || s.includes('"') || s.includes("\n")) return '"' + s.replace(/"/g, '""') + '"';
-            return s;
-          };
-
-          const lines = [visibleHeaderList.map(escape).join(",")];
-          for (const item of rows) {
-            const cells = visibleFieldList.map((f) => escape(getCellValue(item, f)));
-            lines.push(cells.join(","));
-          }
-
-          const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "nexidia_grid_export_" + new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "") + ".csv";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
+          const html = xls.buildExcelHtml(visibleHeaderList, visibleFieldList, rows, []);
+          const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
+          xls.downloadExcelFile("nexidia_grid_export_" + stamp + ".xls", html);
         }
 
         // ── Reset ─────────────────────────────────────────────────────────────
@@ -455,50 +336,23 @@
         }
 
         // ── Modal shell ───────────────────────────────────────────────────────
-        const modal = el("div", {
-          style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;"
-        });
-
-        const stickyClose = el("button", {
-          style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);"
-        }, "X");
-
-        const card = el("div", {
-          style: "background:#fff;width:1280px;max-width:97vw;max-height:92vh;overflow:hidden;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;"
-        });
+        const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+        const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
+        const card = el("div", { style: "background:#fff;width:1280px;max-width:97vw;max-height:92vh;overflow:hidden;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;" });
 
         // ── Toolbar ───────────────────────────────────────────────────────────
-        const toolbar = el("div", {
-          style: "padding:12px 16px 8px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
-        });
-
+        const toolbar = el("div", { style: "padding:12px 16px 8px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
         const titleEl = el("div", { style: "font-size:15px;font-weight:700;color:#111827;flex-shrink:0;" }, "Results Grid");
         const rowCountEl = el("div", { style: "font-size:12px;color:#6b7280;flex-shrink:0;" }, "");
-
-        const globalSearchBox = el("input", {
-          type: "text",
-          placeholder: "Search all visible columns...",
-          style: "margin-left:auto;width:240px;max-width:30vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;"
-        });
+        const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "margin-left:auto;width:240px;max-width:30vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
         globalSearchBox.oninput = () => { state.globalFilter = globalSearchBox.value || ""; renderTable(); };
 
-        const columnsBtn = el("button", {
-          style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:12px;flex-shrink:0;"
-        }, "Columns");
-
-        const adHocBtn = el("button", {
-          style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;flex-shrink:0;"
-        }, "+ Add Column");
+        const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "☰");
+        const adHocBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;flex-shrink:0;" }, "+ Add Column");
         adHocBtn.onclick = () => openAdHocPicker();
-
-        const exportBtn = el("button", {
-          style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;"
-        }, "Export View");
+        const exportBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Export View");
         exportBtn.onclick = () => exportCurrentView();
-
-        const resetBtn = el("button", {
-          style: "padding:6px 10px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;flex-shrink:0;"
-        }, "Reset");
+        const resetBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Reset");
         resetBtn.onclick = () => resetGrid();
 
         toolbar.appendChild(titleEl);
@@ -509,15 +363,15 @@
         toolbar.appendChild(resetBtn);
         toolbar.appendChild(globalSearchBox);
 
-        // ── Sort badge bar ────────────────────────────────────────────────────
-        const sortBar = el("div", {
-          style: "padding:4px 16px;min-height:28px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;"
-        });
+        // ── Sort badge bar with drag-to-reorder ───────────────────────────────
+        const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
+
+        let dragSrcIndex = null;
 
         function renderSortBadges() {
           sortBar.innerHTML = "";
           if (!state.sorts.length) {
-            sortBar.appendChild(el("div", { style: "font-size:11px;color:#9ca3af;" }, "No active sorts. Click a column header to sort."));
+            sortBar.appendChild(el("div", { style: "font-size:11px;color:#9ca3af;" }, "No active sorts \u2014 click a column header to sort."));
             return;
           }
           const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
@@ -528,43 +382,59 @@
             const color = tierColors[i] || "#374151";
 
             const badge = el("div", {
+              draggable: true,
               style: [
                 "display:inline-flex", "align-items:center", "gap:4px",
-                "padding:3px 8px 3px 6px",
+                "padding:4px 8px 4px 6px",
                 "border-radius:999px",
                 "background:" + color,
                 "color:#fff",
                 "font-size:11px",
                 "font-weight:600",
-                "cursor:pointer",
-                "user-select:none"
+                "cursor:grab",
+                "user-select:none",
+                "transition:opacity 0.15s"
               ].join(";"),
-              title: "Tier " + (i + 1) + " sort. Click to reverse direction."
+              title: "Tier " + (i + 1) + " \u2014 drag to reorder, click to reverse, \u2715 to remove"
             });
 
-            const tierNum = el("span", { style: "opacity:0.75;font-size:10px;" }, (i + 1) + ".");
+            const tierNum = el("span", { style: "opacity:0.7;font-size:10px;" }, (i + 1) + ".");
             const labelEl = el("span", {}, label);
-            const dirEl = el("span", {}, dir === 1 ? " ↑" : " ↓");
+            const dirEl = el("span", {}, dir === 1 ? " \u2191" : " \u2193");
             const removeEl = el("span", {
-              style: "margin-left:4px;opacity:0.7;font-size:11px;",
-              title: "Remove this sort tier"
-            }, "✕");
+              style: "margin-left:5px;opacity:0.75;font-size:11px;cursor:pointer;",
+              title: "Remove sort tier"
+            }, "\u2715");
 
             badge.appendChild(tierNum);
             badge.appendChild(labelEl);
             badge.appendChild(dirEl);
             badge.appendChild(removeEl);
 
-            // Click badge body = flip direction
+            // Click = flip direction (unless clicking remove)
             badge.onclick = (e) => {
-              if (e.target === removeEl) {
-                removeSortTier(i);
-              } else {
-                state.sorts[i].dir *= -1;
-                renderSortBadges();
-                renderTable();
-              }
+              if (e.target === removeEl) { removeSortTier(i); return; }
+              state.sorts[i].dir *= -1;
+              renderSortBadges();
+              renderTable();
             };
+
+            // Drag to reorder
+            badge.addEventListener("dragstart", (e) => {
+              dragSrcIndex = i;
+              e.dataTransfer.effectAllowed = "move";
+              setTimeout(() => { badge.style.opacity = "0.4"; }, 0);
+            });
+            badge.addEventListener("dragend", () => { badge.style.opacity = "1"; dragSrcIndex = null; });
+            badge.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+            badge.addEventListener("drop", (e) => {
+              e.preventDefault();
+              if (dragSrcIndex === null || dragSrcIndex === i) return;
+              const moved = state.sorts.splice(dragSrcIndex, 1)[0];
+              state.sorts.splice(i, 0, moved);
+              renderSortBadges();
+              renderTable();
+            });
 
             sortBar.appendChild(badge);
           }
@@ -574,11 +444,8 @@
         const body = el("div", { style: "display:flex;flex:1;min-height:0;" });
 
         // ── Column panel ──────────────────────────────────────────────────────
-        const colPanel = el("div", {
-          style: "width:220px;border-right:1px solid #e5e7eb;padding:10px;overflow-y:auto;display:none;flex-shrink:0;"
-        });
-        const colPanelTitle = el("div", { style: "font-size:12px;font-weight:700;margin-bottom:8px;color:#111827;" }, "Show / Hide Columns");
-        colPanel.appendChild(colPanelTitle);
+        const colPanel = el("div", { style: "width:220px;border-right:1px solid #e5e7eb;padding:10px;overflow-y:auto;display:none;flex-shrink:0;" });
+        colPanel.appendChild(el("div", { style: "font-size:12px;font-weight:700;margin-bottom:8px;color:#111827;" }, "Show / Hide Columns"));
         const colList = el("div", {});
         colPanel.appendChild(colList);
 
@@ -588,24 +455,15 @@
             const f = state.fields[i];
             const h = state.headers[i] || f;
             const hasFilter = state.columnFilters[f] && state.columnFilters[f].value;
-
             const rowEl = el("div", { style: "display:flex;align-items:center;gap:6px;margin:4px 0;" });
             const cb = el("input", { type: "checkbox" });
             cb.checked = state.visible.has(f);
-            cb.onchange = () => {
-              if (cb.checked) state.visible.add(f);
-              else state.visible.delete(f);
-              renderTable();
-            };
-
+            cb.onchange = () => { if (cb.checked) state.visible.add(f); else state.visible.delete(f); renderTable(); };
             const labelEl = el("span", {
-              style: "font-size:11px;color:#111827;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;" + (hasFilter ? "color:#2563eb;font-weight:600;" : ""),
+              style: "font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;" + (hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"),
               title: h + (hasFilter ? " (filtered)" : "")
-            }, h + (hasFilter ? " 🔽" : ""));
-
-            // Click label = open column filter
+            }, h + (hasFilter ? " \uD83D\uDD3D" : ""));
             labelEl.onclick = () => openColumnFilterPopover(f, labelEl);
-
             rowEl.appendChild(cb);
             rowEl.appendChild(labelEl);
             colList.appendChild(rowEl);
@@ -613,11 +471,10 @@
         }
 
         columnsBtn.onclick = () => {
-          const showing = colPanel.style.display !== "none";
-          colPanel.style.display = showing ? "none" : "block";
+          colPanel.style.display = colPanel.style.display !== "none" ? "none" : "block";
         };
 
-        // ── Table area ────────────────────────────────────────────────────────
+        // ── Table ─────────────────────────────────────────────────────────────
         const gridWrap = el("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;" });
         const tableWrap = el("div", { style: "flex:1;min-height:0;overflow:auto;" });
         const table = el("table", { style: "border-collapse:separate;border-spacing:0;width:100%;" });
@@ -628,7 +485,6 @@
         tableWrap.appendChild(table);
         gridWrap.appendChild(tableWrap);
 
-        // ── Render table ──────────────────────────────────────────────────────
         function renderTable() {
           const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
           const visibleHeaderList = state.fields
@@ -636,30 +492,22 @@
             .filter(({ f }) => state.visible.has(f))
             .map(({ h }) => h);
 
-          // Header row
+          // Header
           thead.innerHTML = "";
           const trh = el("tr", {});
-
-          // Play button column header
-          trh.appendChild(el("th", {
-            style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:8px 10px;font-size:11px;text-align:left;white-space:nowrap;width:52px;"
-          }, ""));
+          trh.appendChild(el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:8px 10px;font-size:11px;width:44px;" }, ""));
 
           for (let i = 0; i < visibleFieldList.length; i++) {
             const field = visibleFieldList[i];
             const headerText = visibleHeaderList[i] || field;
             const sortIdx = state.sorts.findIndex((s) => s.field === field);
             const hasFilter = state.columnFilters[field] && state.columnFilters[field].value;
-
             const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
-            const sortColor = sortIdx >= 0 ? tierColors[sortIdx] || "#374151" : null;
+            const sortColor = sortIdx >= 0 ? (tierColors[sortIdx] || "#374151") : null;
 
-            let headerContent = headerText;
-            if (sortIdx >= 0) {
-              const dir = state.sorts[sortIdx].dir === 1 ? " ↑" : " ↓";
-              headerContent = headerText + dir;
-            }
-            if (hasFilter) headerContent += " 🔽";
+            let label = headerText;
+            if (sortIdx >= 0) label += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
+            if (hasFilter) label += " \uD83D\uDD3D";
 
             const th = el("th", {
               style: [
@@ -672,58 +520,50 @@
                 "white-space:nowrap",
                 "cursor:pointer",
                 "user-select:none",
-                sortColor ? "color:" + sortColor + ";font-weight:700;" : ""
+                sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"
               ].join(";"),
               title: "Click to sort"
-            }, headerContent);
+            }, label);
 
             th.onclick = () => handleHeaderClick(field);
             trh.appendChild(th);
           }
           thead.appendChild(trh);
 
-          // Data rows
+          // Rows
           const rows = getFilteredSortedRows();
           rowCountEl.textContent = rows.length.toLocaleString() + " of " + state.rows.length.toLocaleString() + " rows";
-
           tbody.innerHTML = "";
           const maxRender = Math.min(rows.length, 3000);
 
           for (let ri = 0; ri < maxRender; ri++) {
             const item = rows[ri];
-            const tr = el("tr", {
-              style: ri % 2 ? "background:#f8fafc;" : "background:#fff;"
-            });
+            const tr = el("tr", { style: ri % 2 ? "background:#f8fafc;" : "background:#fff;" });
 
-            // Play button cell
-            const tdPlay = el("td", {
-              style: "padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;"
-            });
+            // Play cell
+            const tdPlay = el("td", { style: "padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;" });
             const playBtn = el("button", {
               style: "border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:3px 8px;cursor:pointer;font-size:11px;",
               title: "Open in Nexidia player"
-            }, "▶");
+            }, "\u25B6");
             playBtn.onclick = () => {
               const smid = getSourceMediaId(item);
-              if (!smid) {
-                alert("sourceMediaId not available for this row.");
-                return;
-              }
+              if (!smid) { alert("sourceMediaId not available for this row."); return; }
               window.open(PLAYER_URL(smid), "_blank");
             };
             tdPlay.appendChild(playBtn);
             tr.appendChild(tdPlay);
 
-            // Data cells
+            // Data cells — use getCellDisplay for formatted values
             for (const field of visibleFieldList) {
-              const v = getCellValue(item, field);
+              const display = getCellDisplay(item, field);
+              const raw = getCellValue(item, field);
               const td = el("td", {
                 style: "padding:5px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis;",
-                title: v
-              }, v);
+                title: display
+              }, display);
               tr.appendChild(td);
             }
-
             tbody.appendChild(tr);
           }
 
@@ -775,5 +615,5 @@
     })();
   }
 
-  api.registerTool({ id: "resultsGrid", label: "Results Grid", open: openResultsGrid });
+  api.registerTool({ id: "resultsGrid", label: "Results Grid", hidden: true, open: openResultsGrid });
 })();
