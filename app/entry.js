@@ -64,8 +64,8 @@
   modal.appendChild(card);
   document.body.appendChild(modal);
 
-  //##> RACE CONDITION FIX: entry.js loads before searchExport.js and batchBuilder.js finish
-  //##> eval-ing, even though bootstrap awaits each module sequentially. Without this delay,
+  //##> RACE CONDITION FIX: entry.js loads before other modules finish eval-ing,
+  //##> even though bootstrap awaits each module sequentially. Without this delay,
   //##> render() runs before tools register and the launcher shows "No tools registered yet."
   //##> The 50ms timeout reliably clears the eval stack. Do not reduce to 0 or remove.
   setTimeout(render, 50);
