@@ -33,9 +33,33 @@
         const DEFAULT_FILTER_STORAGES = ["UDFVarchar10","UDFVarchar126","DNIS","siteName","UDFVarchar120"];
         const DEFAULT_KEY_LIST = ["experienceId","UDFVarchar122","UDFVarchar41","UDFVarchar115","UDFVarchar1","UDFVarchar110"];
 
+        // ── Session token ─────────────────────────────────────────────────────
+        // Incremented on every new search run. Stale runs that complete after a
+        // newer search has started will detect the mismatch and discard results
+        // instead of surfacing them to the user.
+        let currentToken = (api.getShared("searchSessionToken") || 0) + 1;
+        api.setShared("searchSessionToken", currentToken);
+
+        // ── Abort controller ──────────────────────────────────────────────────
+        // One controller per search UI instance. Aborted when the user closes
+        // the modal or a new search starts. Cancels all in-flight fetch calls.
+        let abortController = new AbortController();
+
+        function resetSession() {
+          abortController.abort();
+          abortController = new AbortController();
+          currentToken = (api.getShared("searchSessionToken") || 0) + 1;
+          api.setShared("searchSessionToken", currentToken);
+        }
+
+        function isSessionCurrent(token) {
+          return token === api.getShared("searchSessionToken");
+        }
+
+        // ── Metadata fields ───────────────────────────────────────────────────
         let metadataFields = [];
         try {
-          const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
+          const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store", signal: abortController.signal });
           if (res.ok) {
             const json = await res.json();
             metadataFields = Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : [];
@@ -59,15 +83,26 @@
           barOuter.appendChild(barInner);
           const metrics = document.createElement("div");
           metrics.style.cssText = "margin-top:8px;font-size:12px;color:#cbd5e1;";
+          const cancelBtn = document.createElement("div");
+          cancelBtn.textContent = "Cancel";
+          cancelBtn.style.cssText = "margin-top:8px;font-size:11px;color:#f87171;cursor:pointer;text-decoration:underline;";
+          cancelBtn.onclick = () => {
+            abortController.abort();
+            wrap.remove();
+          };
           const closeBtn = document.createElement("div");
           closeBtn.textContent = "X";
           closeBtn.style.cssText = "position:absolute;top:10px;right:12px;cursor:pointer;color:#9ca3af;font-size:14px;";
-          closeBtn.onclick = () => wrap.remove();
+          closeBtn.onclick = () => {
+            abortController.abort();
+            wrap.remove();
+          };
           wrap.appendChild(closeBtn);
           wrap.appendChild(title);
           wrap.appendChild(status);
           wrap.appendChild(barOuter);
           wrap.appendChild(metrics);
+          wrap.appendChild(cancelBtn);
           return {
             show: () => document.body.appendChild(wrap),
             remove: () => { try { wrap.remove(); } catch (_) {} },
@@ -179,7 +214,7 @@
           return dismiss;
         }
 
-        // ── Date changed tracking ─────────────────────────────────────────────
+        // ── Date tracking ─────────────────────────────────────────────────────
         var dateChanged = false;
 
         // ── Field registry ────────────────────────────────────────────────────
@@ -188,8 +223,7 @@
           const set = new Set();
           for (let i = 0; i < allRows.length; i++) {
             const r = allRows[i];
-            if (r === excludeEntry) continue;
-            if (!r.picker) continue;
+            if (r === excludeEntry || !r.picker) continue;
             const sn = r.picker.getStorageName();
             if (sn) set.add(sn);
           }
@@ -203,9 +237,7 @@
           const dropdown = el("div", { style: "display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid #ccc;border-top:none;border-radius:0 0 6px 6px;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,.15);" });
           let hi = -1, vis = [];
           function render(q) {
-            dropdown.innerHTML = "";
-            vis = [];
-            hi = -1;
+            dropdown.innerHTML = ""; vis = []; hi = -1;
             const ql = q.toLowerCase().trim();
             const cur = input.dataset.storageName || "";
             const active = getActiveStorageNames(null);
@@ -223,16 +255,13 @@
                 item.onmouseleave = () => { item.style.background = ""; };
                 item.onmousedown = (e) => { e.preventDefault(); pick(fi); };
               })(f);
-              dropdown.appendChild(item);
-              vis.push(item);
+              dropdown.appendChild(item); vis.push(item);
             }
             dropdown.style.display = "block";
           }
           function pick(f) {
-            input.value = f.displayName;
-            input.dataset.storageName = f.storageName;
-            dropdown.style.display = "none";
-            hi = -1;
+            input.value = f.displayName; input.dataset.storageName = f.storageName;
+            dropdown.style.display = "none"; hi = -1;
             if (onSelect) onSelect(f);
           }
           input.addEventListener("input", () => { delete input.dataset.storageName; render(input.value); });
@@ -245,11 +274,9 @@
             else if (e.key === "Enter") { e.preventDefault(); if (hi >= 0 && vis[hi]) vis[hi].onmousedown(e); }
             else if (e.key === "Escape") { dropdown.style.display = "none"; }
           });
-          wrapper.appendChild(input);
-          wrapper.appendChild(dropdown);
+          wrapper.appendChild(input); wrapper.appendChild(dropdown);
           return {
-            wrapper,
-            input,
+            wrapper, input,
             getStorageName: () => input.dataset.storageName || "",
             getDisplayName: () => input.value,
             preselect(sn) {
@@ -271,9 +298,7 @@
           pill.appendChild(knob);
           const rightIcon = el("span", { style: "display:flex;align-items:center;flex-shrink:0;font-size:13px;line-height:1;", title: "Key" });
           rightIcon.textContent = "\uD83D\uDD11";
-          wrap.appendChild(leftIcon);
-          wrap.appendChild(pill);
-          wrap.appendChild(rightIcon);
+          wrap.appendChild(leftIcon); wrap.appendChild(pill); wrap.appendChild(rightIcon);
           let cur = initialType || "filter", locked = false;
           function apply() {
             if (cur === "filter") { pill.style.background = locked ? "#93c5fd" : "#3b82f6"; knob.style.left = "2px"; leftIcon.style.opacity = "0.9"; rightIcon.style.opacity = "0.35"; }
@@ -284,11 +309,8 @@
           wrap.addEventListener("click", () => { if (locked) return; cur = cur === "filter" ? "key" : "filter"; apply(); if (onChange) onChange(cur); });
           apply();
           return {
-            wrap,
-            getType: () => cur,
-            setType: (t) => { cur = t; apply(); },
-            lock: () => { locked = true; apply(); },
-            unlock: () => { locked = false; apply(); }
+            wrap, getType: () => cur, setType: (t) => { cur = t; apply(); },
+            lock: () => { locked = true; apply(); }, unlock: () => { locked = false; apply(); }
           };
         }
 
@@ -316,8 +338,7 @@
         let carouselViewport = null;
         let keyRowsContainer = null;
         let fadeMaskLeft = null;
-        const PEEK = 80;
-        const GAP = 14;
+        const PEEK = 80, GAP = 14;
         function getPaneWidth() { return carouselViewport ? Math.max(200, carouselViewport.offsetWidth - PEEK - GAP) : 800; }
 
         // ── Row entry builder ─────────────────────────────────────────────────
@@ -375,18 +396,13 @@
           }
           valueInput.addEventListener("input", checkLock);
           const rowEl = el("div", { style: "display:flex;gap:8px;align-items:center;margin:4px 0;" });
-          rowEl.appendChild(removeBtn);
-          rowEl.appendChild(toggle.wrap);
-          rowEl.appendChild(fieldLabelWrap);
-          rowEl.appendChild(valueInput);
+          rowEl.appendChild(removeBtn); rowEl.appendChild(toggle.wrap); rowEl.appendChild(fieldLabelWrap); rowEl.appendChild(valueInput);
           if (picker) rowEl.appendChild(picker.wrapper);
           entry.rowEl = rowEl;
           allRows.push(entry);
           removeBtn.onclick = () => {
-            removeAdjacentAndLabel(rowEl);
-            rowEl.remove();
-            const idx = allRows.indexOf(entry);
-            if (idx !== -1) allRows.splice(idx, 1);
+            removeAdjacentAndLabel(rowEl); rowEl.remove();
+            const idx = allRows.indexOf(entry); if (idx !== -1) allRows.splice(idx, 1);
             for (let i = 0; i < panes.length; i++) { const pi = panes[i].rows.indexOf(entry); if (pi !== -1) panes[i].rows.splice(pi, 1); }
           };
           if (storageName && picker) {
@@ -419,8 +435,7 @@
         function handleTypeChange(entry, newType) {
           if (newType === "key") {
             const firstChild = keyRowsContainer.firstChild;
-            removeAdjacentAndLabel(entry.rowEl);
-            entry.rowEl.remove();
+            removeAdjacentAndLabel(entry.rowEl); entry.rowEl.remove();
             for (let i = 0; i < panes.length; i++) { const pi = panes[i].rows.indexOf(entry); if (pi !== -1) panes[i].rows.splice(pi, 1); }
             entry.paneIndex = -1;
             flipAnimate(entry.rowEl, keyRowsContainer, firstChild, 260);
@@ -456,8 +471,7 @@
           paneEl.appendChild(rowsContainer);
           const addBtn = el("button", { style: "margin-top:12px;padding:6px 12px;border-radius:8px;border:1px solid #3b82f6;background:#fff;color:#3b82f6;cursor:pointer;font-size:12px;" }, "+ Add Filter");
           const addPhraseBtn = el("button", { style: "margin-top:6px;margin-left:8px;padding:6px 12px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;" }, "+ Add Phrase");
-          paneEl.appendChild(addBtn);
-          paneEl.appendChild(addPhraseBtn);
+          paneEl.appendChild(addBtn); paneEl.appendChild(addPhraseBtn);
           const orBtn = el("button", { style: "position:absolute;right:-20px;top:50%;transform:translateY(-50%);z-index:20;padding:7px 15px;border-radius:20px;border:0;background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 3px 12px rgba(59,130,246,0.5);letter-spacing:1px;transition:box-shadow 0.2s;" }, "OR");
           orBtn.onmouseenter = () => { orBtn.style.boxShadow = "0 5px 18px rgba(59,130,246,0.7)"; };
           orBtn.onmouseleave = () => { orBtn.style.boxShadow = "0 3px 12px rgba(59,130,246,0.5)"; };
@@ -466,9 +480,7 @@
           const bottomRow = el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-top:16px;" });
           const bottomLabel = el("div", { style: "font-size:11px;font-weight:600;color:#3b82f6;letter-spacing:1px;opacity:0.7;" }, "Search " + String.fromCharCode(65 + paneIndex));
           const filterSearchBtn = el("button", { style: "padding:7px 22px;border-radius:20px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(59,130,246,0.35);flex:1;margin:0 auto;max-width:160px;" }, "Search");
-          bottomRow.appendChild(bottomLabel);
-          bottomRow.appendChild(filterSearchBtn);
-          bottomRow.appendChild(el("div", { style: "flex:0 0 80px;" }));
+          bottomRow.appendChild(bottomLabel); bottomRow.appendChild(filterSearchBtn); bottomRow.appendChild(el("div", { style: "flex:0 0 80px;" }));
           paneEl.appendChild(bottomRow);
           const paneObj = { el: paneEl, rowsContainer, addBtn, addPhraseBtn, orBtn, filterSearchBtn, rows: [], index: paneIndex, bottomLabel };
           addBtn.onclick = () => { if (paneObj.rows.length > 0) rowsContainer.appendChild(makeAndLabel()); const entry = buildRowEntry("", "filter", false); entry.paneIndex = paneObj.index; rowsContainer.appendChild(entry.rowEl); paneObj.rows.push(entry); };
@@ -481,9 +493,7 @@
           for (let i = 0; i < DEFAULT_FILTER_STORAGES.length; i++) {
             if (i > 0) pane.rowsContainer.appendChild(makeAndLabel());
             const entry = buildRowEntry(DEFAULT_FILTER_STORAGES[i], "filter", false);
-            entry.paneIndex = pane.index;
-            pane.rows.push(entry);
-            pane.rowsContainer.appendChild(entry.rowEl);
+            entry.paneIndex = pane.index; pane.rows.push(entry); pane.rowsContainer.appendChild(entry.rowEl);
           }
         }
 
@@ -517,18 +527,14 @@
             const refEntry = refPane.rows[i];
             const sn = refEntry.picker ? refEntry.picker.getStorageName() : "";
             const entry = buildRowEntry(sn, "filter", refEntry.isPhrase);
-            entry.paneIndex = newIndex;
-            newPane.rows.push(entry);
-            newPane.rowsContainer.appendChild(entry.rowEl);
+            entry.paneIndex = newIndex; newPane.rows.push(entry); newPane.rowsContainer.appendChild(entry.rowEl);
           }
           panes.push(newPane);
           if (ghostPaneEl && carouselTrack.contains(ghostPaneEl)) { carouselTrack.replaceChild(newPane.el, ghostPaneEl); }
           else { carouselTrack.appendChild(newPane.el); }
           ghostPaneEl = buildGhostPane(newIndex + 1);
           carouselTrack.appendChild(ghostPaneEl);
-          resizePanes();
-          slideTo(newIndex);
-          updateDots();
+          resizePanes(); slideTo(newIndex); updateDots();
           allRows.forEach((r) => { if (r.type === "filter" && r.valueInput.value.trim() && r.toggle) { r.toggle.lock(); r.locked = true; } });
         }
 
@@ -546,8 +552,7 @@
           if (ghostPaneEl && ghostPaneEl.parentNode) ghostPaneEl.parentNode.removeChild(ghostPaneEl);
           ghostPaneEl = buildGhostPane(panes.length);
           carouselTrack.appendChild(ghostPaneEl);
-          resizePanes();
-          updateDots();
+          resizePanes(); updateDots();
           if (panes.length === 1) { allRows.forEach((r) => { if (r.type === "filter" && r.toggle) { r.toggle.unlock(); r.locked = false; } }); }
         }
 
@@ -578,10 +583,8 @@
         }
         function slideTo(index) {
           if (index < 0 || index >= panes.length) return;
-          const prev = activePaneIndex;
-          activePaneIndex = index;
-          applySlideTransform(index, true);
-          updateDots();
+          const prev = activePaneIndex; activePaneIndex = index;
+          applySlideTransform(index, true); updateDots();
           if (index < prev) { setTimeout(() => { pruneEmptyTailPanes(); }, 440); }
           allRows.forEach((r) => {
             if (r.type === "filter" && r.toggle) {
@@ -595,16 +598,30 @@
         // ── Modal ─────────────────────────────────────────────────────────────
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
-        stickyClose.onclick = () => { modal.remove(); stickyClose.remove(); };
+
+        function closeAll() {
+          abortController.abort();
+          api.setShared("lastSearchResult", null);
+          api.setShared("dispatcherState", null);
+          try { modal.remove(); } catch (_) {}
+          try { stickyClose.remove(); } catch (_) {}
+          window.removeEventListener("resize", resizePanes);
+        }
+
+        stickyClose.onclick = closeAll;
+
         const card = el("div", { style: "background:#f8fafc;width:1080px;max-height:90vh;overflow:auto;border-radius:14px;padding:18px 18px 22px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
         card.appendChild(el("div", { style: "font-size:18px;font-weight:600;margin-bottom:4px;" }, "Nexidia Search"));
 
         // ── Column prefs warning ──────────────────────────────────────────────
         const prefsError = api.getShared("columnPrefsError");
         if (prefsError) {
-          const prefsWarn = el("div", { style: "background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:12px;color:#92400e;margin-bottom:10px;" },
-            "\u26A0\uFE0F Column preferences unavailable. Using defaults. For saved column layout, launch from the legacy Nexidia search page.");
-          card.appendChild(prefsWarn);
+          const link = el("a", { href: "https://apug01.nxondemand.com/NxIA/Search/ForensicSearch.aspx", target: "_blank", style: "color:#92400e;font-weight:600;" }, "Open Nexidia Search");
+          const warn = el("div", { style: "background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:12px;color:#92400e;margin-bottom:10px;display:flex;align-items:center;gap:6px;" },
+            "\u26A0\uFE0F Column preferences could not be loaded. ");
+          warn.appendChild(link);
+          warn.appendChild(document.createTextNode(" and relaunch to use your saved column layout."));
+          card.appendChild(warn);
         }
 
         card.appendChild(hr());
@@ -622,8 +639,7 @@
         fromDate.input.addEventListener("change", () => { dateChanged = true; });
         toDate.input.addEventListener("change", () => { dateChanged = true; });
         const dateRow = el("div", { style: "display:flex;gap:10px;align-items:flex-end;margin:8px 0;flex-wrap:wrap;" });
-        dateRow.appendChild(fromDate.wrap);
-        dateRow.appendChild(toDate.wrap);
+        dateRow.appendChild(fromDate.wrap); dateRow.appendChild(toDate.wrap);
         dateSectionWrapper.appendChild(dateRow);
         card.appendChild(dateSectionWrapper);
         card.appendChild(hr());
@@ -636,14 +652,10 @@
         const fadeMaskRight = el("div", { style: "position:absolute;top:0;right:0;bottom:0;width:" + PEEK + "px;background:linear-gradient(to left,rgba(248,250,252,0.6),rgba(248,250,252,0));z-index:6;pointer-events:auto;cursor:pointer;" });
         fadeMaskRight.onclick = () => { if (activePaneIndex < panes.length - 1) { slideTo(activePaneIndex + 1); } else { activateNextPane(); } };
         carouselTrack = el("div", { style: "display:flex;flex-direction:row;will-change:transform;" });
-        carouselViewport.appendChild(fadeMaskLeft);
-        carouselViewport.appendChild(fadeMaskRight);
-        carouselViewport.appendChild(carouselTrack);
+        carouselViewport.appendChild(fadeMaskLeft); carouselViewport.appendChild(fadeMaskRight); carouselViewport.appendChild(carouselTrack);
         carouselOuter.appendChild(carouselViewport);
         dotsRow = el("div", { style: "display:flex;justify-content:center;gap:6px;margin-top:10px;" });
-        card.appendChild(carouselOuter);
-        card.appendChild(dotsRow);
-        card.appendChild(hr());
+        card.appendChild(carouselOuter); card.appendChild(dotsRow); card.appendChild(hr());
 
         // ── Key section ───────────────────────────────────────────────────────
         const keySection = el("div", { style: "background:rgba(240,253,244,0.85);border:1px solid rgba(34,197,94,0.22);border-radius:14px;padding:16px 20px 14px;margin-bottom:14px;" });
@@ -661,9 +673,7 @@
         addKeyPhraseBtn.onclick = () => { const e = buildRowEntry("", "key", true); e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl); };
         const keySearchBtn = el("button", { style: "padding:7px 22px;border-radius:20px;border:0;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(34,197,94,0.35);margin-left:auto;" }, "Search");
         keySearchBtn.onclick = () => { runKeySearch(); };
-        keyBtnRow.appendChild(addKeyBtn);
-        keyBtnRow.appendChild(addKeyPhraseBtn);
-        keyBtnRow.appendChild(keySearchBtn);
+        keyBtnRow.appendChild(addKeyBtn); keyBtnRow.appendChild(addKeyPhraseBtn); keyBtnRow.appendChild(keySearchBtn);
         keySection.appendChild(keyBtnRow);
         card.appendChild(keySection);
         modal.appendChild(card);
@@ -683,8 +693,7 @@
           resizePanes();
           for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
             const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
-            e.paneIndex = -1;
-            keyRowsContainer.appendChild(e.rowEl);
+            e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
           }
           updateDots();
           setTimeout(() => {
@@ -775,7 +784,7 @@
         }
 
         // ── Execute search ────────────────────────────────────────────────────
-        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix) {
+        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken) {
           const merged = new Map();
           const passthroughNoKey = [];
           let totalFetched = 0;
@@ -784,40 +793,43 @@
 
           for (let si = 0; si < runSets.length; si++) {
             const runSet = runSets[si];
-            const keywordGroup = runSet.keywordGroup;
-            const phraseGroups = runSet.phraseGroups;
-            const phraseExpansions = phraseGroups.length > 0 ? phraseGroups : [{ group: null, display: null }];
+            const phraseExpansions = runSet.phraseGroups.length > 0 ? runSet.phraseGroups : [{ group: null, display: null }];
 
             for (let ei = 0; ei < phraseExpansions.length; ei++) {
               const expansion = phraseExpansions[ei];
-              const phraseGroup = expansion.group;
-              const phraseDisplay = expansion.display;
-              if (phraseDisplay !== null) distinctPhraseLabels.add(phraseDisplay);
-
+              if (expansion.display !== null) distinctPhraseLabels.add(expansion.display);
               progressUI.set("Searching (" + labelPrefix + " " + (si + 1) + "/" + totalRuns + ")...", 25, "");
               let from = 0;
               const setRows = [];
 
               while (true) {
+                // ── Session check before each page fetch ──────────────────────
+                if (!isSessionCurrent(sessionToken)) return null;
+
                 const interactionFilters = [];
-                if (keywordGroup) interactionFilters.push(keywordGroup);
-                if (phraseGroup) interactionFilters.push(phraseGroup);
+                if (runSet.keywordGroup) interactionFilters.push(runSet.keywordGroup);
+                if (expansion.group) interactionFilters.push(expansion.group);
                 interactionFilters.push(dateFilter);
 
                 const payload = {
-                  languageFilter: { languages: [] },
-                  namedSetId: null,
-                  from,
-                  to: from + PAGE_SIZE,
-                  fields: baseFields,
-                  query: {
-                    operator: "AND",
-                    invertOperator: false,
-                    filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: interactionFilters }]
-                  }
+                  languageFilter: { languages: [] }, namedSetId: null,
+                  from, to: from + PAGE_SIZE, fields: baseFields,
+                  query: { operator: "AND", invertOperator: false, filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: interactionFilters }] }
                 };
 
-                const res = await fetch(SEARCH_URL, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                let res;
+                try {
+                  res = await fetch(SEARCH_URL, {
+                    method: "POST", credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                    signal: abortController.signal
+                  });
+                } catch (err) {
+                  if (err.name === "AbortError") return null;
+                  throw err;
+                }
+
                 if (!res.ok) { const sr = await safeRead(res); throw new Error("Search failed: HTTP " + res.status + "\n" + sr.text.slice(0, 300)); }
                 const sr = await safeRead(res);
                 const rows = pickRows(sr.json);
@@ -834,7 +846,7 @@
                 await sleep(250);
               }
 
-              const rowLabel = phraseDisplay !== null ? phraseDisplay : null;
+              const rowLabel = expansion.display !== null ? expansion.display : null;
               for (let ri = 0; ri < setRows.length; ri++) {
                 const r = setRows[ri];
                 const transId = getFieldValue(r, "UDFVarchar110");
@@ -860,12 +872,13 @@
             }
           }
 
+          if (!isSessionCurrent(sessionToken)) return null;
+
           const finalRows = [];
           let maxPhraseCols = 1;
           for (const v of merged.values()) { if (v.phrases.length > maxPhraseCols) maxPhraseCols = v.phrases.length; finalRows.push(v); }
           for (let i = 0; i < passthroughNoKey.length; i++) { if (passthroughNoKey[i].phrases.length > maxPhraseCols) maxPhraseCols = passthroughNoKey[i].phrases.length; finalRows.push(passthroughNoKey[i]); }
-          const includePhraseCol = distinctPhraseLabels.size >= 2;
-          return { finalRows, maxPhraseCols, includePhraseCol };
+          return { finalRows, maxPhraseCols, includePhraseCol: distinctPhraseLabels.size >= 2 };
         }
 
         function buildPhraseGroups(phraseEntries) {
@@ -899,6 +912,10 @@
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
             if (!confirmDateRange(fromVal, toVal)) return;
+
+            resetSession();
+            const myToken = api.getShared("searchSessionToken");
+
             const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
             const runSets = [];
             for (let pi = 0; pi < panes.length; pi++) {
@@ -922,20 +939,25 @@
               if (!ok) return;
               runSets.push({ keywordGroup: null, phraseGroups: [], label: "All" });
             }
+
             modal.remove(); stickyClose.remove();
             progressUI.show();
             progressUI.set("Loading column preferences...", 5, "");
             const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [], source: "default" };
-            //##> SOURCEMEDIAID GUARANTEE: Always ensure sourceMediaId is in the fields
-            //##> list sent to executeSearch. It must be present on every row for play,
-            //##> transcript fetch, and ad hoc column expansion. Never visible in the grid.
             const searchFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
             progressUI.set("Searching...", 10, "");
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Filter");
+
+            const result = await executeSearch(runSets, searchFields, dateFilter, "Filter", myToken);
+
+            if (result === null) {
+              progressUI.remove();
+              return;
+            }
             if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
             sendToDispatcher(result, colPrefs);
           } catch (err) {
+            if (err.name === "AbortError") { progressUI.remove(); return; }
             console.error(err);
             try { progressUI.remove(); } catch (_) {}
             alert("Search failed. Check console for details.");
@@ -949,6 +971,10 @@
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
             if (!confirmDateRange(fromVal, toVal)) return;
+
+            resetSession();
+            const myToken = api.getShared("searchSessionToken");
+
             const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
             const keyEntries = allRows.filter((r) => r.type === "key" && !r.isPhrase);
             const keyPhraseEntries = allRows.filter((r) => r.type === "key" && r.isPhrase);
@@ -965,18 +991,26 @@
               const ok = confirm("No key values entered. This will pull the entire date range. Continue?");
               if (!ok) return;
             }
+
             modal.remove(); stickyClose.remove();
             progressUI.show();
             progressUI.set("Loading column preferences...", 5, "");
             const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [], source: "default" };
             const searchFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
             progressUI.set("Searching...", 10, "");
+
             const runSets = [{ keywordGroup, phraseGroups, label: "Key Search" }];
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Key");
+            const result = await executeSearch(runSets, searchFields, dateFilter, "Key", myToken);
+
+            if (result === null) {
+              progressUI.remove();
+              return;
+            }
             if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
             sendToDispatcher(result, colPrefs);
           } catch (err) {
+            if (err.name === "AbortError") { progressUI.remove(); return; }
             console.error(err);
             try { progressUI.remove(); } catch (_) {}
             alert("Search failed. Check console for details.");
