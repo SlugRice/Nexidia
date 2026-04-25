@@ -178,8 +178,19 @@
           if (state.adHocPending) { alert("A column fetch is already in progress."); return; }
           if (state.fields.includes(storageName)) { alert("That column is already in the grid."); return; }
           state.adHocPending = true;
-          adHocBtn.disabled = true;
-          adHocBtn.textContent = "Fetching...";
+        adHocBtn.disabled = true;
+        adHocBtn.innerHTML = "";
+        const spinEl = document.createElement("span");
+        spinEl.textContent = "Adding column";
+        const dotEl = document.createElement("span");
+        dotEl.style.cssText = "display:inline-block;width:18px;text-align:left;";
+        adHocBtn.appendChild(spinEl);
+        adHocBtn.appendChild(dotEl);
+        let dotCount = 0;
+        const dotInterval = setInterval(() => {
+          dotCount = (dotCount + 1) % 4;
+        dotEl.textContent = ".".repeat(dotCount);
+        }, 400);
           try {
             const smids = state.rows.map((item) => getSourceMediaId(item)).filter(Boolean);
             if (!smids.length) throw new Error("No sourceMediaId values found in current results.");
@@ -223,6 +234,7 @@
             alert("Column fetch failed: " + (err.message || err));
           } finally {
             state.adHocPending = false;
+            clearInterval(dotInterval);
             adHocBtn.disabled = false;
             adHocBtn.textContent = "+ Add Column";
           }
@@ -367,6 +379,7 @@
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
 
         let dragSrcIndex = null;
+        let dragColIndex = null;
 
         function renderSortBadges() {
           sortBar.innerHTML = "";
@@ -512,7 +525,7 @@
             const th = el("th", {
               style: [
                 "position:sticky", "top:0", "z-index:5",
-                "background:" + (sortColor ? "rgba(59,130,246,0.07)" : "#f9fafb"),
+                "background:" + (sortColor ? "#dbeafe" : "#f9fafb"),
                 "border-bottom:2px solid " + (sortColor || "#e5e7eb"),
                 "padding:8px 10px",
                 "font-size:11px",
@@ -526,7 +539,41 @@
             }, label);
 
             th.onclick = () => handleHeaderClick(field);
-            trh.appendChild(th);
+
+th.draggable = true;
+th.addEventListener("dragstart", (e) => {
+  dragColIndex = i;
+  e.dataTransfer.effectAllowed = "move";
+  setTimeout(() => { th.style.opacity = "0.4"; }, 0);
+});
+th.addEventListener("dragend", () => {
+  th.style.opacity = "1";
+  dragColIndex = null;
+});
+th.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+});
+th.addEventListener("drop", (e) => {
+  e.preventDefault();
+  if (dragColIndex === null || dragColIndex === i) return;
+  const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
+  const srcField = visibleFieldList[dragColIndex];
+  const dstField = visibleFieldList[i];
+  const srcGlobal = state.fields.indexOf(srcField);
+  const dstGlobal = state.fields.indexOf(dstField);
+  if (srcGlobal === -1 || dstGlobal === -1) return;
+  const [movedField] = state.fields.splice(srcGlobal, 1);
+  const [movedHeader] = state.headers.splice(srcGlobal, 1);
+  const newDst = state.fields.indexOf(dstField);
+  state.fields.splice(newDst, 0, movedField);
+  state.headers.splice(newDst, 0, movedHeader);
+  dragColIndex = null;
+  rebuildColumnPanel();
+  renderTable();
+});
+
+trh.appendChild(th);
           }
           thead.appendChild(trh);
 
