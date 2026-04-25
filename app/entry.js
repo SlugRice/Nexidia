@@ -1,7 +1,6 @@
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
-
   if (window.__NEXIDIA_LAUNCHER_OPEN__) return;
   window.__NEXIDIA_LAUNCHER_OPEN__ = true;
 
@@ -36,7 +35,12 @@
 
   const render = () => {
     body.innerHTML = "";
-    const tools = api.listTools();
+    //##> LAUNCHER FILTER: Only tools without hidden:true are shown here.
+    //##> Dispatcher and ResultsGrid are internal tools opened programmatically.
+    //##> Any future internal tool should be registered with hidden:true to keep
+    //##> the launcher clean. Entry points only: Search, Batch Builder, and
+    //##> eventually the Listening Experience tool.
+    const tools = api.listTools().filter(t => !t.hidden);
     if (!tools.length) {
       body.appendChild(el("div", { style: "font-size:13px;color:#444;" }, "No tools registered yet."));
       return;
@@ -60,10 +64,9 @@
   modal.appendChild(card);
   document.body.appendChild(modal);
 
-//##> RACE CONDITION FIX: entry.js loads before searchExport.js and batchBuilder.js finish
-//##> eval-ing, even though bootstrap awaits each module sequentially. Without this delay,
-//##> render() runs before tools register and the launcher shows "No tools registered yet."
-//##> The 50ms timeout reliably clears the eval stack. Do not reduce to 0 or remove.
-  
+  //##> RACE CONDITION FIX: entry.js loads before searchExport.js and batchBuilder.js finish
+  //##> eval-ing, even though bootstrap awaits each module sequentially. Without this delay,
+  //##> render() runs before tools register and the launcher shows "No tools registered yet."
+  //##> The 50ms timeout reliably clears the eval stack. Do not reduce to 0 or remove.
   setTimeout(render, 50);
 })();
