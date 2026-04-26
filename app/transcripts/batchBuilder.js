@@ -5,12 +5,10 @@
   function openTranscriptBatchBuilder() {
     (async () => {
       try {
-        // ============================================================
-        // Nexidia Batch Builder (Console) — UI + Explicit Download
-        // UI tweaks:
-        // - No "Copy Summary" button
-        // - No digit-length/character notation shown to users
-        // ============================================================
+        //##> ============================================================
+        //##> Adjust batch settings here:
+        //##> Concurrency = How many transcripts are pulled at once.
+        //##> ============================================================
 
         const CFG = {
           targetTokens: 25000,
