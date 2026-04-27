@@ -558,7 +558,7 @@
               window.open(PLAYER_URL(smid), "_blank");
               return;
             }
-            playerCtrl = playerTool._openPlayerPane(card);
+            playerCtrl = playerTool._openPlayerPane(card, (registerStop) => { stopPlayer = registerStop; });
           }
           activeSmid = smid;
           playerCtrl.loadCall(smid, label, undefined, searchQuery);
@@ -718,7 +718,9 @@
         document.body.appendChild(modal);
         document.body.appendChild(stickyClose);
 
+        let stopPlayer = null;
         function close() {
+          if (typeof stopPlayer === "function") stopPlayer();
           try { modal.remove(); } catch (_) {}
           try { stickyClose.remove(); } catch (_) {}
           document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
