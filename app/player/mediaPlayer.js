@@ -408,7 +408,7 @@
 
       if (hitLinesResult.status === "fulfilled" && hitLinesResult.value) {
         const raw = hitLinesResult.value;
-        segments = Array.isArray(raw) ? raw : (raw.results || raw.segments || []);
+        segments = raw.hitLines || [];
         nonTalkSegments = segments.filter((s) => s.spokenText === "NonTalk" || s.spokenText === "NonSpeech");
       }
 
