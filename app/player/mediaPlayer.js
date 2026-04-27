@@ -49,10 +49,6 @@
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
-  function fmtTimeSec(sec) {
-    return fmtTime(sec * 1000);
-  }
-
   const el = (tag, props, ...children) => {
     props = props || {};
     const node = document.createElement(tag);
@@ -65,7 +61,6 @@
   };
 
   function buildPlayerPane(gridCard) {
-    const HANDLE_H = 6;
     const DEFAULT_H = 280;
 
     const pane = el("div", {
@@ -73,7 +68,7 @@
     });
 
     const handle = el("div", {
-      style: `height:${HANDLE_H}px;cursor:ns-resize;background:#1f2937;border-bottom:1px solid #374151;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:4px;`
+      style: `height:6px;cursor:ns-resize;background:#1f2937;border-bottom:1px solid #374151;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:4px;`
     });
     for (let i = 0; i < 3; i++) {
       handle.appendChild(el("div", { style: "width:20px;height:2px;background:#4b5563;border-radius:1px;" }));
@@ -157,7 +152,7 @@
     controls.appendChild(pinBar);
 
     const transcriptPane = el("div", {
-      style: "flex:1;min-height:0;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:4px;"
+      style: "flex:1;min-height:0;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px;"
     });
 
     leftCol.appendChild(timelineWrap);
@@ -232,7 +227,7 @@
     playheadDiv.style.left = (Math.min(1, currentMs / durationMs) * 100) + "%";
   }
 
-  function openPlayerPane(gridCard) {
+  function openPlayerPane(gridCard, onClose) {
     const els = buildPlayerPane(gridCard);
     let audio = null;
     let durationMs = 0;
@@ -243,6 +238,14 @@
     let currentSmid = null;
     let seeking = false;
     let nonTalkSegments = [];
+
+    function stopAudio() {
+      if (audio) {
+        audio.pause();
+        audio.src = "";
+        audio = null;
+      }
+    }
 
     function setStatus(msg) { els.statusEl.textContent = msg; }
     function setTitle(t) { els.titleEl.textContent = t; }
@@ -257,16 +260,20 @@
     }
 
     function syncTranscript(curMs) {
+      if (!audio || audio.currentTime <= 0.5) return;
       const curSec = curMs / 1000;
       let activeIdx = -1;
       for (let i = 0; i < transcriptRows.length; i++) {
-        if ((transcriptRows[i].TotalSecondsFromStart || 0) <= curSec) activeIdx = i;
+        if ((transcriptRows[i].totalSecondsFromStart || 0) <= curSec) activeIdx = i;
       }
       els.transcriptPane.querySelectorAll("[data-tx-idx]").forEach((b) => {
         const idx = parseInt(b.getAttribute("data-tx-idx"));
-        b.style.outline = idx === activeIdx ? "2px solid #3b82f6" : "none";
-        if (idx === activeIdx && b.getAttribute("data-active") !== "1" && audio && audio.currentTime > 0.5) { b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
-        b.setAttribute("data-active", idx === activeIdx ? "1" : "0");
+        const isActive = idx === activeIdx;
+        b.style.outline = isActive ? "2px solid #3b82f6" : "none";
+        if (isActive && b.getAttribute("data-active") !== "1") {
+          b.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+        b.setAttribute("data-active", isActive ? "1" : "0");
       });
     }
 
@@ -332,14 +339,17 @@
       els.hideBtn.textContent = hidden ? "Hide Player" : "Show Player";
     };
 
+    if (typeof onClose === "function") {
+      onClose(() => stopAudio());
+    }
+
     async function loadCall(smid, label, jumpToMs, searchQuery) {
       if (currentSmid === smid && jumpToMs !== undefined) {
-        if (audio) { audio.currentTime = jumpToMs / 1000; }
+        if (audio) audio.currentTime = jumpToMs / 1000;
         return;
       }
       currentSmid = smid;
-      if (audio) { audio.pause(); audio.src = ""; }
-      audio = null;
+      stopAudio();
       transcriptRows = []; phraseOffsets = []; eventOffsets = [];
       segments = []; nonTalkSegments = [];
       els.transcriptPane.innerHTML = "";
@@ -376,6 +386,7 @@
       audio.onloadedmetadata = () => {
         if (jumpToMs) audio.currentTime = jumpToMs / 1000;
         updateTime();
+        audio.play().catch(() => {});
       };
 
       setStatus("Loading data...");
@@ -409,19 +420,35 @@
 
       if (transcriptResult.status === "fulfilled" && transcriptResult.value) {
         const raw = transcriptResult.value;
-        transcriptRows = raw.TranscriptRows || raw.rows || raw.transcriptRows || [];
+        transcriptRows = raw.transcriptRows || raw.TranscriptRows || raw.rows || [];
         els.transcriptPane.innerHTML = "";
         for (let i = 0; i < transcriptRows.length; i++) {
           const row = transcriptRows[i];
-          const isAgent = (row.Speaker || row.speaker || "").toLowerCase() === "agent";
+          const isAgent = (row.speaker || row.Speaker || "").toLowerCase() === "agent";
+          const tsLabel = [row.formattedStartOffset, row.formattedEndOffset].filter(Boolean).join(" - ");
+
           const bubble = el("div", {
-            style: `max-width:80%;align-self:${isAgent ? "flex-end" : "flex-start"};background:${isAgent ? "#1e3a5f" : "#1e293b"};color:${isAgent ? "#bfdbfe" : "#e2e8f0"};border-radius:${isAgent ? "10px 10px 2px 10px" : "10px 10px 10px 2px"};padding:5px 10px;font-size:11px;line-height:1.4;cursor:pointer;`,
-            title: fmtTimeSec(row.TotalSecondsFromStart || 0)
+            style: `max-width:80%;display:flex;flex-direction:column;align-self:${isAgent ? "flex-end" : "flex-start"};`
           });
-          bubble.textContent = (row.Text || row.text || "").trim();
+
+          const msgEl = el("div", {
+            style: `background:${isAgent ? "#1e3a5f" : "#1e293b"};color:${isAgent ? "#bfdbfe" : "#e2e8f0"};border-radius:${isAgent ? "10px 10px 2px 10px" : "10px 10px 10px 2px"};padding:5px 10px;font-size:11px;line-height:1.4;cursor:pointer;`
+          });
+          msgEl.textContent = (row.text || row.Text || "").trim();
+
+          const tsEl = el("div", {
+            style: `font-size:10px;color:#475569;margin-top:2px;text-align:${isAgent ? "right" : "left"};padding:0 4px;`
+          }, tsLabel);
+
+          bubble.appendChild(msgEl);
+          bubble.appendChild(tsEl);
           bubble.setAttribute("data-tx-idx", i);
-          bubble.onclick = () => { if (audio) audio.currentTime = row.TotalSecondsFromStart || 0; };
-          const wrapper = el("div", { style: `display:flex;justify-content:${isAgent ? "flex-end" : "flex-start"};` });
+
+          bubble.onclick = () => { if (audio) audio.currentTime = row.totalSecondsFromStart || 0; };
+
+          const wrapper = el("div", {
+            style: `display:flex;justify-content:${isAgent ? "flex-end" : "flex-start"};`
+          });
           wrapper.appendChild(bubble);
           els.transcriptPane.appendChild(wrapper);
         }
@@ -451,7 +478,7 @@
       }, { passive: true });
     }
 
-    return { loadCall, els };
+    return { loadCall, stopAudio, els };
   }
 
   api.registerTool({
