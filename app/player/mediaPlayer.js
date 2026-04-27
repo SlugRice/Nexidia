@@ -438,8 +438,8 @@
       drawTimeline(els.segCanvas, els.timelineWrap, durationMs, segments, phraseOffsets, eventOffsets);
       buildPinBar();
 
-      if (phraseOffsets.length && !jumpToMs) {
-        audio.currentTime = phraseOffsets[0] / 1000;
+      if (phraseOffsets.length) {
+      audio.currentTime = phraseOffsets[0] / 1000;
       }
 
       setStatus(durationMs
