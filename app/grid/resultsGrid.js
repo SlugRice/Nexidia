@@ -561,7 +561,7 @@
             playerCtrl = playerTool._openPlayerPane(card);
           }
           activeSmid = smid;
-          playerCtrl.loadCall(smid, label, jumpTo, searchQuery);
+          playerCtrl.loadCall(smid, label, undefined, searchQuery);
           renderTable();
         }
 
