@@ -265,7 +265,7 @@
       els.transcriptPane.querySelectorAll("[data-tx-idx]").forEach((b) => {
         const idx = parseInt(b.getAttribute("data-tx-idx"));
         b.style.outline = idx === activeIdx ? "2px solid #3b82f6" : "none";
-        if (idx === activeIdx && b.getAttribute("data-active") !== "1") { b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+        if (idx === activeIdx && b.getAttribute("data-active") !== "1" && audio && audio.currentTime > 0.5) { b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
         b.setAttribute("data-active", idx === activeIdx ? "1" : "0");
       });
     }
@@ -369,7 +369,7 @@
 
       audio = new Audio(prepared.mediaUri);
       audio.volume = parseFloat(els.volSlider.value);
-      audio.ontimeupdate = () => { updateTime(); skipNonTalk(); };
+      audio.ontimeupdate = () => { if (audio.currentTime > 0) { updateTime(); skipNonTalk(); } };
       audio.onplay = () => { els.playBtn.textContent = "⏸"; };
       audio.onpause = () => { els.playBtn.textContent = "▶"; };
       audio.onended = () => { els.playBtn.textContent = "▶"; };
