@@ -261,7 +261,6 @@
       let activeIdx = -1;
       for (let i = 0; i < transcriptRows.length; i++) {
         if ((transcriptRows[i].TotalSecondsFromStart || 0) <= curSec) activeIdx = i;
-        }
       }
       els.transcriptPane.querySelectorAll("[data-tx-idx]").forEach((b) => {
         const idx = parseInt(b.getAttribute("data-tx-idx"));
@@ -439,7 +438,7 @@
       buildPinBar();
 
       if (phraseOffsets.length) {
-      audio.currentTime = phraseOffsets[0] / 1000;
+        audio.currentTime = phraseOffsets[0] / 1000;
       }
 
       setStatus(durationMs
