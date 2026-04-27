@@ -642,6 +642,12 @@
         });
         card.appendChild(textarea);
 
+        const preload = api.getShared("batchBuilderPreload");
+        if (preload) {
+          textarea.value = preload;
+          api.setShared("batchBuilderPreload", null);
+        }
+
         // Bottom row: settings button + submit + save checkbox + clear
         const bottomRow = el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
 
