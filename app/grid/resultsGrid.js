@@ -45,8 +45,7 @@
 
         function normalizeCellText(raw) {
           if (xls) return xls.normalizeCellText(raw);
-          let s = (raw === null || raw === undefined) ? "" : String(raw);
-          return s.trim();
+          return (raw === null || raw === undefined) ? "" : String(raw).trim();
         }
 
         function formatDisplay(fieldKey, raw) {
@@ -100,8 +99,13 @@
           sorts: [],
           columnFilters: {},
           globalFilter: "",
-          adHocPending: false
+          adHocPending: false,
+          selected: new Set(),   // indices into getFilteredSortedRows()
+          hiddenRows: new Set()  // indices into state.rows (original)
         };
+
+        let dragColIndex = null;
+        let dragSrcIndex = null;
 
         // ── Sort ─────────────────────────────────────────────────────────────
         function applySort(rows) {
@@ -165,12 +169,76 @@
           return rows.filter((item) => vis.some((f) => getCellValue(item, f).toLowerCase().includes(q)));
         }
 
+        function applyHiddenFilter(rows) {
+          if (!state.hiddenRows.size) return rows;
+          return rows.filter((item) => {
+            const origIdx = state.rows.indexOf(item);
+            return !state.hiddenRows.has(origIdx);
+          });
+        }
+
         function getFilteredSortedRows() {
           let rows = state.rows.slice();
+          rows = applyHiddenFilter(rows);
           rows = applyColumnFilters(rows);
           rows = applyGlobalFilter(rows);
           rows = applySort(rows);
           return rows;
+        }
+
+        // ── Selection helpers ────────────────────────────────────────────────
+        function getSelectedItems() {
+          const rows = getFilteredSortedRows();
+          return [...state.selected].map((i) => rows[i]).filter(Boolean);
+        }
+
+        function updateToolbarCounts() {
+          const rows = getFilteredSortedRows();
+          rowCountEl.textContent = rows.length.toLocaleString() + " of " + state.rows.length.toLocaleString() + " rows";
+
+          // Selection count
+          if (state.selected.size > 0) {
+            selCountEl.textContent = state.selected.size.toLocaleString() + " selected";
+            selCountEl.style.display = "";
+            hideSelectedBtn.style.display = "";
+          } else {
+            selCountEl.style.display = "none";
+            hideSelectedBtn.style.display = "none";
+          }
+
+          // Hidden rows
+          if (state.hiddenRows.size > 0) {
+            hiddenCountEl.textContent = state.hiddenRows.size.toLocaleString() + " hidden";
+            hiddenCountEl.style.display = "";
+            unhideBtn.style.display = "";
+          } else {
+            hiddenCountEl.style.display = "none";
+            unhideBtn.style.display = "none";
+          }
+        }
+
+        // ── Export confirmation dialog ────────────────────────────────────────
+        function confirmExportScope(onSelected, onAll) {
+          if (!state.selected.size) { onAll(); return; }
+          const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+          const box = el("div", { style: "background:#fff;width:400px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+          box.appendChild(el("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:8px;" }, "Export Options"));
+          box.appendChild(el("div", { style: "font-size:13px;color:#374151;margin-bottom:18px;" },
+            `You have ${state.selected.size.toLocaleString()} item${state.selected.size !== 1 ? "s" : ""} selected. Would you like to export just the selected items or the entire dataset?`
+          ));
+          const btnRow = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" });
+          const selBtn = el("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Export Selected");
+          const allBtn = el("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:#f9fafb;border:1px solid #d1d5db;color:#111827;font-size:13px;cursor:pointer;" }, "Export All");
+          const cancelBtn = el("button", { style: "width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;font-size:13px;cursor:pointer;color:#6b7280;" }, "Cancel");
+          selBtn.onclick = () => { overlay.remove(); onSelected(); };
+          allBtn.onclick = () => { overlay.remove(); onAll(); };
+          cancelBtn.onclick = () => overlay.remove();
+          btnRow.appendChild(selBtn);
+          btnRow.appendChild(allBtn);
+          box.appendChild(btnRow);
+          box.appendChild(cancelBtn);
+          overlay.appendChild(box);
+          document.body.appendChild(overlay);
         }
 
         // ── Ad hoc column fetch ───────────────────────────────────────────────
@@ -178,38 +246,31 @@
           if (state.adHocPending) { alert("A column fetch is already in progress."); return; }
           if (state.fields.includes(storageName)) { alert("That column is already in the grid."); return; }
           state.adHocPending = true;
-        adHocBtn.disabled = true;
-        adHocBtn.innerHTML = "";
-        const spinEl = document.createElement("span");
-        spinEl.textContent = "Adding column";
-        const dotEl = document.createElement("span");
-        dotEl.style.cssText = "display:inline-block;width:18px;text-align:left;";
-        adHocBtn.appendChild(spinEl);
-        adHocBtn.appendChild(dotEl);
-        let dotCount = 0;
-        const dotInterval = setInterval(() => {
-          dotCount = (dotCount + 1) % 4;
-        dotEl.textContent = ".".repeat(dotCount);
-        }, 400);
+          adHocBtn.disabled = true;
+          adHocBtn.innerHTML = "";
+          const spinEl = document.createElement("span");
+          spinEl.textContent = "Adding column";
+          const dotEl = document.createElement("span");
+          dotEl.style.cssText = "display:inline-block;width:18px;text-align:left;";
+          adHocBtn.appendChild(spinEl);
+          adHocBtn.appendChild(dotEl);
+          let dotCount = 0;
+          const dotInterval = setInterval(() => {
+            dotCount = (dotCount + 1) % 4;
+            dotEl.textContent = ".".repeat(dotCount);
+          }, 400);
           try {
             const smids = state.rows.map((item) => getSourceMediaId(item)).filter(Boolean);
-            if (!smids.length) throw new Error("No sourceMediaId values found in current results.");
+            if (!smids.length) throw new Error("No sourceMediaId values found.");
             const payload = {
               from: 0, to: smids.length,
               fields: ["sourceMediaId", storageName],
               query: {
                 operator: "AND", invertOperator: false,
-                filters: [{
-                  operator: "AND", invertOperator: false, filterType: "interactions",
-                  filters: [{ operator: "IN", type: "KEYWORD", parameterName: "sourceMediaId", value: smids }]
-                }]
+                filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: [{ operator: "IN", type: "KEYWORD", parameterName: "sourceMediaId", value: smids }] }]
               }
             };
-            const res = await fetch(BASE_SEARCH_URL, {
-              method: "POST", credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload)
-            });
+            const res = await fetch(BASE_SEARCH_URL, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
             if (!res.ok) throw new Error("API returned " + res.status);
             const json = await res.json();
             const results = Array.isArray(json.results) ? json.results : [];
@@ -233,8 +294,8 @@
             console.error(err);
             alert("Column fetch failed: " + (err.message || err));
           } finally {
-            state.adHocPending = false;
             clearInterval(dotInterval);
+            state.adHocPending = false;
             adHocBtn.disabled = false;
             adHocBtn.textContent = "+ Add Column";
           }
@@ -266,9 +327,7 @@
           renderList("");
           const cancelBtn = el("button", { style: "margin-top:10px;width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;" }, "Cancel");
           cancelBtn.onclick = () => overlay.remove();
-          box.appendChild(input);
-          box.appendChild(list);
-          box.appendChild(cancelBtn);
+          box.appendChild(input); box.appendChild(list); box.appendChild(cancelBtn);
           overlay.appendChild(box);
           document.body.appendChild(overlay);
           setTimeout(() => input.focus(), 50);
@@ -280,19 +339,7 @@
           const existing = state.columnFilters[field] || { op: "contains", value: "" };
           const rect = anchorEl.getBoundingClientRect();
           const pop = el("div", {
-            style: [
-              "position:fixed",
-              "top:" + (rect.bottom + 4) + "px",
-              "left:" + rect.left + "px",
-              "width:240px",
-              "background:#fff",
-              "border:1px solid #e5e7eb",
-              "border-radius:10px",
-              "padding:12px",
-              "box-shadow:0 6px 20px rgba(0,0,0,.18)",
-              "z-index:1000002",
-              "font-family:Segoe UI,Arial,sans-serif"
-            ].join(";")
+            style: ["position:fixed","top:" + (rect.bottom + 4) + "px","left:" + rect.left + "px","width:240px","background:#fff","border:1px solid #e5e7eb","border-radius:10px","padding:12px","box-shadow:0 6px 20px rgba(0,0,0,.18)","z-index:1000002","font-family:Segoe UI,Arial,sans-serif"].join(";")
           });
           pop.setAttribute("data-col-filter-popover", "1");
           const opSelect = el("select", { style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;" });
@@ -307,32 +354,50 @@
           applyBtn.onclick = () => { state.columnFilters[field] = { op: opSelect.value, value: valInput.value }; pop.remove(); renderTable(); rebuildColumnPanel(); };
           const clearBtn = el("button", { style: "flex:1;padding:6px;border-radius:6px;border:1px solid #e5e7eb;background:#f9fafb;font-size:12px;cursor:pointer;" }, "Clear");
           clearBtn.onclick = () => { delete state.columnFilters[field]; pop.remove(); renderTable(); rebuildColumnPanel(); };
-          btnRow.appendChild(applyBtn);
-          btnRow.appendChild(clearBtn);
-          pop.appendChild(opSelect);
-          pop.appendChild(valInput);
-          pop.appendChild(btnRow);
+          btnRow.appendChild(applyBtn); btnRow.appendChild(clearBtn);
+          pop.appendChild(opSelect); pop.appendChild(valInput); pop.appendChild(btnRow);
           document.body.appendChild(pop);
           setTimeout(() => valInput.focus(), 30);
-          function onOutside(e) {
-            if (!pop.contains(e.target) && e.target !== anchorEl) { pop.remove(); document.removeEventListener("mousedown", onOutside); }
-          }
+          function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchorEl) { pop.remove(); document.removeEventListener("mousedown", onOutside); } }
           setTimeout(() => document.addEventListener("mousedown", onOutside), 100);
         }
 
-        // ── Export current view as XLS ────────────────────────────────────────
-        function exportCurrentView() {
+        // ── Export to Excel ───────────────────────────────────────────────────
+        function doExcelExport(rows) {
           if (!xls) { alert("Export builder not loaded."); return; }
           const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
-          const visibleHeaderList = state.fields
-            .map((f, i) => ({ f, h: state.headers[i] }))
-            .filter(({ f }) => state.visible.has(f))
-            .map(({ h }) => h);
-          const rows = getFilteredSortedRows();
+          const visibleHeaderList = state.fields.map((f, i) => ({ f, h: state.headers[i] })).filter(({ f }) => state.visible.has(f)).map(({ h }) => h);
           if (!rows.length) { alert("No rows to export."); return; }
           const html = xls.buildExcelHtml(visibleHeaderList, visibleFieldList, rows, []);
           const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
           xls.downloadExcelFile("nexidia_grid_export_" + stamp + ".xls", html);
+        }
+
+        function exportToExcel() {
+          confirmExportScope(
+            () => doExcelExport(getSelectedItems()),
+            () => doExcelExport(getFilteredSortedRows())
+          );
+        }
+
+        // ── Export transcripts ────────────────────────────────────────────────
+        function doTranscriptExport(rows) {
+          const smids = rows.map((item) => getSourceMediaId(item)).filter(Boolean);
+          const transIds = rows.map((item) => getCellValue(item, "UDFVarchar110")).filter((v) => v && v !== "0");
+          if (!smids.length && !transIds.length) { alert("No valid IDs found in selected rows."); return; }
+          // Hand off to batch builder with pre-populated IDs
+          const ids = transIds.length ? transIds : smids;
+          api.setShared("batchBuilderPreload", ids.join("\n"));
+          const tool = api.listTools().find((t) => t.id === "transcriptBatchBuilder");
+          if (tool) tool.open();
+          else alert("Transcript Batch Builder not loaded. Check manifest.");
+        }
+
+        function exportTranscripts() {
+          confirmExportScope(
+            () => doTranscriptExport(getSelectedItems()),
+            () => doTranscriptExport(getFilteredSortedRows())
+          );
         }
 
         // ── Reset ─────────────────────────────────────────────────────────────
@@ -341,10 +406,13 @@
           state.columnFilters = {};
           state.globalFilter = "";
           state.visible = new Set([...phraseFields, ...allFields]);
+          state.selected.clear();
+          state.hiddenRows.clear();
           globalSearchBox.value = "";
           rebuildColumnPanel();
           renderSortBadges();
           renderTable();
+          updateToolbarCounts();
         }
 
         // ── Modal shell ───────────────────────────────────────────────────────
@@ -356,30 +424,56 @@
         const toolbar = el("div", { style: "padding:12px 16px 8px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
         const titleEl = el("div", { style: "font-size:15px;font-weight:700;color:#111827;flex-shrink:0;" }, "Results Grid");
         const rowCountEl = el("div", { style: "font-size:12px;color:#6b7280;flex-shrink:0;" }, "");
+        const selCountEl = el("div", { style: "font-size:12px;color:#2563eb;font-weight:600;flex-shrink:0;display:none;" }, "");
+        const hiddenCountEl = el("div", { style: "font-size:12px;color:#f59e0b;font-weight:600;flex-shrink:0;display:none;" }, "");
+        const unhideBtn = el("button", { style: "padding:4px 8px;border-radius:6px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:11px;flex-shrink:0;display:none;" }, "Unhide All");
+        unhideBtn.onclick = () => { state.hiddenRows.clear(); renderTable(); updateToolbarCounts(); };
+
         const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "margin-left:auto;width:240px;max-width:30vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
         globalSearchBox.oninput = () => { state.globalFilter = globalSearchBox.value || ""; renderTable(); };
 
-        const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "☰");
+        const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "\u2630");
         const adHocBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;flex-shrink:0;" }, "+ Add Column");
         adHocBtn.onclick = () => openAdHocPicker();
-        const exportBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Export View");
-        exportBtn.onclick = () => exportCurrentView();
+
+        const hideSelectedBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #9ca3af;background:#fff;color:#374151;cursor:pointer;font-size:12px;flex-shrink:0;display:none;" }, "Hide Selected");
+        hideSelectedBtn.onclick = () => {
+          const rows = getFilteredSortedRows();
+          for (const i of state.selected) {
+            const item = rows[i];
+            if (!item) continue;
+            const origIdx = state.rows.indexOf(item);
+            if (origIdx !== -1) state.hiddenRows.add(origIdx);
+          }
+          state.selected.clear();
+          renderTable();
+          updateToolbarCounts();
+        };
+
+        const exportExcelBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Export to Excel");
+        exportExcelBtn.onclick = () => exportToExcel();
+
+        const exportTranscriptsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#4f46e5;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Export Transcripts");
+        exportTranscriptsBtn.onclick = () => exportTranscripts();
+
         const resetBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Reset");
         resetBtn.onclick = () => resetGrid();
 
         toolbar.appendChild(titleEl);
         toolbar.appendChild(rowCountEl);
+        toolbar.appendChild(selCountEl);
+        toolbar.appendChild(hiddenCountEl);
+        toolbar.appendChild(unhideBtn);
         toolbar.appendChild(columnsBtn);
         toolbar.appendChild(adHocBtn);
-        toolbar.appendChild(exportBtn);
+        toolbar.appendChild(hideSelectedBtn);
+        toolbar.appendChild(exportExcelBtn);
+        toolbar.appendChild(exportTranscriptsBtn);
         toolbar.appendChild(resetBtn);
         toolbar.appendChild(globalSearchBox);
 
-        // ── Sort badge bar with drag-to-reorder ───────────────────────────────
+        // ── Sort badge bar ────────────────────────────────────────────────────
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
-
-        let dragSrcIndex = null;
-        let dragColIndex = null;
 
         function renderSortBadges() {
           sortBar.innerHTML = "";
@@ -387,68 +481,27 @@
             sortBar.appendChild(el("div", { style: "font-size:11px;color:#9ca3af;" }, "No active sorts \u2014 click a column header to sort."));
             return;
           }
-          const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
+          const tierColors = ["#1d4ed8","#0369a1","#0f766e"];
           for (let i = 0; i < state.sorts.length; i++) {
             const { field, dir } = state.sorts[i];
             const headerIdx = state.fields.indexOf(field);
             const label = headerIdx >= 0 ? (state.headers[headerIdx] || field) : field;
             const color = tierColors[i] || "#374151";
-
             const badge = el("div", {
               draggable: true,
-              style: [
-                "display:inline-flex", "align-items:center", "gap:4px",
-                "padding:4px 8px 4px 6px",
-                "border-radius:999px",
-                "background:" + color,
-                "color:#fff",
-                "font-size:11px",
-                "font-weight:600",
-                "cursor:grab",
-                "user-select:none",
-                "transition:opacity 0.15s"
-              ].join(";"),
+              style: ["display:inline-flex","align-items:center","gap:4px","padding:4px 8px 4px 6px","border-radius:999px","background:" + color,"color:#fff","font-size:11px","font-weight:600","cursor:grab","user-select:none","transition:opacity 0.15s"].join(";"),
               title: "Tier " + (i + 1) + " \u2014 drag to reorder, click to reverse, \u2715 to remove"
             });
-
             const tierNum = el("span", { style: "opacity:0.7;font-size:10px;" }, (i + 1) + ".");
             const labelEl = el("span", {}, label);
             const dirEl = el("span", {}, dir === 1 ? " \u2191" : " \u2193");
-            const removeEl = el("span", {
-              style: "margin-left:5px;opacity:0.75;font-size:11px;cursor:pointer;",
-              title: "Remove sort tier"
-            }, "\u2715");
-
-            badge.appendChild(tierNum);
-            badge.appendChild(labelEl);
-            badge.appendChild(dirEl);
-            badge.appendChild(removeEl);
-
-            // Click = flip direction (unless clicking remove)
-            badge.onclick = (e) => {
-              if (e.target === removeEl) { removeSortTier(i); return; }
-              state.sorts[i].dir *= -1;
-              renderSortBadges();
-              renderTable();
-            };
-
-            // Drag to reorder
-            badge.addEventListener("dragstart", (e) => {
-              dragSrcIndex = i;
-              e.dataTransfer.effectAllowed = "move";
-              setTimeout(() => { badge.style.opacity = "0.4"; }, 0);
-            });
+            const removeEl = el("span", { style: "margin-left:5px;opacity:0.75;font-size:11px;cursor:pointer;", title: "Remove sort tier" }, "\u2715");
+            badge.appendChild(tierNum); badge.appendChild(labelEl); badge.appendChild(dirEl); badge.appendChild(removeEl);
+            badge.onclick = (e) => { if (e.target === removeEl) { removeSortTier(i); return; } state.sorts[i].dir *= -1; renderSortBadges(); renderTable(); };
+            badge.addEventListener("dragstart", (e) => { dragSrcIndex = i; e.dataTransfer.effectAllowed = "move"; setTimeout(() => { badge.style.opacity = "0.4"; }, 0); });
             badge.addEventListener("dragend", () => { badge.style.opacity = "1"; dragSrcIndex = null; });
             badge.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
-            badge.addEventListener("drop", (e) => {
-              e.preventDefault();
-              if (dragSrcIndex === null || dragSrcIndex === i) return;
-              const moved = state.sorts.splice(dragSrcIndex, 1)[0];
-              state.sorts.splice(i, 0, moved);
-              renderSortBadges();
-              renderTable();
-            });
-
+            badge.addEventListener("drop", (e) => { e.preventDefault(); if (dragSrcIndex === null || dragSrcIndex === i) return; const moved = state.sorts.splice(dragSrcIndex, 1)[0]; state.sorts.splice(i, 0, moved); renderSortBadges(); renderTable(); });
             sortBar.appendChild(badge);
           }
         }
@@ -477,15 +530,12 @@
               title: h + (hasFilter ? " (filtered)" : "")
             }, h + (hasFilter ? " \uD83D\uDD3D" : ""));
             labelEl.onclick = () => openColumnFilterPopover(f, labelEl);
-            rowEl.appendChild(cb);
-            rowEl.appendChild(labelEl);
+            rowEl.appendChild(cb); rowEl.appendChild(labelEl);
             colList.appendChild(rowEl);
           }
         }
 
-        columnsBtn.onclick = () => {
-          colPanel.style.display = colPanel.style.display !== "none" ? "none" : "block";
-        };
+        columnsBtn.onclick = () => { colPanel.style.display = colPanel.style.display !== "none" ? "none" : "block"; };
 
         // ── Table ─────────────────────────────────────────────────────────────
         const gridWrap = el("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;" });
@@ -498,101 +548,136 @@
         tableWrap.appendChild(table);
         gridWrap.appendChild(tableWrap);
 
+        // ── Render table ──────────────────────────────────────────────────────
         function renderTable() {
           const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
-          const visibleHeaderList = state.fields
-            .map((f, i) => ({ f, h: state.headers[i] }))
-            .filter(({ f }) => state.visible.has(f))
-            .map(({ h }) => h);
+          const visibleHeaderList = state.fields.map((f, i) => ({ f, h: state.headers[i] })).filter(({ f }) => state.visible.has(f)).map(({ h }) => h);
 
           // Header
           thead.innerHTML = "";
           const trh = el("tr", {});
+
+          // Select-all checkbox col
+          const thSel = el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:6px 8px;width:28px;" });
+          const selectAllCb = el("input", { type: "checkbox", title: "Select all" });
+          selectAllCb.onchange = () => {
+            const rows = getFilteredSortedRows();
+            if (selectAllCb.checked) { rows.forEach((_, i) => state.selected.add(i)); }
+            else { state.selected.clear(); }
+            renderTable();
+            updateToolbarCounts();
+          };
+          thSel.appendChild(selectAllCb);
+          trh.appendChild(thSel);
+
+          // Play col
           trh.appendChild(el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:8px 10px;font-size:11px;width:44px;" }, ""));
+
+          // Hide col
+          trh.appendChild(el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:8px 4px;font-size:11px;width:24px;" }, ""));
 
           for (let i = 0; i < visibleFieldList.length; i++) {
             const field = visibleFieldList[i];
             const headerText = visibleHeaderList[i] || field;
             const sortIdx = state.sorts.findIndex((s) => s.field === field);
             const hasFilter = state.columnFilters[field] && state.columnFilters[field].value;
-            const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
+            const tierColors = ["#1d4ed8","#0369a1","#0f766e"];
             const sortColor = sortIdx >= 0 ? (tierColors[sortIdx] || "#374151") : null;
-
             let label = headerText;
             if (sortIdx >= 0) label += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
             if (hasFilter) label += " \uD83D\uDD3D";
-
             const th = el("th", {
-              style: [
-                "position:sticky", "top:0", "z-index:5",
-                "background:" + (sortColor ? "#dbeafe" : "#f9fafb"),
-                "border-bottom:2px solid " + (sortColor || "#e5e7eb"),
-                "padding:8px 10px",
-                "font-size:11px",
-                "text-align:left",
-                "white-space:nowrap",
-                "cursor:pointer",
-                "user-select:none",
-                sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"
-              ].join(";"),
+              style: ["position:sticky","top:0","z-index:5","background:" + (sortColor ? "#dbeafe" : "#f9fafb"),"border-bottom:2px solid " + (sortColor || "#e5e7eb"),"padding:8px 10px","font-size:11px","text-align:left","white-space:nowrap","cursor:pointer","user-select:none",sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"].join(";"),
               title: "Click to sort"
             }, label);
-
             th.onclick = () => handleHeaderClick(field);
 
-th.draggable = true;
-th.addEventListener("dragstart", (e) => {
-  dragColIndex = i;
-  e.dataTransfer.effectAllowed = "move";
-  setTimeout(() => { th.style.opacity = "0.4"; }, 0);
-});
-th.addEventListener("dragend", () => {
-  th.style.opacity = "1";
-  dragColIndex = null;
-});
-th.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-});
-th.addEventListener("drop", (e) => {
-  e.preventDefault();
-  if (dragColIndex === null || dragColIndex === i) return;
-  const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
-  const srcField = visibleFieldList[dragColIndex];
-  const dstField = visibleFieldList[i];
-  const srcGlobal = state.fields.indexOf(srcField);
-  const dstGlobal = state.fields.indexOf(dstField);
-  if (srcGlobal === -1 || dstGlobal === -1) return;
-  const [movedField] = state.fields.splice(srcGlobal, 1);
-  const [movedHeader] = state.headers.splice(srcGlobal, 1);
-  const newDst = state.fields.indexOf(dstField);
-  state.fields.splice(newDst, 0, movedField);
-  state.headers.splice(newDst, 0, movedHeader);
-  dragColIndex = null;
-  rebuildColumnPanel();
-  renderTable();
-});
+            th.draggable = true;
+            th.addEventListener("dragstart", (e) => { dragColIndex = i; e.dataTransfer.effectAllowed = "move"; setTimeout(() => { th.style.opacity = "0.4"; }, 0); });
+            th.addEventListener("dragend", () => { th.style.opacity = "1"; dragColIndex = null; });
+            th.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+            th.addEventListener("drop", (e) => {
+              e.preventDefault();
+              if (dragColIndex === null || dragColIndex === i) return;
+              const srcField = visibleFieldList[dragColIndex];
+              const dstField = visibleFieldList[i];
+              const srcGlobal = state.fields.indexOf(srcField);
+              const dstGlobal = state.fields.indexOf(dstField);
+              if (srcGlobal === -1 || dstGlobal === -1) return;
+              const [movedField] = state.fields.splice(srcGlobal, 1);
+              const [movedHeader] = state.headers.splice(srcGlobal, 1);
+              const newDst = state.fields.indexOf(dstField);
+              state.fields.splice(newDst, 0, movedField);
+              state.headers.splice(newDst, 0, movedHeader);
+              dragColIndex = null;
+              rebuildColumnPanel();
+              renderTable();
+            });
 
-trh.appendChild(th);
+            trh.appendChild(th);
           }
           thead.appendChild(trh);
 
           // Rows
           const rows = getFilteredSortedRows();
-          rowCountEl.textContent = rows.length.toLocaleString() + " of " + state.rows.length.toLocaleString() + " rows";
+          updateToolbarCounts();
+          selectAllCb.checked = rows.length > 0 && rows.every((_, i) => state.selected.has(i));
+          selectAllCb.indeterminate = state.selected.size > 0 && !selectAllCb.checked;
+
           tbody.innerHTML = "";
           const maxRender = Math.min(rows.length, 3000);
 
           for (let ri = 0; ri < maxRender; ri++) {
             const item = rows[ri];
-            const tr = el("tr", { style: ri % 2 ? "background:#f8fafc;" : "background:#fff;" });
+            const isChecked = state.selected.has(ri);
+            const tr = el("tr", { style: isChecked ? "background:#eff6ff;" : (ri % 2 ? "background:#f8fafc;" : "background:#fff;") });
+
+            // Checkbox + range-select arrows cell
+            const tdSel = el("td", { style: "padding:4px 6px;border-bottom:1px solid #f1f5f9;white-space:nowrap;vertical-align:middle;" });
+            const rowCb = el("input", { type: "checkbox" });
+            rowCb.checked = isChecked;
+            rowCb.onchange = () => {
+              if (rowCb.checked) state.selected.add(ri);
+              else state.selected.delete(ri);
+              updateToolbarCounts();
+              // Show/hide arrows
+              arrowWrap.style.display = rowCb.checked ? "flex" : "none";
+              tr.style.background = rowCb.checked ? "#eff6ff;" : (ri % 2 ? "#f8fafc;" : "#fff;");
+            };
+
+            const arrowWrap = el("div", { style: "display:" + (isChecked ? "flex" : "none") + ";flex-direction:column;align-items:center;margin-right:2px;" });
+
+            const upArrow = el("span", {
+              style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;",
+              title: "Select all above"
+            }, "\u00BB");
+            upArrow.style.transform = "rotate(-90deg)";
+            upArrow.onclick = () => {
+              for (let j = 0; j < ri; j++) state.selected.add(j);
+              renderTable();
+              updateToolbarCounts();
+            };
+
+            const downArrow = el("span", {
+              style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;",
+              title: "Select all below"
+            }, "\u00BB");
+            downArrow.style.transform = "rotate(90deg)";
+            downArrow.onclick = () => {
+              for (let j = ri + 1; j < rows.length; j++) state.selected.add(j);
+              renderTable();
+              updateToolbarCounts();
+            };
+
+            arrowWrap.appendChild(upArrow);
+            arrowWrap.appendChild(downArrow);
+            tdSel.appendChild(arrowWrap);
+            tdSel.appendChild(rowCb);
+            tr.appendChild(tdSel);
 
             // Play cell
             const tdPlay = el("td", { style: "padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;" });
-            const playBtn = el("button", {
-              style: "border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:3px 8px;cursor:pointer;font-size:11px;",
-              title: "Open in Nexidia player"
-            }, "\u25B6");
+            const playBtn = el("button", { style: "border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:3px 8px;cursor:pointer;font-size:11px;", title: "Open in Nexidia player" }, "\u25B6");
             playBtn.onclick = () => {
               const smid = getSourceMediaId(item);
               if (!smid) { alert("sourceMediaId not available for this row."); return; }
@@ -601,25 +686,41 @@ trh.appendChild(th);
             tdPlay.appendChild(playBtn);
             tr.appendChild(tdPlay);
 
-            // Data cells — use getCellDisplay for formatted values
+            // Hide cell
+            const tdHide = el("td", { style: "padding:5px 4px;border-bottom:1px solid #f1f5f9;white-space:nowrap;" });
+            const hideBtn = el("span", {
+              style: "font-size:11px;cursor:pointer;color:#d1d5db;",
+              title: "Hide this row"
+            }, "\u00BB");
+            hideBtn.onmouseenter = () => { hideBtn.style.color = "#6b7280"; };
+            hideBtn.onmouseleave = () => { hideBtn.style.color = "#d1d5db"; };
+            hideBtn.onclick = () => {
+              const origIdx = state.rows.indexOf(item);
+              if (origIdx !== -1) state.hiddenRows.add(origIdx);
+              state.selected.delete(ri);
+              renderTable();
+              updateToolbarCounts();
+            };
+            tdHide.appendChild(hideBtn);
+            tr.appendChild(tdHide);
+
+            // Data cells
             for (const field of visibleFieldList) {
               const display = getCellDisplay(item, field);
-              const raw = getCellValue(item, field);
               const td = el("td", {
                 style: "padding:5px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis;",
                 title: display
               }, display);
               tr.appendChild(td);
             }
+
             tbody.appendChild(tr);
           }
 
           if (rows.length > maxRender) {
             const tr = el("tr", {});
-            const td = el("td", {
-              colSpan: visibleFieldList.length + 1,
-              style: "padding:10px;color:#6b7280;font-size:11px;text-align:center;"
-            }, "Showing first " + maxRender.toLocaleString() + " rows. Refine filters to narrow results.");
+            const td = el("td", { colSpan: visibleFieldList.length + 3, style: "padding:10px;color:#6b7280;font-size:11px;text-align:center;" },
+              "Showing first " + maxRender.toLocaleString() + " rows. Refine filters to narrow results.");
             tr.appendChild(td);
             tbody.appendChild(tr);
           }
