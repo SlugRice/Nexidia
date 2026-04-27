@@ -806,6 +806,8 @@
                 // ── Session check before each page fetch ──────────────────────
                 if (!isSessionCurrent(sessionToken)) return null;
 
+                api.setShared("lastSearchQuery", payload);
+                
                 const interactionFilters = [];
                 if (runSet.keywordGroup) interactionFilters.push(runSet.keywordGroup);
                 if (expansion.group) interactionFilters.push(expansion.group);
