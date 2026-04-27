@@ -10,15 +10,14 @@
           alert("No search results found. Run a search first.");
           return;
         }
-
         const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
         const hiddenFields = api.getShared("hiddenFields") || new Set(["sourceMediaId"]);
         const xls = api.getShared("xlsBuilder");
+        const searchQuery = api.getShared("lastSearchQuery") || null;
 
         const BASE_SEARCH_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search";
         const PLAYER_URL = (smid) => `https://apug01.nxondemand.com/NxIA/ui/explore/(search//player:player/${encodeURIComponent(smid)})`;
 
-        // ── Helpers ──────────────────────────────────────────────────────────
         const el = (tag, props, ...children) => {
           props = props || {};
           const node = document.createElement(tag);
@@ -63,25 +62,38 @@
         }
 
         function getCellValue(item, field) {
-          if (field.startsWith("__PHRASE_")) {
+          if (field.startsWith("__PHRASE_") && !field.startsWith("__PHRASE_OFFSET_")) {
             const idx = parseInt(field.replace(/\D/g, ""), 10) - 1;
             return (item.phrases && item.phrases[idx]) ? item.phrases[idx] : "";
+          }
+          if (field === "__PHRASE_OFFSETS__") {
+            return (item.__phraseOffsets__ && item.__phraseOffsets__.length)
+              ? item.__phraseOffsets__.join("|")
+              : "";
           }
           const r = item.row || item;
           return normalizeCellText(getFieldValue(r, field));
         }
 
         function getCellDisplay(item, field) {
-          if (field.startsWith("__PHRASE_")) return getCellValue(item, field);
+          if (field.startsWith("__PHRASE_") && !field.startsWith("__PHRASE_OFFSET_")) return getCellValue(item, field);
+          if (field === "__PHRASE_OFFSETS__") return getCellValue(item, field);
           const r = item.row || item;
           const raw = normalizeCellText(getFieldValue(r, field));
           return formatDisplay(field, raw);
         }
 
-        // ── State ────────────────────────────────────────────────────────────
+        function getRowLabel(item) {
+          const r = item.row || item;
+          const agent = getFieldValue(r, "agentName") || "";
+          const tid = getFieldValue(r, "UDFVarchar110") || "";
+          const dt = getFieldValue(r, "recordedDateTime") || getFieldValue(r, "recordedDate") || "";
+          const datePart = dt ? new Date(dt).toLocaleDateString() : "";
+          return [agent, tid, datePart].filter(Boolean).join(" · ") || "Call";
+        }
+
         const allFields = colPrefs.fields.filter((f) => !hiddenFields.has(f));
         const allHeaders = colPrefs.headers.filter((_, i) => !hiddenFields.has(colPrefs.fields[i]));
-
         const phraseFields = [];
         const phraseHeaders = [];
         if (data.includePhraseCol) {
@@ -100,14 +112,15 @@
           columnFilters: {},
           globalFilter: "",
           adHocPending: false,
-          selected: new Set(),   // indices into getFilteredSortedRows()
-          hiddenRows: new Set()  // indices into state.rows (original)
+          selected: new Set(),
+          hiddenRows: new Set()
         };
 
         let dragColIndex = null;
         let dragSrcIndex = null;
+        let playerCtrl = null;
+        let activeSmid = null;
 
-        // ── Sort ─────────────────────────────────────────────────────────────
         function applySort(rows) {
           if (!state.sorts.length) return rows;
           return rows.slice().sort((a, b) => {
@@ -146,7 +159,6 @@
           renderTable();
         }
 
-        // ── Filters ──────────────────────────────────────────────────────────
         function applyColumnFilters(rows) {
           const active = Object.entries(state.columnFilters).filter(([, f]) => f && f.value && f.value.trim());
           if (!active.length) return rows;
@@ -186,7 +198,6 @@
           return rows;
         }
 
-        // ── Selection helpers ────────────────────────────────────────────────
         function getSelectedItems() {
           const rows = getFilteredSortedRows();
           return [...state.selected].map((i) => rows[i]).filter(Boolean);
@@ -195,8 +206,6 @@
         function updateToolbarCounts() {
           const rows = getFilteredSortedRows();
           rowCountEl.textContent = rows.length.toLocaleString() + " of " + state.rows.length.toLocaleString() + " rows";
-
-          // Selection count
           if (state.selected.size > 0) {
             selCountEl.textContent = state.selected.size.toLocaleString() + " selected";
             selCountEl.style.display = "";
@@ -205,8 +214,6 @@
             selCountEl.style.display = "none";
             hideSelectedBtn.style.display = "none";
           }
-
-          // Hidden rows
           if (state.hiddenRows.size > 0) {
             hiddenCountEl.textContent = state.hiddenRows.size.toLocaleString() + " hidden";
             hiddenCountEl.style.display = "";
@@ -217,7 +224,6 @@
           }
         }
 
-        // ── Export confirmation dialog ────────────────────────────────────────
         function confirmExportScope(onSelected, onAll) {
           if (!state.selected.size) { onAll(); return; }
           const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
@@ -241,7 +247,6 @@
           document.body.appendChild(overlay);
         }
 
-        // ── Ad hoc column fetch ───────────────────────────────────────────────
         async function fetchAdHocColumn(storageName, displayName) {
           if (state.adHocPending) { alert("A column fetch is already in progress."); return; }
           if (state.fields.includes(storageName)) { alert("That column is already in the grid."); return; }
@@ -301,7 +306,6 @@
           }
         }
 
-        // ── Ad hoc picker ─────────────────────────────────────────────────────
         function openAdHocPicker() {
           const metaFields = api.getShared("metadataFields") || [];
           const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000001;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
@@ -333,17 +337,16 @@
           setTimeout(() => input.focus(), 50);
         }
 
-        // ── Column filter popover ─────────────────────────────────────────────
         function openColumnFilterPopover(field, anchorEl) {
           document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
           const existing = state.columnFilters[field] || { op: "contains", value: "" };
           const rect = anchorEl.getBoundingClientRect();
           const pop = el("div", {
-            style: ["position:fixed","top:" + (rect.bottom + 4) + "px","left:" + rect.left + "px","width:240px","background:#fff","border:1px solid #e5e7eb","border-radius:10px","padding:12px","box-shadow:0 6px 20px rgba(0,0,0,.18)","z-index:1000002","font-family:Segoe UI,Arial,sans-serif"].join(";")
+            style: ["position:fixed", "top:" + (rect.bottom + 4) + "px", "left:" + rect.left + "px", "width:240px", "background:#fff", "border:1px solid #e5e7eb", "border-radius:10px", "padding:12px", "box-shadow:0 6px 20px rgba(0,0,0,.18)", "z-index:1000002", "font-family:Segoe UI,Arial,sans-serif"].join(";")
           });
           pop.setAttribute("data-col-filter-popover", "1");
           const opSelect = el("select", { style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;" });
-          [["contains","Contains"],["notcontains","Does not contain"],["exact","Exact match"]].forEach(([val, label]) => {
+          [["contains", "Contains"], ["notcontains", "Does not contain"], ["exact", "Exact match"]].forEach(([val, label]) => {
             const opt = el("option", { value: val }, label);
             if (val === existing.op) opt.selected = true;
             opSelect.appendChild(opt);
@@ -362,13 +365,24 @@
           setTimeout(() => document.addEventListener("mousedown", onOutside), 100);
         }
 
-        // ── Export to Excel ───────────────────────────────────────────────────
         function doExcelExport(rows) {
           if (!xls) { alert("Export builder not loaded."); return; }
+          const hasOffsets = rows.some((item) => item.__phraseOffsets__ && item.__phraseOffsets__.length);
           const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
-          const visibleHeaderList = state.fields.map((f, i) => ({ f, h: state.headers[i] })).filter(({ f }) => state.visible.has(f)).map(({ h }) => h);
+          const visibleHeaderList = state.fields
+            .map((f, i) => ({ f, h: state.headers[i] }))
+            .filter(({ f }) => state.visible.has(f))
+            .map(({ h }) => h);
+
+          let exportFields = visibleFieldList;
+          let exportHeaders = visibleHeaderList;
+          if (hasOffsets) {
+            exportFields = [...visibleFieldList, "__PHRASE_OFFSETS__"];
+            exportHeaders = [...visibleHeaderList, "PhraseOffsets"];
+          }
+
           if (!rows.length) { alert("No rows to export."); return; }
-          const html = xls.buildExcelHtml(visibleHeaderList, visibleFieldList, rows, []);
+          const html = xls.buildExcelHtml(exportHeaders, exportFields, rows, hasOffsets ? ["PhraseOffsets"] : []);
           const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
           xls.downloadExcelFile("nexidia_grid_export_" + stamp + ".xls", html);
         }
@@ -380,12 +394,10 @@
           );
         }
 
-        // ── Export transcripts ────────────────────────────────────────────────
         function doTranscriptExport(rows) {
           const smids = rows.map((item) => getSourceMediaId(item)).filter(Boolean);
           const transIds = rows.map((item) => getCellValue(item, "UDFVarchar110")).filter((v) => v && v !== "0");
           if (!smids.length && !transIds.length) { alert("No valid IDs found in selected rows."); return; }
-          // Hand off to batch builder with pre-populated IDs
           const ids = transIds.length ? transIds : smids;
           api.setShared("batchBuilderPreload", ids.join("\n"));
           const tool = api.listTools().find((t) => t.id === "transcriptBatchBuilder");
@@ -400,7 +412,6 @@
           );
         }
 
-        // ── Reset ─────────────────────────────────────────────────────────────
         function resetGrid() {
           state.sorts = [];
           state.columnFilters = {};
@@ -415,12 +426,10 @@
           updateToolbarCounts();
         }
 
-        // ── Modal shell ───────────────────────────────────────────────────────
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
         const card = el("div", { style: "background:#fff;width:1280px;max-width:97vw;max-height:92vh;overflow:hidden;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;" });
 
-        // ── Toolbar ───────────────────────────────────────────────────────────
         const toolbar = el("div", { style: "padding:12px 16px 8px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
         const titleEl = el("div", { style: "font-size:15px;font-weight:700;color:#111827;flex-shrink:0;" }, "Results Grid");
         const rowCountEl = el("div", { style: "font-size:12px;color:#6b7280;flex-shrink:0;" }, "");
@@ -428,14 +437,11 @@
         const hiddenCountEl = el("div", { style: "font-size:12px;color:#f59e0b;font-weight:600;flex-shrink:0;display:none;" }, "");
         const unhideBtn = el("button", { style: "padding:4px 8px;border-radius:6px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:11px;flex-shrink:0;display:none;" }, "Unhide All");
         unhideBtn.onclick = () => { state.hiddenRows.clear(); renderTable(); updateToolbarCounts(); };
-
         const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "margin-left:auto;width:240px;max-width:30vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
         globalSearchBox.oninput = () => { state.globalFilter = globalSearchBox.value || ""; renderTable(); };
-
         const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "\u2630");
         const adHocBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;flex-shrink:0;" }, "+ Add Column");
         adHocBtn.onclick = () => openAdHocPicker();
-
         const hideSelectedBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #9ca3af;background:#fff;color:#374151;cursor:pointer;font-size:12px;flex-shrink:0;display:none;" }, "Hide Selected");
         hideSelectedBtn.onclick = () => {
           const rows = getFilteredSortedRows();
@@ -449,13 +455,10 @@
           renderTable();
           updateToolbarCounts();
         };
-
         const exportExcelBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Export to Excel");
         exportExcelBtn.onclick = () => exportToExcel();
-
         const exportTranscriptsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#4f46e5;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Export Transcripts");
         exportTranscriptsBtn.onclick = () => exportTranscripts();
-
         const resetBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Reset");
         resetBtn.onclick = () => resetGrid();
 
@@ -472,7 +475,6 @@
         toolbar.appendChild(resetBtn);
         toolbar.appendChild(globalSearchBox);
 
-        // ── Sort badge bar ────────────────────────────────────────────────────
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
 
         function renderSortBadges() {
@@ -481,7 +483,7 @@
             sortBar.appendChild(el("div", { style: "font-size:11px;color:#9ca3af;" }, "No active sorts \u2014 click a column header to sort."));
             return;
           }
-          const tierColors = ["#1d4ed8","#0369a1","#0f766e"];
+          const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
           for (let i = 0; i < state.sorts.length; i++) {
             const { field, dir } = state.sorts[i];
             const headerIdx = state.fields.indexOf(field);
@@ -489,7 +491,7 @@
             const color = tierColors[i] || "#374151";
             const badge = el("div", {
               draggable: true,
-              style: ["display:inline-flex","align-items:center","gap:4px","padding:4px 8px 4px 6px","border-radius:999px","background:" + color,"color:#fff","font-size:11px","font-weight:600","cursor:grab","user-select:none","transition:opacity 0.15s"].join(";"),
+              style: ["display:inline-flex", "align-items:center", "gap:4px", "padding:4px 8px 4px 6px", "border-radius:999px", "background:" + color, "color:#fff", "font-size:11px", "font-weight:600", "cursor:grab", "user-select:none", "transition:opacity 0.15s"].join(";"),
               title: "Tier " + (i + 1) + " \u2014 drag to reorder, click to reverse, \u2715 to remove"
             });
             const tierNum = el("span", { style: "opacity:0.7;font-size:10px;" }, (i + 1) + ".");
@@ -506,10 +508,7 @@
           }
         }
 
-        // ── Body layout ───────────────────────────────────────────────────────
         const body = el("div", { style: "display:flex;flex:1;min-height:0;" });
-
-        // ── Column panel ──────────────────────────────────────────────────────
         const colPanel = el("div", { style: "width:220px;border-right:1px solid #e5e7eb;padding:10px;overflow-y:auto;display:none;flex-shrink:0;" });
         colPanel.appendChild(el("div", { style: "font-size:12px;font-weight:700;margin-bottom:8px;color:#111827;" }, "Show / Hide Columns"));
         const colList = el("div", {});
@@ -537,7 +536,6 @@
 
         columnsBtn.onclick = () => { colPanel.style.display = colPanel.style.display !== "none" ? "none" : "block"; };
 
-        // ── Table ─────────────────────────────────────────────────────────────
         const gridWrap = el("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;" });
         const tableWrap = el("div", { style: "flex:1;min-height:0;overflow:auto;" });
         const table = el("table", { style: "border-collapse:separate;border-spacing:0;width:100%;" });
@@ -548,16 +546,34 @@
         tableWrap.appendChild(table);
         gridWrap.appendChild(tableWrap);
 
-        // ── Render table ──────────────────────────────────────────────────────
+        function triggerPlay(item) {
+          const smid = getSourceMediaId(item);
+          if (!smid) return;
+          const label = getRowLabel(item);
+          const offsets = item.__phraseOffsets__ || [];
+          const jumpTo = offsets.length ? offsets[0] : undefined;
+          if (!playerCtrl) {
+            const playerTool = api.listTools().find((t) => t.id === "mediaPlayer");
+            if (!playerTool || !playerTool._openPlayerPane) {
+              window.open(PLAYER_URL(smid), "_blank");
+              return;
+            }
+            playerCtrl = playerTool._openPlayerPane(card);
+          }
+          activeSmid = smid;
+          playerCtrl.loadCall(smid, label, jumpTo, searchQuery);
+          renderTable();
+        }
+
         function renderTable() {
           const visibleFieldList = state.fields.filter((f) => state.visible.has(f));
-          const visibleHeaderList = state.fields.map((f, i) => ({ f, h: state.headers[i] })).filter(({ f }) => state.visible.has(f)).map(({ h }) => h);
+          const visibleHeaderList = state.fields
+            .map((f, i) => ({ f, h: state.headers[i] }))
+            .filter(({ f }) => state.visible.has(f))
+            .map(({ h }) => h);
 
-          // Header
           thead.innerHTML = "";
           const trh = el("tr", {});
-
-          // Select-all checkbox col
           const thSel = el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:6px 8px;width:28px;" });
           const selectAllCb = el("input", { type: "checkbox", title: "Select all" });
           selectAllCb.onchange = () => {
@@ -569,29 +585,22 @@
           };
           thSel.appendChild(selectAllCb);
           trh.appendChild(thSel);
-
-          // Play col
-          trh.appendChild(el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:8px 10px;font-size:11px;width:44px;" }, ""));
-
-          // Hide col
           trh.appendChild(el("th", { style: "position:sticky;top:0;z-index:5;background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:8px 4px;font-size:11px;width:24px;" }, ""));
-
           for (let i = 0; i < visibleFieldList.length; i++) {
             const field = visibleFieldList[i];
             const headerText = visibleHeaderList[i] || field;
             const sortIdx = state.sorts.findIndex((s) => s.field === field);
             const hasFilter = state.columnFilters[field] && state.columnFilters[field].value;
-            const tierColors = ["#1d4ed8","#0369a1","#0f766e"];
+            const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
             const sortColor = sortIdx >= 0 ? (tierColors[sortIdx] || "#374151") : null;
             let label = headerText;
             if (sortIdx >= 0) label += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
             if (hasFilter) label += " \uD83D\uDD3D";
             const th = el("th", {
-              style: ["position:sticky","top:0","z-index:5","background:" + (sortColor ? "#dbeafe" : "#f9fafb"),"border-bottom:2px solid " + (sortColor || "#e5e7eb"),"padding:8px 10px","font-size:11px","text-align:left","white-space:nowrap","cursor:pointer","user-select:none",sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"].join(";"),
+              style: ["position:sticky", "top:0", "z-index:5", "background:" + (sortColor ? "#dbeafe" : "#f9fafb"), "border-bottom:2px solid " + (sortColor || "#e5e7eb"), "padding:8px 10px", "font-size:11px", "text-align:left", "white-space:nowrap", "cursor:pointer", "user-select:none", sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"].join(";"),
               title: "Click to sort"
             }, label);
             th.onclick = () => handleHeaderClick(field);
-
             th.draggable = true;
             th.addEventListener("dragstart", (e) => { dragColIndex = i; e.dataTransfer.effectAllowed = "move"; setTimeout(() => { th.style.opacity = "0.4"; }, 0); });
             th.addEventListener("dragend", () => { th.style.opacity = "1"; dragColIndex = null; });
@@ -613,12 +622,10 @@
               rebuildColumnPanel();
               renderTable();
             });
-
             trh.appendChild(th);
           }
           thead.appendChild(trh);
 
-          // Rows
           const rows = getFilteredSortedRows();
           updateToolbarCounts();
           selectAllCb.checked = rows.length > 0 && rows.every((_, i) => state.selected.has(i));
@@ -626,75 +633,47 @@
 
           tbody.innerHTML = "";
           const maxRender = Math.min(rows.length, 3000);
-
           for (let ri = 0; ri < maxRender; ri++) {
             const item = rows[ri];
+            const smid = getSourceMediaId(item);
+            const isActive = smid && smid == activeSmid;
             const isChecked = state.selected.has(ri);
-            const tr = el("tr", { style: isChecked ? "background:#eff6ff;" : (ri % 2 ? "background:#f8fafc;" : "background:#fff;") });
+            const tr = el("tr", {
+              style: isActive
+                ? "background:#eff6ff;outline:2px solid #3b82f6;outline-offset:-2px;cursor:pointer;"
+                : (isChecked ? "background:#eff6ff;cursor:pointer;" : (ri % 2 ? "background:#f8fafc;cursor:pointer;" : "background:#fff;cursor:pointer;"))
+            });
 
-            // Checkbox + range-select arrows cell
             const tdSel = el("td", { style: "padding:4px 6px;border-bottom:1px solid #f1f5f9;white-space:nowrap;vertical-align:middle;" });
             const rowCb = el("input", { type: "checkbox" });
             rowCb.checked = isChecked;
+            rowCb.onclick = (e) => { e.stopPropagation(); };
             rowCb.onchange = () => {
               if (rowCb.checked) state.selected.add(ri);
               else state.selected.delete(ri);
               updateToolbarCounts();
-              // Show/hide arrows
               arrowWrap.style.display = rowCb.checked ? "flex" : "none";
-              tr.style.background = rowCb.checked ? "#eff6ff;" : (ri % 2 ? "#f8fafc;" : "#fff;");
+              tr.style.background = rowCb.checked ? "#eff6ff" : (ri % 2 ? "#f8fafc" : "#fff");
             };
-
             const arrowWrap = el("div", { style: "display:" + (isChecked ? "flex" : "none") + ";flex-direction:column;align-items:center;margin-right:2px;" });
-
-            const upArrow = el("span", {
-              style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;",
-              title: "Select all above"
-            }, "\u00BB");
+            const upArrow = el("span", { style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;", title: "Select all above" }, "\u00BB");
             upArrow.style.transform = "rotate(-90deg)";
-            upArrow.onclick = () => {
-              for (let j = 0; j < ri; j++) state.selected.add(j);
-              renderTable();
-              updateToolbarCounts();
-            };
-
-            const downArrow = el("span", {
-              style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;",
-              title: "Select all below"
-            }, "\u00BB");
+            upArrow.onclick = (e) => { e.stopPropagation(); for (let j = 0; j < ri; j++) state.selected.add(j); renderTable(); updateToolbarCounts(); };
+            const downArrow = el("span", { style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;", title: "Select all below" }, "\u00BB");
             downArrow.style.transform = "rotate(90deg)";
-            downArrow.onclick = () => {
-              for (let j = ri + 1; j < rows.length; j++) state.selected.add(j);
-              renderTable();
-              updateToolbarCounts();
-            };
-
+            downArrow.onclick = (e) => { e.stopPropagation(); for (let j = ri + 1; j < rows.length; j++) state.selected.add(j); renderTable(); updateToolbarCounts(); };
             arrowWrap.appendChild(upArrow);
             arrowWrap.appendChild(downArrow);
             tdSel.appendChild(arrowWrap);
             tdSel.appendChild(rowCb);
             tr.appendChild(tdSel);
 
-            // Play cell
-            const tdPlay = el("td", { style: "padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;" });
-            const playBtn = el("button", { style: "border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:3px 8px;cursor:pointer;font-size:11px;", title: "Open in Nexidia player" }, "\u25B6");
-            playBtn.onclick = () => {
-              const smid = getSourceMediaId(item);
-              if (!smid) { alert("sourceMediaId not available for this row."); return; }
-              window.open(PLAYER_URL(smid), "_blank");
-            };
-            tdPlay.appendChild(playBtn);
-            tr.appendChild(tdPlay);
-
-            // Hide cell
             const tdHide = el("td", { style: "padding:5px 4px;border-bottom:1px solid #f1f5f9;white-space:nowrap;" });
-            const hideBtn = el("span", {
-              style: "font-size:11px;cursor:pointer;color:#d1d5db;",
-              title: "Hide this row"
-            }, "\u00BB");
+            const hideBtn = el("span", { style: "font-size:11px;cursor:pointer;color:#d1d5db;", title: "Hide this row" }, "\u00BB");
             hideBtn.onmouseenter = () => { hideBtn.style.color = "#6b7280"; };
             hideBtn.onmouseleave = () => { hideBtn.style.color = "#d1d5db"; };
-            hideBtn.onclick = () => {
+            hideBtn.onclick = (e) => {
+              e.stopPropagation();
               const origIdx = state.rows.indexOf(item);
               if (origIdx !== -1) state.hiddenRows.add(origIdx);
               state.selected.delete(ri);
@@ -704,7 +683,6 @@
             tdHide.appendChild(hideBtn);
             tr.appendChild(tdHide);
 
-            // Data cells
             for (const field of visibleFieldList) {
               const display = getCellDisplay(item, field);
               const td = el("td", {
@@ -714,19 +692,23 @@
               tr.appendChild(td);
             }
 
+            tr.addEventListener("click", (e) => {
+              if (e.target === rowCb || tdSel.contains(e.target) || tdHide.contains(e.target)) return;
+              triggerPlay(item);
+            });
+
             tbody.appendChild(tr);
           }
 
           if (rows.length > maxRender) {
             const tr = el("tr", {});
-            const td = el("td", { colSpan: visibleFieldList.length + 3, style: "padding:10px;color:#6b7280;font-size:11px;text-align:center;" },
+            const td = el("td", { colSpan: visibleFieldList.length + 2, style: "padding:10px;color:#6b7280;font-size:11px;text-align:center;" },
               "Showing first " + maxRender.toLocaleString() + " rows. Refine filters to narrow results.");
             tr.appendChild(td);
             tbody.appendChild(tr);
           }
         }
 
-        // ── Assemble ──────────────────────────────────────────────────────────
         body.appendChild(colPanel);
         body.appendChild(gridWrap);
         card.appendChild(toolbar);
@@ -743,7 +725,6 @@
         }
         stickyClose.onclick = close;
 
-        // Cache metadata fields for ad hoc picker
         try {
           const res = await fetch("https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names", { credentials: "include", cache: "no-store" });
           if (res.ok) {
@@ -755,7 +736,6 @@
         rebuildColumnPanel();
         renderSortBadges();
         renderTable();
-
       } catch (e) {
         console.error(e);
         alert("Failed to open grid. Check console for details.");
