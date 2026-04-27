@@ -805,8 +805,6 @@
               while (true) {
                 // ── Session check before each page fetch ──────────────────────
                 if (!isSessionCurrent(sessionToken)) return null;
-
-                api.setShared("lastSearchQuery", payload);
                 
                 const interactionFilters = [];
                 if (runSet.keywordGroup) interactionFilters.push(runSet.keywordGroup);
@@ -819,6 +817,8 @@
                   query: { operator: "AND", invertOperator: false, filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: interactionFilters }] }
                 };
 
+                api.setShared("lastSearchQuery", payload);
+                
                 let res;
                 try {
                   res = await fetch(SEARCH_URL, {
