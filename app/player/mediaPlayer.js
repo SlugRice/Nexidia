@@ -265,7 +265,8 @@
       els.transcriptPane.querySelectorAll("[data-tx-idx]").forEach((b) => {
         const idx = parseInt(b.getAttribute("data-tx-idx"));
         b.style.outline = idx === activeIdx ? "2px solid #3b82f6" : "none";
-        if (idx === activeIdx) b.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (idx === activeIdx && b.getAttribute("data-active") !== "1") { b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+        b.setAttribute("data-active", idx === activeIdx ? "1" : "0");
       });
     }
 
