@@ -30,8 +30,8 @@
           "UDFVarchar115","UDFVarchar136","UDFVarchar50","UDFVarchar104","UDFVarchar105"
         ]);
 
-        const DEFAULT_FILTER_STORAGES = ["UDFVarchar10","UDFVarchar126","DNIS","siteName","UDFVarchar120"];
-        const DEFAULT_KEY_LIST = ["experienceId","UDFVarchar122","UDFVarchar41","UDFVarchar115","UDFVarchar1","UDFVarchar110"];
+        const DEFAULT_FILTER_STORAGES = ["UDFVarchar10","UDFVarchar126","DNIS","siteName","UDFVarchar120","UDFVarchar41"];
+        const DEFAULT_KEY_LIST = ["experienceId","UDFVarchar122","UDFVarchar1","UDFVarchar110"];
 
         // ── Session token ─────────────────────────────────────────────────────
         // Incremented on every new search run. Stale runs that complete after a
@@ -374,6 +374,21 @@
             });
           } else {
             valueInput = el("input", { type: "text", placeholder: initialType === "filter" ? FILTER_PLACEHOLDER : KEY_PLACEHOLDER, style: "flex:1;min-width:0;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;" });
+            valueInput.addEventListener("paste", (e) => {
+              if (entry.type !== "key") return;
+              try {
+                const text = (e.clipboardData || window.clipboardData).getData("text");
+                if (typeof text !== "string") return;
+                const norm = text.replace(/\r\n/g, ",").replace(/\n/g, ",").replace(/\t/g, ",");
+                if (norm !== text) {
+                  e.preventDefault();
+                  const s = valueInput.selectionStart != null ? valueInput.selectionStart : valueInput.value.length;
+                  const en = valueInput.selectionEnd != null ? valueInput.selectionEnd : valueInput.value.length;
+                  valueInput.value = valueInput.value.slice(0, s) + norm + valueInput.value.slice(en);
+                  valueInput.selectionStart = valueInput.selectionEnd = s + norm.length;
+                }
+              } catch (_) {}
+            });
           }
           entry.valueInput = valueInput;
           const picker = isPhrase ? null : makeFieldPicker((f) => {
