@@ -8,7 +8,7 @@
   const HIT_LINES_URL = `${BASE}/api/search/media-hit-lines`;
   const AUTOSUMMARY_URL = (smid) => `${BASE}/api/autosummary/${smid}`;
   const TRANSCRIPT_URL = (smid) => `${BASE}/api/transcript/${smid}`;
-  const HIGHLIGHTS_URL = `${BASE}/api-gateway/explore/api/v1.0/search/highlights`;
+  const HIGHLIGHTS_URL = (smid) => `${BASE}/api-gateway/explore/api/v1.0/transcripts/${smid}/highlights`;
 
   const SEGMENT_COLORS = {
     Agent: "#3b82f6",
@@ -151,13 +151,54 @@
     controls.appendChild(volSlider);
     controls.appendChild(pinBar);
 
+const transcriptOuter = el("div", {
+      style: "position:relative;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;"
+    });
+
+    const transcriptBar = el("div", {
+      style: "display:flex;align-items:center;gap:10px;padding:4px 10px;background:#0f172a;border-top:1px solid #1e293b;flex-shrink:0;"
+    });
+
+    const autoScrollLabel = el("label", {
+      style: "display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer;"
+    });
+    const autoScrollCb = el("input", { type: "checkbox" });
+    autoScrollCb.checked = true;
+    autoScrollCb.onchange = () => { autoScrollEnabled = autoScrollCb.checked; };
+    autoScrollLabel.appendChild(autoScrollCb);
+    autoScrollLabel.appendChild(document.createTextNode("Auto-scroll with playback"));
+    transcriptBar.appendChild(autoScrollLabel);
+
+    const copyTxBtn = el("button", {
+      title: "Copy Transcript To Clipboard",
+      style: "margin-left:auto;border:0;background:#1e293b;color:#cbd5e1;padding:4px 7px;border-radius:6px;cursor:pointer;font-size:13px;line-height:1;"
+    }, "\u29C9");
+    copyTxBtn.onclick = () => {
+      const lines = [];
+      for (const row of transcriptRows) {
+        const spRaw = (row.speaker || "").toLowerCase();
+        const sp = spRaw === "agent" ? "Agent" : spRaw === "customer" ? "Customer" : "Unknown";
+        const range = [row.formattedStartOffset, row.formattedEndOffset].filter(Boolean).join(" - ");
+        const text = (row.text || "").trim();
+        if (!text) continue;
+        lines.push(sp + " (" + range + ")\n" + text);
+      }
+      navigator.clipboard.writeText(lines.join("\n"));
+      copyTxBtn.textContent = "\u2713";
+      setTimeout(() => { copyTxBtn.textContent = "\u29C9"; }, 1500);
+    };
+    transcriptBar.appendChild(copyTxBtn);
+
     const transcriptPane = el("div", {
       style: "flex:1;min-height:0;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px;"
     });
 
+    transcriptOuter.appendChild(transcriptBar);
+    transcriptOuter.appendChild(transcriptPane);
+
     leftCol.appendChild(timelineWrap);
     leftCol.appendChild(controls);
-    leftCol.appendChild(transcriptPane);
+    leftCol.appendChild(transcriptOuter);
     body.appendChild(leftCol);
     pane.appendChild(handle);
     pane.appendChild(header);
@@ -238,6 +279,7 @@
     let currentSmid = null;
     let seeking = false;
     let nonTalkSegments = [];
+    let autoScrollEnabled = true;
 
     function stopAudio() {
       if (audio) {
@@ -270,12 +312,10 @@
         const idx = parseInt(b.getAttribute("data-tx-idx"));
         const isActive = idx === activeIdx;
         b.style.outline = isActive ? "2px solid #3b82f6" : "none";
-        if (isActive && b.getAttribute("data-active") !== "1") {
-          b.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        }
+        if (autoScrollEnabled && isActive && b.getAttribute("data-active") !== "1" && audio && audio.currentTime > 0.5) { b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
         b.setAttribute("data-active", isActive ? "1" : "0");
       });
-    }
+      }
 
     function buildPinBar() {
       els.pinBar.innerHTML = "";
@@ -399,10 +439,15 @@
         }),
         fetchJson(AUTOSUMMARY_URL(smid)),
         fetchJson(TRANSCRIPT_URL(smid)),
-        searchQuery ? fetchJson(HIGHLIGHTS_URL, {
+        searchQuery ? fetchJson(HIGHLIGHTS_URL(smid), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(Object.assign({}, searchQuery, { sourceMediaId: smid }))
+          body: JSON.stringify({
+            languageFilter: searchQuery.languageFilter || { languages: [] },
+            namedSetId: searchQuery.namedSetId || null,
+            query: searchQuery.query,
+            highlightFragmentSize: 0
+          })
         }) : Promise.resolve(null)
       ]);
 
@@ -454,12 +499,32 @@
         }
       }
 
-      if (highlightsResult.status === "fulfilled" && highlightsResult.value) {
+      if (highlightsResult.status === "fulfilled" && highlightsResult.value && transcriptRows.length) {
         const raw = highlightsResult.value;
-        const hits = raw.hits || raw.mediaHits || raw.results || [];
-        phraseOffsets = hits
-          .map((h) => h.startOffsetInMs || h.startOffset || h.offsetMs || null)
-          .filter((v) => v !== null && v !== 0);
+        const hlText = (raw.transcriptHighlights || []).join("\n");
+        const plainRows = [];
+        let runningText = "";
+        for (const row of transcriptRows) {
+          const t = (row.text || "").trim().toLowerCase().replace(/<unk>/g, "").replace(/\s+/g, " ").trim();
+          if (t) plainRows.push({ text: t, ts: row.totalSecondsFromStart || 0 });
+        }
+        const markerRegex = /\{\{\{(.+?)\}\}\}/g;
+        let match;
+        const phraseTexts = [];
+        while ((match = markerRegex.exec(hlText)) !== null) {
+          phraseTexts.push(match[1].toLowerCase().trim());
+        }
+        const seen = new Set();
+        phraseOffsets = [];
+        for (const phrase of phraseTexts) {
+          for (const pr of plainRows) {
+            if (pr.text.includes(phrase) && !seen.has(pr.ts)) {
+              seen.add(pr.ts);
+              phraseOffsets.push(pr.ts * 1000);
+              break;
+            }
+          }
+        }
       }
 
       drawTimeline(els.segCanvas, els.timelineWrap, durationMs, segments, phraseOffsets, eventOffsets);
