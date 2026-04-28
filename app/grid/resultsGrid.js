@@ -89,7 +89,7 @@
           const tid = getFieldValue(r, "UDFVarchar110") || "";
           const dt = getFieldValue(r, "recordedDateTime") || getFieldValue(r, "recordedDate") || "";
           const datePart = dt ? new Date(dt).toLocaleDateString() : "";
-          return [agent, tid, datePart].filter(Boolean).join(" · ") || "Call";
+          return [agent, tid, datePart].filter(Boolean).join(" \u00B7 ") || "Call";
         }
 
         const allFields = colPrefs.fields.filter((f) => !hiddenFields.has(f));
@@ -118,8 +118,29 @@
 
         let dragColIndex = null;
         let dragSrcIndex = null;
+        let dragGhost = null;
         let playerCtrl = null;
         let activeSmid = null;
+
+        function createDragGhost(text) {
+          if (dragGhost) dragGhost.remove();
+          dragGhost = el("div", {
+            style: "position:fixed;top:-9999px;left:-9999px;z-index:1000010;background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;padding:6px 14px;border-radius:6px;white-space:nowrap;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:Segoe UI,Arial,sans-serif;"
+          }, text);
+          document.body.appendChild(dragGhost);
+          return dragGhost;
+        }
+
+        function removeDragGhost() {
+          if (dragGhost) { dragGhost.remove(); dragGhost = null; }
+        }
+
+        function clearDropIndicators() {
+          thead.querySelectorAll("th").forEach((th) => {
+            th.style.borderLeft = "";
+            th.style.borderRight = "";
+          });
+        }
 
         function applySort(rows) {
           if (!state.sorts.length) return rows;
@@ -432,6 +453,11 @@
 
         const toolbar = el("div", { style: "padding:12px 16px 8px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
         const titleEl = el("div", { style: "font-size:15px;font-weight:700;color:#111827;flex-shrink:0;" }, "Results Grid");
+
+        const backToSearchBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#475569;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;gap:5px;" });
+        backToSearchBtn.appendChild(el("span", { style: "font-size:14px;" }, "\u2190"));
+        backToSearchBtn.appendChild(document.createTextNode("Back to Search"));
+
         const rowCountEl = el("div", { style: "font-size:12px;color:#6b7280;flex-shrink:0;" }, "");
         const selCountEl = el("div", { style: "font-size:12px;color:#2563eb;font-weight:600;flex-shrink:0;display:none;" }, "");
         const hiddenCountEl = el("div", { style: "font-size:12px;color:#f59e0b;font-weight:600;flex-shrink:0;display:none;" }, "");
@@ -463,6 +489,7 @@
         resetBtn.onclick = () => resetGrid();
 
         toolbar.appendChild(titleEl);
+        toolbar.appendChild(backToSearchBtn);
         toolbar.appendChild(rowCountEl);
         toolbar.appendChild(selCountEl);
         toolbar.appendChild(hiddenCountEl);
@@ -550,8 +577,6 @@
           const smid = getSourceMediaId(item);
           if (!smid) return;
           const label = getRowLabel(item);
-          const offsets = item.__phraseOffsets__ || [];
-          const jumpTo = offsets.length ? offsets[0] : undefined;
           if (!playerCtrl) {
             const playerTool = api.listTools().find((t) => t.id === "mediaPlayer");
             if (!playerTool || !playerTool._openPlayerPane) {
@@ -597,16 +622,51 @@
             if (sortIdx >= 0) label += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
             if (hasFilter) label += " \uD83D\uDD3D";
             const th = el("th", {
-              style: ["position:sticky", "top:0", "z-index:5", "background:" + (sortColor ? "#dbeafe" : "#f9fafb"), "border-bottom:2px solid " + (sortColor || "#e5e7eb"), "padding:8px 10px", "font-size:11px", "text-align:left", "white-space:nowrap", "cursor:pointer", "user-select:none", sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"].join(";"),
-              title: "Click to sort"
+              style: ["position:sticky", "top:0", "z-index:5", "background:" + (sortColor ? "#dbeafe" : "#f9fafb"), "border-bottom:2px solid " + (sortColor || "#e5e7eb"), "padding:8px 10px", "font-size:11px", "text-align:left", "white-space:nowrap", "cursor:pointer", "user-select:none", "transition:border-color 0.15s", sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"].join(";"),
+              title: "Click to sort, drag to reorder"
             }, label);
-            th.onclick = () => handleHeaderClick(field);
+
+            th.setAttribute("data-col-idx", i);
             th.draggable = true;
-            th.addEventListener("dragstart", (e) => { dragColIndex = i; e.dataTransfer.effectAllowed = "move"; setTimeout(() => { th.style.opacity = "0.4"; }, 0); });
-            th.addEventListener("dragend", () => { th.style.opacity = "1"; dragColIndex = null; });
-            th.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+
+            th.addEventListener("dragstart", (e) => {
+              dragColIndex = i;
+              e.dataTransfer.effectAllowed = "move";
+              const ghost = createDragGhost(headerText);
+              e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, ghost.offsetHeight / 2);
+              setTimeout(() => { th.style.opacity = "0.3"; }, 0);
+            });
+
+            th.addEventListener("dragend", () => {
+              th.style.opacity = "1";
+              dragColIndex = null;
+              removeDragGhost();
+              clearDropIndicators();
+            });
+
+            th.addEventListener("dragover", (e) => {
+              if (dragColIndex === null) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              clearDropIndicators();
+              const myIdx = parseInt(th.getAttribute("data-col-idx"));
+              if (myIdx === dragColIndex) return;
+              if (dragColIndex < myIdx) {
+                th.style.borderRight = "3px solid #3b82f6";
+              } else {
+                th.style.borderLeft = "3px solid #3b82f6";
+              }
+            });
+
+            th.addEventListener("dragleave", () => {
+              th.style.borderLeft = "";
+              th.style.borderRight = "";
+            });
+
             th.addEventListener("drop", (e) => {
               e.preventDefault();
+              clearDropIndicators();
+              removeDragGhost();
               if (dragColIndex === null || dragColIndex === i) return;
               const srcField = visibleFieldList[dragColIndex];
               const dstField = visibleFieldList[i];
@@ -622,6 +682,12 @@
               rebuildColumnPanel();
               renderTable();
             });
+
+            th.onclick = (e) => {
+              if (dragColIndex !== null) return;
+              handleHeaderClick(field);
+            };
+
             trh.appendChild(th);
           }
           thead.appendChild(trh);
@@ -721,11 +787,13 @@
         let stopPlayer = null;
         function close() {
           if (typeof stopPlayer === "function") stopPlayer();
+          removeDragGhost();
           try { modal.remove(); } catch (_) {}
           try { stickyClose.remove(); } catch (_) {}
           document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
         }
         stickyClose.onclick = close;
+        backToSearchBtn.onclick = close;
 
         try {
           const res = await fetch("https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names", { credentials: "include", cache: "no-store" });
