@@ -20,6 +20,23 @@
   const EVENT_PIN_COLOR = "#0ea5e9";
   const PLAYHEAD_COLOR = "#ffffff";
 
+  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const LS_SPEED_KEY = "nexidia_player_speed";
+
+  function loadSavedSpeed() {
+    try {
+      const v = parseFloat(localStorage.getItem(LS_SPEED_KEY));
+      if (SPEEDS.includes(v)) return v;
+    } catch (_) {}
+    return null;
+  }
+  function saveSpeed(rate) {
+    try { localStorage.setItem(LS_SPEED_KEY, String(rate)); } catch (_) {}
+  }
+  function clearSavedSpeed() {
+    try { localStorage.removeItem(LS_SPEED_KEY); } catch (_) {}
+  }
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function fetchJson(url, init) {
@@ -68,7 +85,7 @@
     });
 
     const handle = el("div", {
-      style: `height:6px;cursor:ns-resize;background:#1f2937;border-bottom:1px solid #374151;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:4px;`
+      style: "height:6px;cursor:ns-resize;background:#1f2937;border-bottom:1px solid #374151;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:4px;"
     });
     for (let i = 0; i < 3; i++) {
       handle.appendChild(el("div", { style: "width:20px;height:2px;background:#4b5563;border-radius:1px;" }));
@@ -126,7 +143,7 @@
     });
     const playBtn = el("button", {
       style: "width:32px;height:32px;border-radius:50%;border:0;background:#3b82f6;color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
-    }, "▶");
+    }, "\u25B6");
     const timeEl = el("div", {
       style: "font-size:11px;color:#94a3b8;flex-shrink:0;font-family:monospace;min-width:90px;"
     }, "00:00 / 00:00");
@@ -136,22 +153,38 @@
     });
     const volBtn = el("button", {
       style: "border:0;background:transparent;color:#94a3b8;font-size:14px;cursor:pointer;flex-shrink:0;padding:2px 4px;"
-    }, "🔊");
+    }, "\uD83D\uDD0A");
     const volSlider = el("input", {
       type: "range", min: 0, max: 1, step: 0.05, value: 1,
       style: "width:60px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0;"
     });
+
+    const speedBtn = el("button", {
+      style: "border:1px solid #475569;background:transparent;color:#94a3b8;padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer;font-family:monospace;flex-shrink:0;min-width:38px;text-align:center;"
+    }, "1x");
+
+    const rememberSpeedLabel = el("label", {
+      style: "display:flex;align-items:center;gap:4px;font-size:10px;color:#64748b;cursor:pointer;flex-shrink:0;"
+    });
+    const rememberSpeedCb = el("input", { type: "checkbox" });
+    rememberSpeedCb.checked = loadSavedSpeed() !== null;
+    rememberSpeedLabel.appendChild(rememberSpeedCb);
+    rememberSpeedLabel.appendChild(document.createTextNode("Remember"));
+
     const pinBar = el("div", {
       style: "display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:8px;"
     });
+
     controls.appendChild(playBtn);
     controls.appendChild(timeEl);
     controls.appendChild(seekBar);
     controls.appendChild(volBtn);
     controls.appendChild(volSlider);
+    controls.appendChild(speedBtn);
+    controls.appendChild(rememberSpeedLabel);
     controls.appendChild(pinBar);
 
-const transcriptOuter = el("div", {
+    const transcriptOuter = el("div", {
       style: "position:relative;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;"
     });
 
@@ -164,7 +197,6 @@ const transcriptOuter = el("div", {
     });
     const autoScrollCb = el("input", { type: "checkbox" });
     autoScrollCb.checked = true;
-    autoScrollCb.onchange = () => { autoScrollEnabled = autoScrollCb.checked; };
     autoScrollLabel.appendChild(autoScrollCb);
     autoScrollLabel.appendChild(document.createTextNode("Auto-scroll with playback"));
     transcriptBar.appendChild(autoScrollLabel);
@@ -173,20 +205,6 @@ const transcriptOuter = el("div", {
       title: "Copy Transcript To Clipboard",
       style: "margin-left:auto;border:0;background:#1e293b;color:#cbd5e1;padding:4px 7px;border-radius:6px;cursor:pointer;font-size:13px;line-height:1;"
     }, "\u29C9");
-    copyTxBtn.onclick = () => {
-      const lines = [];
-      for (const row of transcriptRows) {
-        const spRaw = (row.speaker || "").toLowerCase();
-        const sp = spRaw === "agent" ? "Agent" : spRaw === "customer" ? "Customer" : "Unknown";
-        const range = [row.formattedStartOffset, row.formattedEndOffset].filter(Boolean).join(" - ");
-        const text = (row.text || "").trim();
-        if (!text) continue;
-        lines.push(sp + " (" + range + ")\n" + text);
-      }
-      navigator.clipboard.writeText(lines.join("\n"));
-      copyTxBtn.textContent = "\u2713";
-      setTimeout(() => { copyTxBtn.textContent = "\u29C9"; }, 1500);
-    };
     transcriptBar.appendChild(copyTxBtn);
 
     const transcriptPane = el("div", {
@@ -209,6 +227,8 @@ const transcriptOuter = el("div", {
       pane, titleEl, statusEl, hideBtn,
       timelineWrap, waveformImg, segCanvas, playheadDiv,
       playBtn, timeEl, seekBar, volBtn, volSlider, pinBar,
+      speedBtn, rememberSpeedCb,
+      autoScrollCb, copyTxBtn,
       transcriptPane
     };
   }
@@ -281,6 +301,67 @@ const transcriptOuter = el("div", {
     let nonTalkSegments = [];
     let autoScrollEnabled = true;
 
+    const saved = loadSavedSpeed();
+    let speedIdx = saved !== null ? SPEEDS.indexOf(saved) : 2;
+    if (speedIdx < 0) speedIdx = 2;
+    els.speedBtn.textContent = SPEEDS[speedIdx] + "x";
+    if (SPEEDS[speedIdx] !== 1) {
+      els.speedBtn.style.color = "#3b82f6";
+      els.speedBtn.style.borderColor = "#3b82f6";
+    }
+
+    function applySpeed(idx) {
+      speedIdx = idx;
+      const rate = SPEEDS[speedIdx];
+      if (audio) audio.playbackRate = rate;
+      els.speedBtn.textContent = rate + "x";
+      els.speedBtn.style.color = rate === 1 ? "#94a3b8" : "#3b82f6";
+      els.speedBtn.style.borderColor = rate === 1 ? "#475569" : "#3b82f6";
+      if (els.rememberSpeedCb.checked) saveSpeed(rate);
+    }
+
+    els.speedBtn.onclick = () => {
+      applySpeed((speedIdx + 1) % SPEEDS.length);
+    };
+
+    els.rememberSpeedCb.onchange = () => {
+      if (els.rememberSpeedCb.checked) {
+        saveSpeed(SPEEDS[speedIdx]);
+      } else {
+        clearSavedSpeed();
+      }
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        applySpeed(Math.min(speedIdx + 1, SPEEDS.length - 1));
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        applySpeed(Math.max(speedIdx - 1, 0));
+      }
+    });
+
+    els.autoScrollCb.onchange = () => {
+      autoScrollEnabled = els.autoScrollCb.checked;
+    };
+
+    els.copyTxBtn.onclick = () => {
+      const lines = [];
+      for (const row of transcriptRows) {
+        const spRaw = (row.speaker || "").toLowerCase();
+        const sp = spRaw === "agent" ? "Agent" : spRaw === "customer" ? "Customer" : "Unknown";
+        const range = [row.formattedStartOffset, row.formattedEndOffset].filter(Boolean).join(" - ");
+        const text = (row.text || "").trim();
+        if (!text) continue;
+        lines.push(sp + " (" + range + ")\n" + text);
+      }
+      navigator.clipboard.writeText(lines.join("\n"));
+      els.copyTxBtn.textContent = "\u2713";
+      setTimeout(() => { els.copyTxBtn.textContent = "\u29C9"; }, 1500);
+    };
+
     function stopAudio() {
       if (audio) {
         audio.pause();
@@ -312,10 +393,12 @@ const transcriptOuter = el("div", {
         const idx = parseInt(b.getAttribute("data-tx-idx"));
         const isActive = idx === activeIdx;
         b.style.outline = isActive ? "2px solid #3b82f6" : "none";
-        if (autoScrollEnabled && isActive && b.getAttribute("data-active") !== "1" && audio && audio.currentTime > 0.5) { b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+        if (autoScrollEnabled && isActive && b.getAttribute("data-active") !== "1" && audio && audio.currentTime > 0.5) {
+          b.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
         b.setAttribute("data-active", isActive ? "1" : "0");
       });
-      }
+    }
 
     function buildPinBar() {
       els.pinBar.innerHTML = "";
@@ -365,7 +448,7 @@ const transcriptOuter = el("div", {
     els.volBtn.onclick = () => {
       if (!audio) return;
       audio.muted = !audio.muted;
-      els.volBtn.textContent = audio.muted ? "🔇" : "🔊";
+      els.volBtn.textContent = audio.muted ? "\uD83D\uDD07" : "\uD83D\uDD0A";
     };
     els.timelineWrap.addEventListener("click", (e) => {
       if (!audio || !durationMs) return;
@@ -394,7 +477,7 @@ const transcriptOuter = el("div", {
       segments = []; nonTalkSegments = [];
       els.transcriptPane.innerHTML = "";
       els.pinBar.innerHTML = "";
-      els.playBtn.textContent = "▶";
+      els.playBtn.textContent = "\u25B6";
       els.seekBar.value = 0;
       els.timeEl.textContent = "00:00 / 00:00";
       els.waveformImg.src = "";
@@ -419,10 +502,11 @@ const transcriptOuter = el("div", {
 
       audio = new Audio(prepared.mediaUri);
       audio.volume = parseFloat(els.volSlider.value);
+      audio.playbackRate = SPEEDS[speedIdx];
       audio.ontimeupdate = () => { if (audio.currentTime > 0) { updateTime(); skipNonTalk(); } };
-      audio.onplay = () => { els.playBtn.textContent = "⏸"; };
-      audio.onpause = () => { els.playBtn.textContent = "▶"; };
-      audio.onended = () => { els.playBtn.textContent = "▶"; };
+      audio.onplay = () => { els.playBtn.textContent = "\u23F8"; };
+      audio.onpause = () => { els.playBtn.textContent = "\u25B6"; };
+      audio.onended = () => { els.playBtn.textContent = "\u25B6"; };
       audio.onloadedmetadata = () => {
         if (jumpToMs) audio.currentTime = jumpToMs / 1000;
         updateTime();
@@ -503,7 +587,6 @@ const transcriptOuter = el("div", {
         const raw = highlightsResult.value;
         const hlText = (raw.transcriptHighlights || []).join("\n");
         const plainRows = [];
-        let runningText = "";
         for (const row of transcriptRows) {
           const t = (row.text || "").trim().toLowerCase().replace(/<unk>/g, "").replace(/\s+/g, " ").trim();
           if (t) plainRows.push({ text: t, ts: row.totalSecondsFromStart || 0 });
@@ -535,7 +618,7 @@ const transcriptOuter = el("div", {
       }
 
       setStatus(durationMs
-        ? `${fmtTime(durationMs)} · ${segments.length} segments · ${phraseOffsets.length} phrase hits`
+        ? `${fmtTime(durationMs)} \u00B7 ${segments.length} segments \u00B7 ${phraseOffsets.length} phrase hits`
         : "Loaded");
 
       window.addEventListener("resize", () => {
