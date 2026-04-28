@@ -30,7 +30,7 @@
     searchTo: 10000,
     useApiFirst: true,
     batchMode: "length",
-    countPerBatch: 10,
+    countPerBatch: 50,
     copies: 1,
     fileBase: "Batch",
     fileIncrement: "001",
@@ -239,10 +239,15 @@
   function tooltip(text) {
     const wrap = el("span", { style: "position:relative;display:inline-flex;align-items:center;cursor:help;margin-left:4px;" });
     const icon = el("span", { style: "display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:#e5e7eb;color:#6b7280;font-size:10px;font-weight:700;line-height:1;flex-shrink:0;" }, "i");
-    const tip = el("div", { style: "display:none;position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);background:#1f2937;color:#f9fafb;font-size:11px;padding:6px 10px;border-radius:7px;width:220px;z-index:1000010;line-height:1.4;white-space:normal;pointer-events:none;" }, text);
+    const tip = el("div", { style: "display:none;position:fixed;background:#1f2937;color:#f9fafb;font-size:11px;padding:6px 10px;border-radius:7px;width:220px;z-index:1000010;line-height:1.4;white-space:normal;pointer-events:none;" }, text);
     wrap.appendChild(icon);
     wrap.appendChild(tip);
-    wrap.onmouseenter = () => { tip.style.display = "block"; };
+    wrap.onmouseenter = () => {
+      const r = wrap.getBoundingClientRect();
+      tip.style.display = "block";
+      tip.style.left = Math.min(r.left + r.width / 2 - 110, window.innerWidth - 230) + "px";
+      tip.style.top = (r.top - tip.offsetHeight - 8) + "px";
+    };
     wrap.onmouseleave = () => { tip.style.display = "none"; };
     return wrap;
   }
@@ -821,7 +826,7 @@
           failed.push(it);
         }
         const done = i + 1;
-        if (done % 10 === 0 || done === items.length) {
+        if (done % 50 === 0 || done === items.length) {
           const pct = 8 + Math.floor((done / items.length) * 52);
           UI.setProgress(pct, "Fetching transcripts...", `${done} / ${items.length}\nFailed: ${failed.length}`);
           UI.appendLog(`Fetched ${done}/${items.length}`);
