@@ -630,10 +630,17 @@
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const card = el("div", { style: "background:#fff;width:540px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
 
-        const titleEl = el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Transcript Batch Builder");
+        const titleRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:4px;" });
+        const backBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#475569;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;gap:5px;" });
+        backBtn.appendChild(el("span", { style: "font-size:14px;" }, "\u2190"));
+        backBtn.appendChild(document.createTextNode("Back"));
+        backBtn.onclick = () => modal.remove();
+        const titleEl = el("div", { style: "font-size:16px;font-weight:700;color:#111827;" }, "Transcript Batch Builder");
         const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;" }, "\u2715");
         closeBtn.onclick = () => modal.remove();
-        card.appendChild(titleEl);
+        titleRow.appendChild(backBtn);
+        titleRow.appendChild(titleEl);
+        card.appendChild(titleRow);
         card.appendChild(closeBtn);
 
         card.appendChild(el("div", { style: "font-size:12px;color:#6b7280;margin-bottom:14px;" },
