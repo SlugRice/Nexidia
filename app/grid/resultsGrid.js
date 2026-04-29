@@ -500,6 +500,9 @@
         toolbar.appendChild(exportExcelBtn);
         toolbar.appendChild(exportTranscriptsBtn);
         toolbar.appendChild(resetBtn);
+        const saveSearchGridBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "\uD83D\uDCBE Save Search");
+        saveSearchGridBtn.onclick = () => { const fn = api.getShared("openGlobalSavePrompt"); if (fn) fn(); else alert("Save function not available."); };
+        toolbar.appendChild(saveSearchGridBtn);
         toolbar.appendChild(globalSearchBox);
 
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
