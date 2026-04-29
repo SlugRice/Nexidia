@@ -552,15 +552,13 @@
           orBtn.onmouseleave = () => { orBtn.style.boxShadow = "0 3px 12px rgba(59,130,246,0.5)"; };
           orBtn.onclick = () => { if (paneObj.index < panes.length - 1) { slideTo(paneObj.index + 1); } else { activateNextPane(); } };
           paneEl.appendChild(orBtn);
-          const bottomRow = el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-top:16px;" });
+          const bottomRow = el("div", { style: "display:flex;align-items:center;margin-top:16px;" });
           const bottomLabel = el("div", { style: "font-size:11px;font-weight:600;color:#3b82f6;letter-spacing:1px;opacity:0.7;" }, "Search " + String.fromCharCode(65 + paneIndex));
-          const filterSearchBtn = el("button", { style: "padding:7px 22px;border-radius:20px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(59,130,246,0.35);flex:1;margin:0 auto;max-width:160px;" }, "Search");
-          bottomRow.appendChild(bottomLabel); bottomRow.appendChild(filterSearchBtn); bottomRow.appendChild(el("div", { style: "flex:0 0 80px;" }));
+          bottomRow.appendChild(bottomLabel);
           paneEl.appendChild(bottomRow);
-          const paneObj = { el: paneEl, rowsContainer, addBtn, addPhraseBtn, orBtn, filterSearchBtn, rows: [], index: paneIndex, bottomLabel };
+          const paneObj = { el: paneEl, rowsContainer, addBtn, addPhraseBtn, orBtn, rows: [], index: paneIndex, bottomLabel };
           addBtn.onclick = () => { if (paneObj.rows.length > 0) rowsContainer.appendChild(makeAndLabel()); const entry = buildRowEntry("", "filter", false); entry.paneIndex = paneObj.index; rowsContainer.appendChild(entry.rowEl); paneObj.rows.push(entry); };
           addPhraseBtn.onclick = () => { if (paneObj.rows.length > 0) rowsContainer.appendChild(makeAndLabel()); const entry = buildRowEntry("", "filter", true); entry.paneIndex = paneObj.index; rowsContainer.appendChild(entry.rowEl); paneObj.rows.push(entry); };
-          filterSearchBtn.onclick = () => { runFilterSearch(paneObj); };
           return paneObj;
         }
 
@@ -754,11 +752,16 @@
         addKeyBtn.onclick = () => { const e = buildRowEntry("", "key", false); e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl); };
         const addKeyPhraseBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;" }, "+ Add Phrase");
         addKeyPhraseBtn.onclick = () => { const e = buildRowEntry("", "key", true); e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl); };
-        const keySearchBtn = el("button", { style: "padding:7px 22px;border-radius:20px;border:0;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(34,197,94,0.35);margin-left:auto;" }, "Search");
-        keySearchBtn.onclick = () => { runKeySearch(); };
-        keyBtnRow.appendChild(addKeyBtn); keyBtnRow.appendChild(addKeyPhraseBtn); keyBtnRow.appendChild(keySearchBtn);
+        keyBtnRow.appendChild(addKeyBtn); keyBtnRow.appendChild(addKeyPhraseBtn);
         keySection.appendChild(keyBtnRow);
         card.appendChild(keySection);
+        const searchBar = el("div", { style: "position:sticky;bottom:0;padding:16px 0 4px;background:linear-gradient(to bottom, rgba(248,250,252,0) 0%, #f8fafc 30%);display:flex;justify-content:center;z-index:10;" });
+        const mainSearchBtn = el("button", { style: "padding:12px 72px;border-radius:24px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(59,130,246,0.4);letter-spacing:0.5px;transition:box-shadow 0.2s;" }, "Search");
+        mainSearchBtn.onmouseenter = () => { mainSearchBtn.style.boxShadow = "0 6px 22px rgba(59,130,246,0.55)"; };
+        mainSearchBtn.onmouseleave = () => { mainSearchBtn.style.boxShadow = "0 4px 16px rgba(59,130,246,0.4)"; };
+        mainSearchBtn.onclick = () => { runSearch(); };
+        searchBar.appendChild(mainSearchBtn);
+        card.appendChild(searchBar);
         modal.appendChild(card);
         document.body.appendChild(modal);
         document.body.appendChild(stickyClose);
@@ -892,6 +895,7 @@
                 const interactionFilters = [];
                 if (runSet.keywordGroup) interactionFilters.push(runSet.keywordGroup);
                 if (expansion.group) interactionFilters.push(expansion.group);
+                if (runSet.keyFilters) { for (let kfi = 0; kfi < runSet.keyFilters.length; kfi++) interactionFilters.push(runSet.keyFilters[kfi]); }
                 if (excludeGroup) interactionFilters.push(excludeGroup);
                 interactionFilters.push(dateFilter);
 
@@ -1255,18 +1259,16 @@ function openLoadPanel() {
           else { alert("Dispatcher not loaded. Check manifest."); }
         }
 
-        // ── Filter search ─────────────────────────────────────────────────────
-        async function runFilterSearch(triggerPane) {
+async function runSearch() {
           try {
             const fromVal = fromDate.input.value;
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
             if (!confirmDateRange(fromVal, toVal)) return;
-
             resetSession();
             const myToken = api.getShared("searchSessionToken");
-
             const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
+
             const runSets = [];
             const globalExcludes = [];
             for (let pi = 0; pi < panes.length; pi++) {
@@ -1289,87 +1291,48 @@ function openLoadPanel() {
               const keywordGroup = includeKw.length ? { operator: "AND", invertOperator: false, filters: includeKw } : null;
               const phraseGroups = phraseResult.include;
               if (!keywordGroup && !phraseGroups.length) continue;
-              runSets.push({ keywordGroup, phraseGroups, label: "Search " + String.fromCharCode(65 + pane.index) });
-            }
-            if (!runSets.length) {
-              const ok = confirm("No filter values entered. This will pull the entire date range. Continue?");
-              if (!ok) return;
-              runSets.push({ keywordGroup: null, phraseGroups: [], label: "All" });
+              runSets.push({ keywordGroup, phraseGroups, keyFilters: [], label: "Search " + String.fromCharCode(65 + pane.index) });
             }
 
-            api.setShared("lastSearchConfig", serializeSearch());
-            progressUI.show();
-            progressUI.set("Loading column preferences...", 5, "");
-            const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [], source: "default" };
-            const searchFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
-            progressUI.set("Searching...", 10, "");
-
-            const excludeGroup = globalExcludes.length ? { operator: "OR", invertOperator: true, filters: globalExcludes } : null;
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Filter", myToken, excludeGroup);
-
-            if (result === null) {
-              progressUI.remove();
-              return;
-            }
-            if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
-            progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
-            sendToDispatcher(result, colPrefs);
-          } catch (err) {
-            if (err.name === "AbortError") { progressUI.remove(); return; }
-            console.error(err);
-            try { progressUI.remove(); } catch (_) {}
-            alert("Search failed. Check console for details.");
-          }
-        }
-
-        // ── Key search ────────────────────────────────────────────────────────
-        async function runKeySearch() {
-          try {
-            const fromVal = fromDate.input.value;
-            const toVal = toDate.input.value;
-            if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
-            if (!confirmDateRange(fromVal, toVal)) return;
-
-            resetSession();
-            const myToken = api.getShared("searchSessionToken");
-
-            const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
             const keyEntries = allRows.filter((r) => r.type === "key" && !r.isPhrase);
             const keyPhraseEntries = allRows.filter((r) => r.type === "key" && r.isPhrase);
-            const includeKw = [];
-            const excludeKw = [];
+            const keyIncludeKw = [];
+            const keyExcludeKw = [];
             for (let i = 0; i < keyEntries.length; i++) {
               const e = keyEntries[i];
               const sn = e.picker ? e.picker.getStorageName() : "";
               const val = e.valueInput.value.trim();
               if (sn && val) {
-                (e.exclude ? excludeKw : includeKw).push(buildKeywordFilter(sn, splitValues(val)));
+                (e.exclude ? keyExcludeKw : keyIncludeKw).push(buildKeywordFilter(sn, splitValues(val)));
               }
             }
-            const phraseResult = buildPhraseGroups(keyPhraseEntries);
-            const keyExcludes = [...excludeKw, ...phraseResult.exclude.map((p) => p.group)];
-            const phraseGroups = phraseResult.include;
-            const keywordGroup = includeKw.length ? { operator: "AND", invertOperator: false, filters: includeKw } : null;
-            if (!keywordGroup && !phraseGroups.length) {
-              const ok = confirm("No key values entered. This will pull the entire date range. Continue?");
+            const keyPhraseResult = buildPhraseGroups(keyPhraseEntries);
+            for (let ei = 0; ei < keyExcludeKw.length; ei++) globalExcludes.push(keyExcludeKw[ei]);
+            for (let ei = 0; ei < keyPhraseResult.exclude.length; ei++) globalExcludes.push(keyPhraseResult.exclude[ei].group);
+            const keyAndFilters = [...keyIncludeKw, ...keyPhraseResult.include.map((p) => p.group)];
+
+            if (runSets.length && keyAndFilters.length) {
+              for (let i = 0; i < runSets.length; i++) runSets[i].keyFilters = keyAndFilters;
+            } else if (!runSets.length && keyAndFilters.length) {
+              runSets.push({ keywordGroup: null, phraseGroups: [], keyFilters: keyAndFilters, label: "Key Search" });
+            }
+
+            if (!runSets.length) {
+              const ok = confirm("No search values entered. This will pull the entire date range. Continue?");
               if (!ok) return;
+              runSets.push({ keywordGroup: null, phraseGroups: [], keyFilters: [], label: "All" });
             }
 
             api.setShared("lastSearchConfig", serializeSearch());
+            modal.remove(); stickyClose.remove();
             progressUI.show();
             progressUI.set("Loading column preferences...", 5, "");
             const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [], source: "default" };
             const searchFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
             progressUI.set("Searching...", 10, "");
-
-            const runSets = [{ keywordGroup, phraseGroups, label: "Key Search" }];
-            const excludeGroup = keyExcludes.length ? { operator: "OR", invertOperator: true, filters: keyExcludes } : null;
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Key", myToken, excludeGroup);
-
-            if (result === null) {
-              progressUI.remove();
-              return;
-            }
+            const excludeGroup = globalExcludes.length ? { operator: "OR", invertOperator: true, filters: globalExcludes } : null;
+            const result = await executeSearch(runSets, searchFields, dateFilter, "Search", myToken, excludeGroup);
+            if (result === null) { progressUI.remove(); return; }
             if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
             sendToDispatcher(result, colPrefs);
@@ -1380,7 +1343,8 @@ function openLoadPanel() {
             alert("Search failed. Check console for details.");
           }
         }
-
+        
+        
       } catch (err) {
         console.error(err);
         alert("Failed to run. Make sure you're running this from an active Nexidia session.");
