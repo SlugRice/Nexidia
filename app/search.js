@@ -1025,10 +1025,10 @@ function serializeSearch() {
       for (let i = 0; i < pane.rows.length; i++) {
         const row = pane.rows[i];
         if (row.isPhrase) {
-          phrases.push(row.valueInput.value);
+          phrases.push({ value: row.valueInput.value, exclude: row.exclude, speaker: row.speaker });
         } else {
           const sn = row.picker ? row.picker.getStorageName() : "";
-          filters.push({ storageName: sn, value: row.valueInput.value });
+          filters.push({ storageName: sn, value: row.valueInput.value, exclude: row.exclude });
         }
       }
       return { filters, phrases };
@@ -1039,10 +1039,10 @@ function serializeSearch() {
         const row = allRows[i];
         if (row.type !== "key") continue;
         if (row.isPhrase) {
-          keys.push({ isPhrase: true, value: row.valueInput.value });
+          keys.push({ isPhrase: true, value: row.valueInput.value, exclude: row.exclude, speaker: row.speaker });
         } else {
           const sn = row.picker ? row.picker.getStorageName() : "";
-          keys.push({ storageName: sn, value: row.valueInput.value });
+          keys.push({ storageName: sn, value: row.valueInput.value, exclude: row.exclude });
         }
       }
       return keys;
@@ -1103,6 +1103,7 @@ function deserializeSearch(payload) {
       const entry = buildRowEntry(filters[fi].storageName || "", "filter", false);
       entry.paneIndex = pane.index;
       entry.valueInput.value = filters[fi].value || "";
+      if (filters[fi].exclude) entry.excludeToggle.set(true);
       pane.rows.push(entry);
       pane.rowsContainer.appendChild(entry.rowEl);
     }
@@ -1111,7 +1112,15 @@ function deserializeSearch(payload) {
       if (pane.rows.length > 0) pane.rowsContainer.appendChild(makeAndLabel());
       const entry = buildRowEntry("", "filter", true);
       entry.paneIndex = pane.index;
-      entry.valueInput.value = phrases[phi];
+      const pd_phrase = typeof phrases[phi] === "string" ? { value: phrases[phi] } : phrases[phi];
+      entry.valueInput.value = pd_phrase.value || "";
+      if (pd_phrase.exclude) entry.excludeToggle.set(true);
+      if (pd_phrase.speaker && entry.speakerRadios) {
+        entry.speaker = pd_phrase.speaker;
+        for (let sri = 0; sri < entry.speakerRadios.length; sri++) {
+          entry.speakerRadios[sri].radio.checked = entry.speakerRadios[sri].value === pd_phrase.speaker;
+        }
+      }
       pane.rows.push(entry);
       pane.rowsContainer.appendChild(entry.rowEl);
     }
@@ -1130,6 +1139,13 @@ function deserializeSearch(payload) {
     const entry = buildRowEntry(isPhrase ? "" : (kd.storageName || ""), "key", isPhrase);
     entry.paneIndex = -1;
     entry.valueInput.value = kd.value || "";
+    if (kd.exclude) entry.excludeToggle.set(true);
+    if (kd.speaker && entry.speakerRadios) {
+      entry.speaker = kd.speaker;
+      for (let sri = 0; sri < entry.speakerRadios.length; sri++) {
+        entry.speakerRadios[sri].radio.checked = entry.speakerRadios[sri].value === kd.speaker;
+      }
+    }
     keyRowsContainer.appendChild(entry.rowEl);
   }
 
