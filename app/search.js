@@ -1060,7 +1060,100 @@ function deserializeSearch(payload) {
   for (let ki = 0; ki < keys.length; ki++) {
     const kd = keys[ki];
     const isPhrase = kd.isPhrase || false;
-    const entry = buildRowEntry(isPhrase ? "" : (k
+    const entry = buildRowEntry(isPhrase ? "" : (kd.storageName || ""), "key", isPhrase);
+    entry.paneIndex = -1;
+    entry.valueInput.value = kd.value || "";
+    keyRowsContainer.appendChild(entry.rowEl);
+  }
+
+  if (!keys.length) {
+    for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
+      const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
+      e.paneIndex = -1;
+      keyRowsContainer.appendChild(e.rowEl);
+    }
+  }
+
+  resizePanes();
+  updateDots();
+  slideTo(0);
+}
+
+function openSavePrompt(payload, suggestedName) {
+  const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+  const box = el("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+  box.appendChild(el("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Save Search"));
+  const nameInput = el("input", { type: "text", placeholder: "Search name...", value: suggestedName || "", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:14px;" });
+  box.appendChild(nameInput);
+  const btnRow = el("div", { style: "display:flex;gap:8px;" });
+  const saveBtn = el("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Save");
+  const expBtn = el("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Save & Export");
+  const cancelBtn = el("button", { style: "width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;font-size:13px;cursor:pointer;color:#6b7280;" }, "Cancel");
+  saveBtn.onclick = () => { const n = nameInput.value.trim(); if (!n) { nameInput.style.borderColor = "#ef4444"; return; } saveSearchToStorage(n, payload); overlay.remove(); };
+  expBtn.onclick = () => { const n = nameInput.value.trim(); if (!n) { nameInput.style.borderColor = "#ef4444"; return; } saveSearchToStorage(n, payload); exportSearchAsFile(n, payload); overlay.remove(); };
+  cancelBtn.onclick = () => overlay.remove();
+  btnRow.appendChild(saveBtn); btnRow.appendChild(expBtn);
+  box.appendChild(btnRow); box.appendChild(cancelBtn);
+  overlay.appendChild(box); document.body.appendChild(overlay);
+  setTimeout(() => nameInput.focus(), 50);
+}
+
+function openLoadPanel() {
+  const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+  const box = el("div", { style: "background:#fff;width:460px;max-height:80vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+  box.appendChild(el("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Load Search"));
+  const listWrap = el("div", { style: "margin-bottom:14px;" });
+
+  function renderList() {
+    listWrap.innerHTML = "";
+    const saved = getSavedSearches();
+    const names = Object.keys(saved);
+    if (!names.length) {
+      listWrap.appendChild(el("div", { style: "font-size:12px;color:#6b7280;padding:8px 0;" }, "No saved searches."));
+      return;
+    }
+    for (let ni = 0; ni < names.length; ni++) {
+      const name = names[ni];
+      const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;" });
+      row.appendChild(el("div", { style: "flex:1;font-size:13px;color:#111827;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, name));
+      const loadBtn = el("button", { style: "padding:4px 10px;border-radius:6px;border:0;background:#3b82f6;color:#fff;font-size:11px;cursor:pointer;font-weight:600;" }, "Load");
+      const dlBtn = el("button", { style: "padding:4px 10px;border-radius:6px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:11px;cursor:pointer;" }, "Export");
+      const delBtn = el("button", { style: "padding:4px 10px;border-radius:6px;border:1px solid #ef4444;background:#fff;color:#ef4444;font-size:11px;cursor:pointer;" }, "Del");
+      (function(n) {
+        loadBtn.onclick = () => { overlay.remove(); deserializeSearch(saved[n]); };
+        dlBtn.onclick = () => { exportSearchAsFile(n, saved[n]); };
+        delBtn.onclick = () => { if (confirm("Delete \"" + n + "\"?")) { deleteSearchFromStorage(n); renderList(); } };
+      })(name);
+      row.appendChild(loadBtn); row.appendChild(dlBtn); row.appendChild(delBtn);
+      listWrap.appendChild(row);
+    }
+  }
+
+  renderList();
+  box.appendChild(listWrap);
+  box.appendChild(el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" }));
+  box.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;" }, "Import from file or paste"));
+  const fileInput = el("input", { type: "file", accept: ".txt,.json", style: "font-size:12px;margin-bottom:8px;" });
+  const pasteArea = el("textarea", { rows: 3, placeholder: "Paste exported search JSON here...", style: "width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:12px;font-family:monospace;margin-bottom:8px;resize:vertical;" });
+  const importBtn = el("button", { style: "padding:7px 16px;border-radius:8px;border:0;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Import & Load");
+  const cancelBtn = el("button", { style: "width:100%;margin-top:8px;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;color:#6b7280;" }, "Cancel");
+
+  function doImport(text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed.panes && !parsed.keys) throw new Error("Invalid");
+      if (parsed.name) saveSearchToStorage(parsed.name, parsed);
+      overlay.remove();
+      deserializeSearch(parsed);
+    } catch (e) { alert("Invalid search file. Paste the exact output from a previous export."); }
+  }
+
+  fileInput.onchange = () => { const f = fileInput.files && fileInput.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { doImport(r.result); }; r.readAsText(f); };
+  importBtn.onclick = () => { const t = pasteArea.value.trim(); if (t) doImport(t); };
+  cancelBtn.onclick = () => overlay.remove();
+  box.appendChild(fileInput); box.appendChild(pasteArea); box.appendChild(importBtn); box.appendChild(cancelBtn);
+  overlay.appendChild(box); document.body.appendChild(overlay);
+}
         
         
         // ── Hand off to dispatcher ────────────────────────────────────────────
@@ -1113,7 +1206,7 @@ function deserializeSearch(payload) {
               runSets.push({ keywordGroup: null, phraseGroups: [], label: "All" });
             }
 
-            modal.remove(); stickyClose.remove();
+            api.setShared("lastSearchConfig", serializeSearch());
             progressUI.show();
             progressUI.set("Loading column preferences...", 5, "");
             const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [], source: "default" };
@@ -1165,7 +1258,7 @@ function deserializeSearch(payload) {
               if (!ok) return;
             }
 
-            modal.remove(); stickyClose.remove();
+            api.setShared("lastSearchConfig", serializeSearch());
             progressUI.show();
             progressUI.set("Loading column preferences...", 5, "");
             const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [], source: "default" };
@@ -1197,5 +1290,32 @@ function deserializeSearch(payload) {
     })();
   }
 
+  function openGlobalSavePrompt() {
+  const payload = api.getShared("lastSearchConfig");
+  if (!payload) { alert("No search config available. Run a search first."); return; }
+  const mk = (tag, props, ...ch) => { const n = document.createElement(tag); Object.assign(n, props || {}); for (const c of ch) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); return n; };
+  const LS_G = "NEXIDIA_SAVED_SEARCHES";
+  function getAll() { try { return JSON.parse(localStorage.getItem(LS_G)) || {}; } catch (_) { return {}; } }
+  function saveIt(name, data) { const a = getAll(); a[name] = data; localStorage.setItem(LS_G, JSON.stringify(a)); }
+  function exportIt(name, data) { const b = new Blob([JSON.stringify({ name: name, dateFrom: data.dateFrom, dateTo: data.dateTo, panes: data.panes, keys: data.keys })], { type: "text/plain" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = name.replace(/[^a-zA-Z0-9_\- ]/g, "_") + ".txt"; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); }
+  const overlay = mk("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+  const box = mk("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+  box.appendChild(mk("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Save Search"));
+  const nameInput = mk("input", { type: "text", placeholder: "Search name...", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:14px;" });
+  box.appendChild(nameInput);
+  const btnRow = mk("div", { style: "display:flex;gap:8px;" });
+  const saveBtn = mk("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Save");
+  const expBtn = mk("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Save & Export");
+  const cancelBtn = mk("button", { style: "width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;font-size:13px;cursor:pointer;color:#6b7280;" }, "Cancel");
+  saveBtn.onclick = () => { const n = nameInput.value.trim(); if (!n) { nameInput.style.borderColor = "#ef4444"; return; } saveIt(n, payload); overlay.remove(); };
+  expBtn.onclick = () => { const n = nameInput.value.trim(); if (!n) { nameInput.style.borderColor = "#ef4444"; return; } saveIt(n, payload); exportIt(n, payload); overlay.remove(); };
+  cancelBtn.onclick = () => overlay.remove();
+  btnRow.appendChild(saveBtn); btnRow.appendChild(expBtn);
+  box.appendChild(btnRow); box.appendChild(cancelBtn);
+  overlay.appendChild(box); document.body.appendChild(overlay);
+  setTimeout(() => nameInput.focus(), 50);
+}
+api.setShared("openGlobalSavePrompt", openGlobalSavePrompt);
+  
   api.registerTool({ id: "search", label: "Search", open: openSearch });
 })();
