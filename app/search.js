@@ -1083,7 +1083,7 @@ function openSavePrompt(payload, suggestedName) {
   const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
   const box = el("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
   box.appendChild(el("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Save Search"));
-  const nameInput = el("input", { type: "text", placeholder: "Search name...", value: suggestedName || "", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:14px;" });
+  const nameInput = el("input", { type: "text", placeholder: "Name your search...", value: suggestedName || "", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:14px;" });
   box.appendChild(nameInput);
   const btnRow = el("div", { style: "display:flex;gap:8px;" });
   const saveBtn = el("button", { style: "flex:1;padding:9px;border-radius:8px;border:0;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Save");
@@ -1301,6 +1301,7 @@ function openLoadPanel() {
   const overlay = mk("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
   const box = mk("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
   box.appendChild(mk("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Save Search"));
+  box.appendChild(mk("div", { style: "font-size:11px;color:#6b7280;line-height:1.5;margin-bottom:12px;" }, "Your search will be saved to this browser\u2019s local storage. Clearing cookies or browser data will erase saved searches. Use Save & Export to download a backup file you can reload later by uploading or pasting."));
   const nameInput = mk("input", { type: "text", placeholder: "Search name...", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:14px;" });
   box.appendChild(nameInput);
   const btnRow = mk("div", { style: "display:flex;gap:8px;" });
