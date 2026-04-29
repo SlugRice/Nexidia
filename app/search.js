@@ -626,7 +626,15 @@
         stickyClose.onclick = closeAll;
 
         const card = el("div", { style: "background:#f8fafc;width:1080px;max-height:90vh;overflow:auto;border-radius:14px;padding:18px 18px 22px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-        card.appendChild(el("div", { style: "font-size:18px;font-weight:600;margin-bottom:4px;" }, "Nexidia Search"));
+        const headerRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:4px;" });
+        headerRow.appendChild(el("div", { style: "font-size:18px;font-weight:600;flex:1;" }, "Nexidia Search"));
+        const loadSearchBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;" }, "\uD83D\uDCC2 Load");
+        loadSearchBtn.onclick = () => { openLoadPanel(); };
+        const saveSearchBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;" }, "\uD83D\uDCBE Save");
+        saveSearchBtn.onclick = () => { openSavePrompt(serializeSearch(), ""); };
+        headerRow.appendChild(loadSearchBtn);
+        headerRow.appendChild(saveSearchBtn);
+        card.appendChild(headerRow);
 
         // ── Column prefs warning ──────────────────────────────────────────────
         const prefsError = api.getShared("columnPrefsError");
@@ -907,6 +915,154 @@
           return groups;
         }
 
+        
+        // ── Saved search engine ──────────────────────────────────────────────
+const LS_KEY = "NEXIDIA_SAVED_SEARCHES";
+
+function getSavedSearches() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_) { return {}; }
+}
+
+function saveSearchToStorage(name, payload) {
+  const all = getSavedSearches();
+  all[name] = payload;
+  localStorage.setItem(LS_KEY, JSON.stringify(all));
+}
+
+function deleteSearchFromStorage(name) {
+  const all = getSavedSearches();
+  delete all[name];
+  localStorage.setItem(LS_KEY, JSON.stringify(all));
+}
+
+function exportSearchAsFile(name, payload) {
+  const out = JSON.stringify({ name: name, dateFrom: payload.dateFrom, dateTo: payload.dateTo, panes: payload.panes, keys: payload.keys });
+  const blob = new Blob([out], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name.replace(/[^a-zA-Z0-9_\- ]/g, "_") + ".txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function serializeSearch() {
+  return {
+    dateFrom: fromDate.input.value,
+    dateTo: toDate.input.value,
+    panes: panes.map(function(pane) {
+      const filters = [];
+      const phrases = [];
+      for (let i = 0; i < pane.rows.length; i++) {
+        const row = pane.rows[i];
+        if (row.isPhrase) {
+          phrases.push(row.valueInput.value);
+        } else {
+          const sn = row.picker ? row.picker.getStorageName() : "";
+          filters.push({ storageName: sn, value: row.valueInput.value });
+        }
+      }
+      return { filters, phrases };
+    }),
+    keys: (function() {
+      const keys = [];
+      for (let i = 0; i < allRows.length; i++) {
+        const row = allRows[i];
+        if (row.type !== "key") continue;
+        if (row.isPhrase) {
+          keys.push({ isPhrase: true, value: row.valueInput.value });
+        } else {
+          const sn = row.picker ? row.picker.getStorageName() : "";
+          keys.push({ storageName: sn, value: row.valueInput.value });
+        }
+      }
+      return keys;
+    })()
+  };
+}
+
+function deserializeSearch(payload) {
+  if (payload.dateFrom) { fromDate.input.value = payload.dateFrom; dateChanged = true; }
+  if (payload.dateTo) { toDate.input.value = payload.dateTo; dateChanged = true; }
+
+  while (panes.length > 1) {
+    const last = panes[panes.length - 1];
+    for (let i = 0; i < last.rows.length; i++) {
+      const idx = allRows.indexOf(last.rows[i]);
+      if (idx !== -1) allRows.splice(idx, 1);
+    }
+    if (last.el.parentNode) last.el.parentNode.removeChild(last.el);
+    panes.pop();
+  }
+
+  const fp = panes[0];
+  while (fp.rows.length) {
+    const row = fp.rows.pop();
+    const idx = allRows.indexOf(row);
+    if (idx !== -1) allRows.splice(idx, 1);
+    if (row.rowEl.parentNode) row.rowEl.parentNode.removeChild(row.rowEl);
+  }
+  fp.rowsContainer.innerHTML = "";
+
+  const keyEntries = allRows.filter((r) => r.type === "key");
+  for (let i = keyEntries.length - 1; i >= 0; i--) {
+    const row = keyEntries[i];
+    const idx = allRows.indexOf(row);
+    if (idx !== -1) allRows.splice(idx, 1);
+    if (row.rowEl.parentNode) row.rowEl.parentNode.removeChild(row.rowEl);
+  }
+  keyRowsContainer.innerHTML = "";
+
+  const paneList = payload.panes || [];
+  for (let pi = 0; pi < paneList.length; pi++) {
+    const pd = paneList[pi];
+    let pane;
+    if (pi === 0) {
+      pane = fp;
+    } else {
+      pane = buildPaneEl(pi);
+      panes.push(pane);
+      if (ghostPaneEl && carouselTrack.contains(ghostPaneEl)) {
+        carouselTrack.insertBefore(pane.el, ghostPaneEl);
+      } else {
+        carouselTrack.appendChild(pane.el);
+      }
+    }
+    const filters = pd.filters || [];
+    for (let fi = 0; fi < filters.length; fi++) {
+      if (pane.rows.length > 0) pane.rowsContainer.appendChild(makeAndLabel());
+      const entry = buildRowEntry(filters[fi].storageName || "", "filter", false);
+      entry.paneIndex = pane.index;
+      entry.valueInput.value = filters[fi].value || "";
+      pane.rows.push(entry);
+      pane.rowsContainer.appendChild(entry.rowEl);
+    }
+    const phrases = pd.phrases || [];
+    for (let phi = 0; phi < phrases.length; phi++) {
+      if (pane.rows.length > 0) pane.rowsContainer.appendChild(makeAndLabel());
+      const entry = buildRowEntry("", "filter", true);
+      entry.paneIndex = pane.index;
+      entry.valueInput.value = phrases[phi];
+      pane.rows.push(entry);
+      pane.rowsContainer.appendChild(entry.rowEl);
+    }
+  }
+
+  if (!paneList.length) populatePaneDefaults(fp);
+
+  if (ghostPaneEl && ghostPaneEl.parentNode) ghostPaneEl.parentNode.removeChild(ghostPaneEl);
+  ghostPaneEl = buildGhostPane(panes.length);
+  carouselTrack.appendChild(ghostPaneEl);
+
+  const keys = payload.keys || [];
+  for (let ki = 0; ki < keys.length; ki++) {
+    const kd = keys[ki];
+    const isPhrase = kd.isPhrase || false;
+    const entry = buildRowEntry(isPhrase ? "" : (k
+        
+        
         // ── Hand off to dispatcher ────────────────────────────────────────────
         function sendToDispatcher(result, colPrefs) {
           api.setShared("lastSearchResult", {
