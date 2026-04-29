@@ -344,7 +344,7 @@
         // ── Row entry builder ─────────────────────────────────────────────────
         function buildRowEntry(storageName, initialType, isPhrase) {
           isPhrase = isPhrase || false;
-          const entry = { rowEl: null, picker: null, valueInput: null, fieldLabelWrap: null, type: initialType, paneIndex: initialType === "key" ? -1 : 0, locked: false, toggle: null, isPhrase };
+          const entry = { rowEl: null, picker: null, valueInput: null, fieldLabelWrap: null, type: initialType, paneIndex: initialType === "key" ? -1 : 0, locked: false, toggle: null, isPhrase, exclude: false, speaker: "transcript", excludeToggle: null, speakerWrap: null, speakerRadios: null };
           const toggle = makeSlideToggle(initialType, (newType) => {
             entry.type = newType;
             entry.valueInput.value = "";
@@ -391,6 +391,57 @@
             });
           }
           entry.valueInput = valueInput;
+          const excludeToggle = (() => {
+          const PW = 32, PH = 16, KN = 12;
+          const wrap = el("div", { style: "display:flex;align-items:center;gap:4px;flex-shrink:0;cursor:pointer;user-select:none;" });
+          const label = el("span", { style: "font-size:10px;font-weight:600;letter-spacing:0.5px;" });
+          const pill = el("div", { style: "position:relative;width:" + PW + "px;height:" + PH + "px;border-radius:999px;transition:background 0.22s;flex-shrink:0;" });
+          const knob = el("div", { style: "position:absolute;top:" + ((PH - KN) / 2) + "px;width:" + KN + "px;height:" + KN + "px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.25);transition:left 0.22s;" });
+          pill.appendChild(knob);
+          wrap.appendChild(label);
+          wrap.appendChild(pill);
+          let on = false;
+          function apply() {
+            if (on) {
+              pill.style.background = "#ef4444";
+              knob.style.left = (PW - KN - 2) + "px";
+              label.textContent = "EXCLUDE";
+              label.style.color = "#ef4444";
+              if (entry.rowEl) entry.rowEl.style.background = "rgba(239,68,68,0.06)";
+            } else {
+              pill.style.background = "#22c55e";
+              knob.style.left = "2px";
+              label.textContent = "INCLUDE";
+              label.style.color = "#22c55e";
+              if (entry.rowEl) entry.rowEl.style.background = "";
+            }
+          }
+          wrap.addEventListener("click", () => { on = !on; entry.exclude = on; apply(); });
+          apply();
+          return { wrap, get: () => on, set: (v) => { on = v; entry.exclude = v; apply(); } };
+        })();
+        entry.excludeToggle = excludeToggle;
+
+        let speakerWrap = null;
+        if (isPhrase) {
+          speakerWrap = el("div", { style: "display:inline-flex;align-items:center;gap:2px;border:1px solid #e5e7eb;border-radius:6px;padding:2px 4px;background:#f9fafb;" });
+          const speakers = [["transcript", "Either"], ["agentText", "Agent"], ["customerText", "Customer"]];
+          const radios = [];
+          for (let si = 0; si < speakers.length; si++) {
+            const spVal = speakers[si][0];
+            const spLabel = speakers[si][1];
+            const radio = el("input", { type: "radio", name: "speaker_" + Math.random().toString(36).slice(2), style: "margin:0 2px 0 " + (si > 0 ? "6" : "0") + "px;" });
+            if (si === 0) radio.checked = true;
+            radio.onchange = () => { if (radio.checked) entry.speaker = spVal; };
+            const lbl = el("label", { style: "font-size:10px;color:#374151;cursor:pointer;user-select:none;" }, spLabel);
+            lbl.onclick = () => { radio.checked = true; entry.speaker = spVal; };
+            speakerWrap.appendChild(radio);
+            speakerWrap.appendChild(lbl);
+            radios.push({ radio, value: spVal });
+          }
+          entry.speakerRadios = radios;
+        }
+        entry.speakerWrap = speakerWrap;
           const picker = isPhrase ? null : makeFieldPicker((f) => {
             fieldLabelWrap.textContent = f.displayName;
             fieldLabelWrap.title = f.displayName;
@@ -413,6 +464,15 @@
           const rowEl = el("div", { style: "display:flex;gap:8px;align-items:center;margin:4px 0;" });
           rowEl.appendChild(removeBtn); rowEl.appendChild(toggle.wrap); rowEl.appendChild(fieldLabelWrap); rowEl.appendChild(valueInput);
           if (picker) rowEl.appendChild(picker.wrapper);
+          if (isPhrase) {
+          const subRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin:4px 0 2px 30px;" });
+          subRow.appendChild(excludeToggle.wrap);
+          if (speakerWrap) subRow.appendChild(speakerWrap);
+          rowEl.style.flexWrap = "wrap";
+          rowEl.appendChild(subRow);
+        } else {
+          rowEl.insertBefore(excludeToggle.wrap, toggle.wrap);
+        }
           entry.rowEl = rowEl;
           allRows.push(entry);
           removeBtn.onclick = () => {
@@ -768,8 +828,8 @@
         function buildKeywordFilter(pn, vals) {
           return { operator: "IN", type: "KEYWORD", parameterName: normalizeParamName(pn), value: normalizeKeywordValues(pn, vals) };
         }
-        function buildTextFilter(phrase) {
-          return { operator: "IN", type: "TEXT", parameterName: "transcript", value: { phrases: [phrase], anotherPhrases: [], relevance: "Anywhere", position: "Begin" } };
+        function buildTextFilter(phrase, paramName) {
+          return { operator: "IN", type: "TEXT", parameterName: paramName || "transcript", value: { phrases: [phrase], anotherPhrases: [], relevance: "Anywhere", position: "Begin" } };
         }
 
         async function safeRead(res) {
@@ -807,7 +867,7 @@
         }
 
         // ── Execute search ────────────────────────────────────────────────────
-        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken) {
+        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken, excludeGroup) {
           const merged = new Map();
           const passthroughNoKey = [];
           let totalFetched = 0;
@@ -832,6 +892,7 @@
                 const interactionFilters = [];
                 if (runSet.keywordGroup) interactionFilters.push(runSet.keywordGroup);
                 if (expansion.group) interactionFilters.push(expansion.group);
+                if (excludeGroup) interactionFilters.push(excludeGroup);
                 interactionFilters.push(dateFilter);
 
                 const payload = {
@@ -907,12 +968,18 @@
         }
 
         function buildPhraseGroups(phraseEntries) {
-          const groups = [];
+          const include = [];
+          const exclude = [];
           for (let i = 0; i < phraseEntries.length; i++) {
-            const lines = splitValues(phraseEntries[i].valueInput.value);
-            for (let j = 0; j < lines.length; j++) { groups.push({ group: buildTextFilter(lines[j]), display: '"' + lines[j] + '"' }); }
+            const pe = phraseEntries[i];
+            const lines = splitValues(pe.valueInput.value);
+            const speaker = pe.speaker || "transcript";
+            const target = pe.exclude ? exclude : include;
+            for (let j = 0; j < lines.length; j++) {
+              target.push({ group: buildTextFilter(lines[j], speaker), display: '"' + lines[j] + '"' });
+            }
           }
-          return groups;
+          return { include, exclude };
         }
 
         
@@ -1185,19 +1252,26 @@ function openLoadPanel() {
 
             const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
             const runSets = [];
+            const globalExcludes = [];
             for (let pi = 0; pi < panes.length; pi++) {
               const pane = panes[pi];
               const filterEntries = allRows.filter((r) => r.type === "filter" && !r.isPhrase && r.paneIndex === pane.index);
               const phraseEntries = allRows.filter((r) => r.type === "filter" && r.isPhrase && r.paneIndex === pane.index);
-              const kwFilters = [];
+              const includeKw = [];
+              const excludeKw = [];
               for (let i = 0; i < filterEntries.length; i++) {
                 const e = filterEntries[i];
                 const sn = e.picker ? e.picker.getStorageName() : "";
                 const val = e.valueInput.value.trim();
-                if (sn && val) kwFilters.push(buildKeywordFilter(sn, splitValues(val)));
+                if (sn && val) {
+                  (e.exclude ? excludeKw : includeKw).push(buildKeywordFilter(sn, splitValues(val)));
+                }
               }
-              const keywordGroup = kwFilters.length ? { operator: "AND", invertOperator: false, filters: kwFilters } : null;
-              const phraseGroups = buildPhraseGroups(phraseEntries);
+              const phraseResult = buildPhraseGroups(phraseEntries);
+              for (let ei = 0; ei < excludeKw.length; ei++) globalExcludes.push(excludeKw[ei]);
+              for (let ei = 0; ei < phraseResult.exclude.length; ei++) globalExcludes.push(phraseResult.exclude[ei].group);
+              const keywordGroup = includeKw.length ? { operator: "AND", invertOperator: false, filters: includeKw } : null;
+              const phraseGroups = phraseResult.include;
               if (!keywordGroup && !phraseGroups.length) continue;
               runSets.push({ keywordGroup, phraseGroups, label: "Search " + String.fromCharCode(65 + pane.index) });
             }
@@ -1214,7 +1288,8 @@ function openLoadPanel() {
             const searchFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
             progressUI.set("Searching...", 10, "");
 
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Filter", myToken);
+            const excludeGroup = globalExcludes.length ? { operator: "OR", invertOperator: true, filters: globalExcludes } : null;
+            const result = await executeSearch(runSets, searchFields, dateFilter, "Filter", myToken, excludeGroup);
 
             if (result === null) {
               progressUI.remove();
@@ -1245,15 +1320,20 @@ function openLoadPanel() {
             const dateFilter = { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
             const keyEntries = allRows.filter((r) => r.type === "key" && !r.isPhrase);
             const keyPhraseEntries = allRows.filter((r) => r.type === "key" && r.isPhrase);
-            const kwFilters = [];
+            const includeKw = [];
+            const excludeKw = [];
             for (let i = 0; i < keyEntries.length; i++) {
               const e = keyEntries[i];
               const sn = e.picker ? e.picker.getStorageName() : "";
               const val = e.valueInput.value.trim();
-              if (sn && val) kwFilters.push(buildKeywordFilter(sn, splitValues(val)));
+              if (sn && val) {
+                (e.exclude ? excludeKw : includeKw).push(buildKeywordFilter(sn, splitValues(val)));
+              }
             }
-            const phraseGroups = buildPhraseGroups(keyPhraseEntries);
-            const keywordGroup = kwFilters.length ? { operator: "AND", invertOperator: false, filters: kwFilters } : null;
+            const phraseResult = buildPhraseGroups(keyPhraseEntries);
+            const keyExcludes = [...excludeKw, ...phraseResult.exclude.map((p) => p.group)];
+            const phraseGroups = phraseResult.include;
+            const keywordGroup = includeKw.length ? { operator: "AND", invertOperator: false, filters: includeKw } : null;
             if (!keywordGroup && !phraseGroups.length) {
               const ok = confirm("No key values entered. This will pull the entire date range. Continue?");
               if (!ok) return;
@@ -1267,7 +1347,8 @@ function openLoadPanel() {
             progressUI.set("Searching...", 10, "");
 
             const runSets = [{ keywordGroup, phraseGroups, label: "Key Search" }];
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Key", myToken);
+            const excludeGroup = keyExcludes.length ? { operator: "OR", invertOperator: true, filters: keyExcludes } : null;
+            const result = await executeSearch(runSets, searchFields, dateFilter, "Key", myToken, excludeGroup);
 
             if (result === null) {
               progressUI.remove();
