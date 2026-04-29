@@ -175,6 +175,16 @@
       // ── Divider ─────────────────────────────────────────────────────────────
       card.appendChild(el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" }));
 
+      const saveSearchBtn = el("button", {
+      style: "width:100%;padding:9px;border-radius:10px;border:1px solid #22c55e;background:#fff;color:#16a34a;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:10px;"
+      }, "\uD83D\uDCBE Save This Search");
+      saveSearchBtn.onclick = () => {
+        const fn = api.getShared("openGlobalSavePrompt");
+        if (fn) fn();
+        else alert("Save function not available.");
+      };
+      card.appendChild(saveSearchBtn);
+
       // ── Confirm button ──────────────────────────────────────────────────────
       const confirmBtn = el("button", {
         style: [
