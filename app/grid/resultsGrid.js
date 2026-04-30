@@ -181,15 +181,41 @@
         }
 
         function applyColumnFilters(rows) {
-          const active = Object.entries(state.columnFilters).filter(([, f]) => f && f.value && f.value.trim());
+          const active = Object.entries(state.columnFilters).filter(([, f]) => f && f.op);
           if (!active.length) return rows;
           return rows.filter((item) => {
             for (const [field, filter] of active) {
-              const cell = getCellValue(item, field).toLowerCase();
-              const val = filter.value.trim().toLowerCase();
-              if (filter.op === "contains" && !cell.includes(val)) return false;
-              if (filter.op === "notcontains" && cell.includes(val)) return false;
-              if (filter.op === "exact" && cell !== val) return false;
+              const cell = getCellValue(item, field);
+              const cellLower = cell.toLowerCase();
+              const val = (filter.value || "").trim().toLowerCase();
+              const numCell = Number(cell);
+              const numVal = Number(filter.value);
+              switch (filter.op) {
+                case "hideempty":
+                  if (cell === "" || cell === "0") return false;
+                  break;
+                case "showempty":
+                  if (cell !== "" && cell !== "0") return false;
+                  break;
+                case "contains":
+                  if (!val || !cellLower.includes(val)) return false;
+                  break;
+                case "notcontains":
+                  if (val && cellLower.includes(val)) return false;
+                  break;
+                case "exact":
+                  if (cellLower !== val) return false;
+                  break;
+                case "gt":
+                  if (isNaN(numCell) || isNaN(numVal) || numCell <= numVal) return false;
+                  break;
+                case "lt":
+                  if (isNaN(numCell) || isNaN(numVal) || numCell >= numVal) return false;
+                  break;
+                case "eq":
+                  if (isNaN(numCell) || isNaN(numVal) || numCell !== numVal) return false;
+                  break;
+              }
             }
             return true;
           });
@@ -367,21 +393,30 @@
           });
           pop.setAttribute("data-col-filter-popover", "1");
           const opSelect = el("select", { style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;" });
-          [["contains", "Contains"], ["notcontains", "Does not contain"], ["exact", "Exact match"]].forEach(([val, label]) => {
+          [["hideempty", "Hide Empty"], ["showempty", "Show Empty Only"], ["contains", "Contains"], ["notcontains", "Does Not Contain"], ["exact", "Exact Match"], ["gt", "Greater Than"], ["lt", "Less Than"], ["eq", "Equal To"]].forEach(([val, label]) => {
             const opt = el("option", { value: val }, label);
             if (val === existing.op) opt.selected = true;
             opSelect.appendChild(opt);
           });
-          const valInput = el("input", { type: "text", placeholder: "Filter value...", value: existing.value, style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;" });
+          const valInput = el("input", { type: "text", placeholder: "Filter value...", value: existing.value || "", style: "width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;box-sizing:border-box;margin-bottom:8px;" });
+          const noValueOps = ["hideempty", "showempty"];
+          function syncInputVis() { valInput.style.display = noValueOps.includes(opSelect.value) ? "none" : ""; }
+          syncInputVis();
+          opSelect.onchange = syncInputVis;
           const btnRow = el("div", { style: "display:flex;gap:6px;" });
           const applyBtn = el("button", { style: "flex:1;padding:6px;border-radius:6px;border:0;background:#3b82f6;color:#fff;font-size:12px;cursor:pointer;font-weight:600;" }, "Apply");
-          applyBtn.onclick = () => { state.columnFilters[field] = { op: opSelect.value, value: valInput.value }; pop.remove(); renderTable(); rebuildColumnPanel(); };
+          applyBtn.onclick = () => {
+            const op = opSelect.value;
+            if (noValueOps.includes(op)) { state.columnFilters[field] = { op: op, value: "" }; }
+            else { state.columnFilters[field] = { op: op, value: valInput.value }; }
+            pop.remove(); renderTable(); rebuildColumnPanel();
+          };
           const clearBtn = el("button", { style: "flex:1;padding:6px;border-radius:6px;border:1px solid #e5e7eb;background:#f9fafb;font-size:12px;cursor:pointer;" }, "Clear");
           clearBtn.onclick = () => { delete state.columnFilters[field]; pop.remove(); renderTable(); rebuildColumnPanel(); };
           btnRow.appendChild(applyBtn); btnRow.appendChild(clearBtn);
           pop.appendChild(opSelect); pop.appendChild(valInput); pop.appendChild(btnRow);
           document.body.appendChild(pop);
-          setTimeout(() => valInput.focus(), 30);
+          setTimeout(() => { if (valInput.style.display !== "none") valInput.focus(); }, 30);
           function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchorEl) { pop.remove(); document.removeEventListener("mousedown", onOutside); } }
           setTimeout(() => document.addEventListener("mousedown", onOutside), 100);
         }
@@ -552,7 +587,7 @@
           for (let i = 0; i < state.fields.length; i++) {
             const f = state.fields[i];
             const h = state.headers[i] || f;
-            const hasFilter = state.columnFilters[f] && state.columnFilters[f].value;
+            const hasFilter = state.columnFilters[f] && state.columnFilters[f].op;
             const rowEl = el("div", { style: "display:flex;align-items:center;gap:6px;margin:4px 0;" });
             const cb = el("input", { type: "checkbox" });
             cb.checked = state.visible.has(f);
@@ -621,17 +656,24 @@
             const field = visibleFieldList[i];
             const headerText = visibleHeaderList[i] || field;
             const sortIdx = state.sorts.findIndex((s) => s.field === field);
-            const hasFilter = state.columnFilters[field] && state.columnFilters[field].value;
+            const hasFilter = state.columnFilters[field] && state.columnFilters[field].op;
             const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
             const sortColor = sortIdx >= 0 ? (tierColors[sortIdx] || "#374151") : null;
-            let label = headerText;
-            if (sortIdx >= 0) label += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
-            if (hasFilter) label += " \uD83D\uDD3D";
+            let sortLabel = headerText;
+            if (sortIdx >= 0) sortLabel += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
             const th = el("th", {
               style: ["position:sticky", "top:0", "z-index:5", "background:" + (sortColor ? "#dbeafe" : "#f9fafb"), "border-bottom:2px solid " + (sortColor || "#e5e7eb"), "padding:8px 10px", "font-size:11px", "text-align:left", "white-space:nowrap", "cursor:pointer", "user-select:none", "transition:border-color 0.15s", sortColor ? "color:" + sortColor + ";font-weight:700;" : "color:#374151;"].join(";"),
               title: "Click to sort, drag to reorder"
-            }, label);
-
+            });
+            const thLabel = el("span", {}, sortLabel);
+            const filterIcon = el("span", {
+              style: "font-size:11px;cursor:pointer;margin-left:4px;color:" + (hasFilter ? "#3b82f6" : "#d1d5db") + ";transition:color 0.15s;"
+            }, "\u25BE");
+            filterIcon.onclick = (e) => { e.stopPropagation(); openColumnFilterPopover(field, filterIcon); };
+            filterIcon.onmouseenter = () => { if (!hasFilter) filterIcon.style.color = "#9ca3af"; };
+            filterIcon.onmouseleave = () => { filterIcon.style.color = hasFilter ? "#3b82f6" : "#d1d5db"; };
+            th.appendChild(thLabel);
+            th.appendChild(filterIcon);
             th.setAttribute("data-col-idx", i);
             th.draggable = true;
 
@@ -729,10 +771,13 @@
             };
             const arrowWrap = el("div", { style: "display:" + (isChecked ? "flex" : "none") + ";flex-direction:column;align-items:center;margin-right:2px;" });
             const upArrow = el("span", { style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;", title: "Select all above" }, "\u00BB");
-            upArrow.style.transform = "rotate(-90deg)";
+            const upArrow = el("span", { style: "font-size:14px;cursor:pointer;color:#9ca3af;line-height:1;padding:3px 5px;border-radius:4px;transition:background 0.15s,color 0.15s;", title: "Select all above" }, "\u25B2");
+            upArrow.onmouseenter = () => { upArrow.style.background = "#dbeafe"; upArrow.style.color = "#2563eb"; };
+            upArrow.onmouseleave = () => { upArrow.style.background = "transparent"; upArrow.style.color = "#9ca3af"; };
             upArrow.onclick = (e) => { e.stopPropagation(); for (let j = 0; j < ri; j++) state.selected.add(j); renderTable(); updateToolbarCounts(); };
-            const downArrow = el("span", { style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;", title: "Select all below" }, "\u00BB");
-            downArrow.style.transform = "rotate(90deg)";
+            const downArrow = el("span", { style: "font-size:14px;cursor:pointer;color:#9ca3af;line-height:1;padding:3px 5px;border-radius:4px;transition:background 0.15s,color 0.15s;", title: "Select all below" }, "\u25BC");
+            downArrow.onmouseenter = () => { downArrow.style.background = "#dbeafe"; downArrow.style.color = "#2563eb"; };
+            downArrow.onmouseleave = () => { downArrow.style.background = "transparent"; downArrow.style.color = "#9ca3af"; };
             downArrow.onclick = (e) => { e.stopPropagation(); for (let j = ri + 1; j < rows.length; j++) state.selected.add(j); renderTable(); updateToolbarCounts(); };
             arrowWrap.appendChild(upArrow);
             arrowWrap.appendChild(downArrow);
@@ -794,30 +839,47 @@
 
           const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
           const box = el("div", { style: "background:#fff;width:480px;max-height:80vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
-          box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Query Enrichment"));
-          box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:14px;" }, "Select a query to check which calls in your results matched. Adds a score column to the grid."));
+          box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Query Search"));
+          box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:14px;" }, "Select one or more queries to check which calls matched. Each adds a score column."));
 
           const searchInput = el("input", { type: "text", placeholder: "Search queries...", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:8px;" });
           box.appendChild(searchInput);
 
           const listWrap = el("div", { style: "max-height:220px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:14px;" });
-          const tileWrap = el("div", { style: "margin-bottom:14px;display:none;" });
-          let selectedQuery = null;
+          let queryQueue = [];
 
-          function renderTile(q) {
-            tileWrap.innerHTML = "";
-            if (!q) { tileWrap.style.display = "none"; return; }
-            tileWrap.style.display = "block";
-            const tile = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px;background:#f9fafb;" });
-            tile.appendChild(el("div", { style: "font-size:14px;font-weight:600;color:#111827;margin-bottom:8px;" }, q.name));
-            const badgeRow = el("div", { style: "display:flex;gap:8px;" });
-            const sp = (q.speaker || "Either").toLowerCase();
-            const agentOn = sp === "agent" || sp === "either";
-            const custOn = sp === "customer" || sp === "either";
-            badgeRow.appendChild(el("div", { style: "padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;" + (agentOn ? "background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;" : "background:#f3f4f6;color:#d1d5db;border:1px solid #e5e7eb;") }, "Agent"));
-            badgeRow.appendChild(el("div", { style: "padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;" + (custOn ? "background:#dcfce7;color:#16a34a;border:1px solid #86efac;" : "background:#f3f4f6;color:#d1d5db;border:1px solid #e5e7eb;") }, "Customer"));
-            tile.appendChild(badgeRow);
-            tileWrap.appendChild(tile);
+          const queueWrap = el("div", { style: "display:none;flex-wrap:wrap;gap:6px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:14px;" });
+
+          const runBtn = el("button", { style: "width:100%;padding:10px;border-radius:10px;border:0;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(139,92,246,0.35);margin-bottom:8px;opacity:0.5;pointer-events:none;" }, "Search Query");
+
+          function renderQueue() {
+            queueWrap.innerHTML = "";
+            if (!queryQueue.length) {
+              queueWrap.style.display = "none";
+              runBtn.textContent = "Search Query";
+              runBtn.style.opacity = "0.5";
+              runBtn.style.pointerEvents = "none";
+              return;
+            }
+            queueWrap.style.display = "flex";
+            runBtn.textContent = queryQueue.length === 1 ? "Search Query" : "Search Queries";
+            runBtn.style.opacity = "1";
+            runBtn.style.pointerEvents = "auto";
+            for (let qi = 0; qi < queryQueue.length; qi++) {
+              const q = queryQueue[qi];
+              const chip = el("div", { style: "display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #93c5fd;border-radius:999px;padding:4px 10px;font-size:11px;color:#1d4ed8;font-weight:600;" });
+              chip.appendChild(el("span", {}, q.name));
+              const removeX = el("span", { style: "cursor:pointer;font-size:13px;color:#6b7280;line-height:1;" }, "\u00D7");
+              (function(query) {
+                removeX.onclick = function() {
+                  queryQueue = queryQueue.filter(function(qq) { return qq.id !== query.id; });
+                  renderQueue();
+                  renderList(searchInput.value);
+                };
+              })(q);
+              chip.appendChild(removeX);
+              queueWrap.appendChild(chip);
+            }
           }
 
           function renderList(filter) {
@@ -829,17 +891,19 @@
               const q = matches[qi];
               const sp = (q.speaker || "Either").toLowerCase();
               const spLabel = sp === "agent" ? "Agent" : sp === "customer" ? "Customer" : "Either";
-              const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:12px;color:#111827;" });
+              const inQueue = queryQueue.some(function(qq) { return qq.id === q.id; });
+              const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:12px;color:#111827;" + (inQueue ? "background:#eff6ff;" : "") });
               row.appendChild(el("div", { style: "flex:1;" }, q.name));
               row.appendChild(el("div", { style: "font-size:10px;color:#6b7280;flex-shrink:0;" }, spLabel));
               (function(query, rowEl) {
-                rowEl.onmouseenter = function() { rowEl.style.background = "#e8f0fe"; };
-                rowEl.onmouseleave = function() { rowEl.style.background = selectedQuery && selectedQuery.id === query.id ? "#eff6ff" : ""; };
+                rowEl.onmouseenter = function() { if (!queryQueue.some(function(qq) { return qq.id === query.id; })) rowEl.style.background = "#e8f0fe"; };
+                rowEl.onmouseleave = function() { rowEl.style.background = queryQueue.some(function(qq) { return qq.id === query.id; }) ? "#eff6ff" : ""; };
                 rowEl.onclick = function() {
-                  selectedQuery = query;
-                  renderTile(query);
-                  for (let ci = 0; ci < listWrap.children.length; ci++) listWrap.children[ci].style.background = "";
-                  rowEl.style.background = "#eff6ff";
+                  const idx = queryQueue.findIndex(function(qq) { return qq.id === query.id; });
+                  if (idx >= 0) { queryQueue.splice(idx, 1); }
+                  else { queryQueue.push(query); }
+                  renderQueue();
+                  renderList(searchInput.value);
                 };
               })(q, row);
               listWrap.appendChild(row);
@@ -848,16 +912,17 @@
 
           searchInput.addEventListener("input", function() { renderList(searchInput.value); });
           renderList("");
-          box.appendChild(listWrap);
-          box.appendChild(tileWrap);
 
-          const runBtn = el("button", { style: "width:100%;padding:10px;border-radius:10px;border:0;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(139,92,246,0.35);margin-bottom:8px;" }, "Run Enrichment");
-          const cancelBtn = el("button", { style: "width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;color:#6b7280;" }, "Cancel");
+          box.appendChild(listWrap);
+          box.appendChild(queueWrap);
+
           runBtn.onclick = async function() {
-            if (!selectedQuery) { alert("Select a query first."); return; }
+            if (!queryQueue.length) { alert("Select at least one query."); return; }
+            var toRun = queryQueue.slice();
             overlay.remove();
-            await runQueryEnrichment(selectedQuery);
+            await runQueryEnrichment(toRun);
           };
+          const cancelBtn = el("button", { style: "width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;color:#6b7280;" }, "Cancel");
           cancelBtn.onclick = function() { overlay.remove(); };
           box.appendChild(runBtn);
           box.appendChild(cancelBtn);
@@ -866,7 +931,8 @@
           setTimeout(function() { searchInput.focus(); }, 50);
         }
 
-        async function runQueryEnrichment(query) {
+        async function runQueryEnrichment(queries) {
+          if (!Array.isArray(queries)) queries = [queries];
           var HITS_URL = function(smid) { return "https://apug01.nxondemand.com/NxIA/api/hits/fetch/" + smid; };
           var BATCH = 50;
           var smids = [];
@@ -876,8 +942,11 @@
           }
           if (!smids.length) { alert("No SMIDs found in results."); return; }
 
+          var scoreMaps = new Map();
+          for (var qmi = 0; qmi < queries.length; qmi++) { scoreMaps.set(queries[qmi].id, new Map()); }
+
           var progOverlay = el("div", { style: "position:fixed;top:16px;right:16px;z-index:1000010;width:360px;background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:12px;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 12px 28px rgba(0,0,0,.35);" });
-          var progTitle = el("div", { style: "font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;" }, "Query: " + query.name);
+          var progTitle = el("div", { style: "font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;" }, "Searching " + queries.length + " quer" + (queries.length === 1 ? "y" : "ies"));
           var progStatus = el("div", { style: "font-size:12px;margin-bottom:6px;" }, "Starting...");
           var progBarOuter = el("div", { style: "height:8px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151;" });
           var progBarInner = el("div", { style: "height:100%;width:0%;background:#8b5cf6;transition:width 0.3s;" });
@@ -891,23 +960,26 @@
           progOverlay.appendChild(progCancel);
           document.body.appendChild(progOverlay);
 
-          var scoreMap = new Map();
           var done = 0;
-
           for (var bi = 0; bi < smids.length; bi += BATCH) {
             if (cancelled) break;
             var batch = smids.slice(bi, bi + BATCH);
             var promises = batch.map(function(entry) {
               return fetch(HITS_URL(entry.smid), { credentials: "include" })
-               .then(function(r) { return r.ok ? r.json() : []; })
+                .then(function(r) { return r.ok ? r.json() : []; })
                 .then(function(hits) {
                   var arr = Array.isArray(hits) ? hits : (hits && Array.isArray(hits.data) ? hits.data : []);
-                  var matches = arr.filter(function(h) { return h.id === query.id || h.name === query.name; });
-                  var best = 0;
-                  for (var mi = 0; mi < matches.length; mi++) { if ((matches[mi].score || 0) > best) best = matches[mi].score; }
-                  scoreMap.set(entry.smid, best);
+                  for (var qi = 0; qi < queries.length; qi++) {
+                    var query = queries[qi];
+                    var matches = arr.filter(function(h) { return h.id === query.id || h.name === query.name; });
+                    var best = 0;
+                    for (var mi = 0; mi < matches.length; mi++) { if ((matches[mi].score || 0) > best) best = matches[mi].score; }
+                    scoreMaps.get(query.id).set(entry.smid, best);
+                  }
                 })
-                .catch(function() { scoreMap.set(entry.smid, 0); });
+                .catch(function() {
+                  for (var qi = 0; qi < queries.length; qi++) { scoreMaps.get(queries[qi].id).set(entry.smid, 0); }
+                });
             });
             await Promise.all(promises);
             done += batch.length;
@@ -916,26 +988,26 @@
             progBarInner.style.width = pct + "%";
             if (bi + BATCH < smids.length && !cancelled) await new Promise(function(r) { setTimeout(r, 100); });
           }
-
           progOverlay.remove();
           if (cancelled) return;
 
-          var colName = "__QUERY_" + query.id + "__";
-          var colHeader = query.name;
-
-          for (var ri = 0; ri < state.rows.length; ri++) {
-            var item = state.rows[ri];
-            var rowSmid = String(getSourceMediaId(item) || "");
-            var r = item.row || item;
-            r[colName] = scoreMap.has(rowSmid) ? scoreMap.get(rowSmid) : "";
+          for (var qi = 0; qi < queries.length; qi++) {
+            var query = queries[qi];
+            var colName = "__QUERY_" + query.id + "__";
+            var colHeader = query.name;
+            var qScoreMap = scoreMaps.get(query.id);
+            for (var ri = 0; ri < state.rows.length; ri++) {
+              var item = state.rows[ri];
+              var rowSmid = String(getSourceMediaId(item) || "");
+              var r = item.row || item;
+              r[colName] = qScoreMap.has(rowSmid) ? qScoreMap.get(rowSmid) : "";
+            }
+            if (!state.fields.includes(colName)) {
+              state.fields.unshift(colName);
+              state.headers.unshift(colHeader);
+              state.visible.add(colName);
+            }
           }
-
-          if (!state.fields.includes(colName)) {
-            state.fields.unshift(colName);
-            state.headers.unshift(colHeader);
-            state.visible.add(colName);
-          }
-
           rebuildColumnPanel();
           renderSortBadges();
           renderTable();
