@@ -595,7 +595,7 @@
             const labelEl = el("span", {
               style: "font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;" + (hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"),
               title: h + (hasFilter ? " (filtered)" : "")
-            }, h + (hasFilter ? " \uD83D\uDD3D" : ""));
+            }, h + (hasFilter ? " (filtered)" : ""));
             labelEl.onclick = () => openColumnFilterPopover(f, labelEl);
             rowEl.appendChild(cb); rowEl.appendChild(labelEl);
             colList.appendChild(rowEl);
@@ -770,7 +770,6 @@
               tr.style.background = rowCb.checked ? "#eff6ff" : (ri % 2 ? "#f8fafc" : "#fff");
             };
             const arrowWrap = el("div", { style: "display:" + (isChecked ? "flex" : "none") + ";flex-direction:column;align-items:center;margin-right:2px;" });
-            const upArrow = el("span", { style: "font-size:10px;cursor:pointer;color:#6b7280;line-height:1;", title: "Select all above" }, "\u00BB");
             const upArrow = el("span", { style: "font-size:14px;cursor:pointer;color:#9ca3af;line-height:1;padding:3px 5px;border-radius:4px;transition:background 0.15s,color 0.15s;", title: "Select all above" }, "\u25B2");
             upArrow.onmouseenter = () => { upArrow.style.background = "#dbeafe"; upArrow.style.color = "#2563eb"; };
             upArrow.onmouseleave = () => { upArrow.style.background = "transparent"; upArrow.style.color = "#9ca3af"; };
