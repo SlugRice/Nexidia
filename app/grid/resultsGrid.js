@@ -499,6 +499,9 @@
         toolbar.appendChild(hideSelectedBtn);
         toolbar.appendChild(exportExcelBtn);
         toolbar.appendChild(exportTranscriptsBtn);
+        const queryEnrichBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #8b5cf6;background:#fff;color:#7c3aed;cursor:pointer;font-size:12px;flex-shrink:0;" }, "Queries");
+        queryEnrichBtn.onclick = () => openQueryEnrichment();
+        toolbar.appendChild(queryEnrichBtn);
         toolbar.appendChild(resetBtn);
         const saveSearchGridBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "\uD83D\uDCBE Save Search");
         saveSearchGridBtn.onclick = () => { const fn = api.getShared("openGlobalSavePrompt"); if (fn) fn(); else alert("Save function not available."); };
@@ -776,6 +779,164 @@
             tr.appendChild(td);
             tbody.appendChild(tr);
           }
+        }
+
+        async function openQueryEnrichment() {
+          let queryCatalog = [];
+          try {
+            const res = await fetch("https://apug01.nxondemand.com/NxIA/api/queries", { credentials: "include" });
+            if (res.ok) queryCatalog = await res.json();
+          } catch (_) {}
+          if (!Array.isArray(queryCatalog) || !queryCatalog.length) { alert("Could not load query catalog."); return; }
+          queryCatalog.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+          const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+          const box = el("div", { style: "background:#fff;width:480px;max-height:80vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+          box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Query Enrichment"));
+          box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:14px;" }, "Select a query to check which calls in your results matched. Adds a score column to the grid."));
+
+          const searchInput = el("input", { type: "text", placeholder: "Search queries...", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:8px;" });
+          box.appendChild(searchInput);
+
+          const listWrap = el("div", { style: "max-height:220px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:14px;" });
+          const tileWrap = el("div", { style: "margin-bottom:14px;display:none;" });
+          let selectedQuery = null;
+
+          function renderTile(q) {
+            tileWrap.innerHTML = "";
+            if (!q) { tileWrap.style.display = "none"; return; }
+            tileWrap.style.display = "block";
+            const tile = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px;background:#f9fafb;" });
+            tile.appendChild(el("div", { style: "font-size:14px;font-weight:600;color:#111827;margin-bottom:8px;" }, q.name));
+            const badgeRow = el("div", { style: "display:flex;gap:8px;" });
+            const sp = (q.speaker || "Either").toLowerCase();
+            const agentOn = sp === "agent" || sp === "either";
+            const custOn = sp === "customer" || sp === "either";
+            badgeRow.appendChild(el("div", { style: "padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;" + (agentOn ? "background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;" : "background:#f3f4f6;color:#d1d5db;border:1px solid #e5e7eb;") }, "Agent"));
+            badgeRow.appendChild(el("div", { style: "padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;" + (custOn ? "background:#dcfce7;color:#16a34a;border:1px solid #86efac;" : "background:#f3f4f6;color:#d1d5db;border:1px solid #e5e7eb;") }, "Customer"));
+            tile.appendChild(badgeRow);
+            tileWrap.appendChild(tile);
+          }
+
+          function renderList(filter) {
+            listWrap.innerHTML = "";
+            const fl = (filter || "").toLowerCase().trim();
+            const matches = queryCatalog.filter((q) => !fl || (q.name || "").toLowerCase().includes(fl));
+            if (!matches.length) { listWrap.appendChild(el("div", { style: "padding:10px;font-size:12px;color:#6b7280;" }, "No queries found.")); return; }
+            for (let qi = 0; qi < matches.length; qi++) {
+              const q = matches[qi];
+              const sp = (q.speaker || "Either").toLowerCase();
+              const spLabel = sp === "agent" ? "Agent" : sp === "customer" ? "Customer" : "Either";
+              const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:12px;color:#111827;" });
+              row.appendChild(el("div", { style: "flex:1;" }, q.name));
+              row.appendChild(el("div", { style: "font-size:10px;color:#6b7280;flex-shrink:0;" }, spLabel));
+              (function(query, rowEl) {
+                rowEl.onmouseenter = function() { rowEl.style.background = "#e8f0fe"; };
+                rowEl.onmouseleave = function() { rowEl.style.background = selectedQuery && selectedQuery.id === query.id ? "#eff6ff" : ""; };
+                rowEl.onclick = function() {
+                  selectedQuery = query;
+                  renderTile(query);
+                  for (let ci = 0; ci < listWrap.children.length; ci++) listWrap.children[ci].style.background = "";
+                  rowEl.style.background = "#eff6ff";
+                };
+              })(q, row);
+              listWrap.appendChild(row);
+            }
+          }
+
+          searchInput.addEventListener("input", function() { renderList(searchInput.value); });
+          renderList("");
+          box.appendChild(listWrap);
+          box.appendChild(tileWrap);
+
+          const runBtn = el("button", { style: "width:100%;padding:10px;border-radius:10px;border:0;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(139,92,246,0.35);margin-bottom:8px;" }, "Run Enrichment");
+          const cancelBtn = el("button", { style: "width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;color:#6b7280;" }, "Cancel");
+          runBtn.onclick = async function() {
+            if (!selectedQuery) { alert("Select a query first."); return; }
+            overlay.remove();
+            await runQueryEnrichment(selectedQuery);
+          };
+          cancelBtn.onclick = function() { overlay.remove(); };
+          box.appendChild(runBtn);
+          box.appendChild(cancelBtn);
+          overlay.appendChild(box);
+          document.body.appendChild(overlay);
+          setTimeout(function() { searchInput.focus(); }, 50);
+        }
+
+        async function runQueryEnrichment(query) {
+          var HITS_URL = function(smid) { return "https://apug01.nxondemand.com/NxIA/api/hits/fetch/" + smid; };
+          var BATCH = 50;
+          var smids = [];
+          for (var si = 0; si < state.rows.length; si++) {
+            var smid = getSourceMediaId(state.rows[si]);
+            if (smid) smids.push({ idx: si, smid: String(smid) });
+          }
+          if (!smids.length) { alert("No SMIDs found in results."); return; }
+
+          var progOverlay = el("div", { style: "position:fixed;top:16px;right:16px;z-index:1000010;width:360px;background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:12px;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 12px 28px rgba(0,0,0,.35);" });
+          var progTitle = el("div", { style: "font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;" }, "Query: " + query.name);
+          var progStatus = el("div", { style: "font-size:12px;margin-bottom:6px;" }, "Starting...");
+          var progBarOuter = el("div", { style: "height:8px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151;" });
+          var progBarInner = el("div", { style: "height:100%;width:0%;background:#8b5cf6;transition:width 0.3s;" });
+          progBarOuter.appendChild(progBarInner);
+          var progCancel = el("div", { style: "margin-top:6px;font-size:11px;color:#f87171;cursor:pointer;text-decoration:underline;" }, "Cancel");
+          var cancelled = false;
+          progCancel.onclick = function() { cancelled = true; };
+          progOverlay.appendChild(progTitle);
+          progOverlay.appendChild(progStatus);
+          progOverlay.appendChild(progBarOuter);
+          progOverlay.appendChild(progCancel);
+          document.body.appendChild(progOverlay);
+
+          var scoreMap = new Map();
+          var done = 0;
+
+          for (var bi = 0; bi < smids.length; bi += BATCH) {
+            if (cancelled) break;
+            var batch = smids.slice(bi, bi + BATCH);
+            var promises = batch.map(function(entry) {
+              return fetch(HITS_URL(entry.smid), { credentials: "include" })
+                .then(function(r) { return r.ok ? r.json() : []; })
+                .then(function(hits) {
+                  var arr = Array.isArray(hits) ? hits : [];
+                  var matches = arr.filter(function(h) { return h.id === query.id || h.name === query.name; });
+                  var best = 0;
+                  for (var mi = 0; mi < matches.length; mi++) { if ((matches[mi].score || 0) > best) best = matches[mi].score; }
+                  scoreMap.set(entry.smid, best);
+                })
+                .catch(function() { scoreMap.set(entry.smid, 0); });
+            });
+            await Promise.all(promises);
+            done += batch.length;
+            var pct = Math.round((done / smids.length) * 100);
+            progStatus.textContent = done + " / " + smids.length + " calls checked";
+            progBarInner.style.width = pct + "%";
+            if (bi + BATCH < smids.length && !cancelled) await new Promise(function(r) { setTimeout(r, 100); });
+          }
+
+          progOverlay.remove();
+          if (cancelled) return;
+
+          var colName = "__QUERY_" + query.id + "__";
+          var colHeader = query.name;
+
+          for (var ri = 0; ri < state.rows.length; ri++) {
+            var item = state.rows[ri];
+            var rowSmid = String(getSourceMediaId(item) || "");
+            var r = item.row || item;
+            r[colName] = scoreMap.has(rowSmid) ? scoreMap.get(rowSmid) : "";
+          }
+
+          if (!state.fields.includes(colName)) {
+            state.fields.unshift(colName);
+            state.headers.unshift(colHeader);
+            state.visible.add(colName);
+          }
+
+          rebuildColumnPanel();
+          renderSortBadges();
+          renderTable();
         }
 
         body.appendChild(colPanel);
