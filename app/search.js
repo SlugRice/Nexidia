@@ -777,14 +777,22 @@
         var dismissDateAnim = null;
         requestAnimationFrame(() => {
           resizePanes();
-          for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
-            const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
-            e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
+          const savedConfig = api.getShared("returnToSearch") ? api.getShared("lastSearchConfig") : null;
+          api.setShared("returnToSearch", false);
+          if (savedConfig) {
+            deserializeSearch(savedConfig);
+          } else {
+            for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
+              const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
+              e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
+            }
           }
           updateDots();
-          setTimeout(() => {
-            dismissDateAnim = runDateFocusAnimation(card, dateSectionWrapper, () => { dismissDateAnim = null; });
-          }, 120);
+          if (!savedConfig) {
+            setTimeout(() => {
+              dismissDateAnim = runDateFocusAnimation(card, dateSectionWrapper, () => { dismissDateAnim = null; });
+            }, 120);
+          }
         });
         window.addEventListener("resize", resizePanes);
 
