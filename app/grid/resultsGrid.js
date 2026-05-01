@@ -1030,7 +1030,12 @@
           document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
         }
         stickyClose.onclick = close;
-        backToSearchBtn.onclick = close;
+        backToSearchBtn.onclick = () => {
+          close();
+          api.setShared("returnToSearch", true);
+          const searchTool = api.listTools().find((t) => t.id === "search");
+          if (searchTool) searchTool.open();
+        };
 
         try {
           const res = await fetch("https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names", { credentials: "include", cache: "no-store" });
