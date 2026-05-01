@@ -1311,7 +1311,10 @@ async function runSearch() {
             const keyPhraseResult = buildPhraseGroups(keyPhraseEntries);
             for (let ei = 0; ei < keyExcludeKw.length; ei++) globalExcludes.push(keyExcludeKw[ei]);
             for (let ei = 0; ei < keyPhraseResult.exclude.length; ei++) globalExcludes.push(keyPhraseResult.exclude[ei].group);
-            const keyAndFilters = [...keyIncludeKw, ...keyPhraseResult.include.map((p) => p.group)];
+            const keyPhraseFilters = keyPhraseResult.include.map((p) => p.group);
+            const keyAndFilters = [...keyIncludeKw];
+            if (keyPhraseFilters.length === 1) keyAndFilters.push(keyPhraseFilters[0]);
+            else if (keyPhraseFilters.length > 1) keyAndFilters.push({ operator: "OR", invertOperator: false, filters: keyPhraseFilters });
 
             if (runSets.length && keyAndFilters.length) {
               for (let i = 0; i < runSets.length; i++) runSets[i].keyFilters = keyAndFilters;
