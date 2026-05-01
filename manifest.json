@@ -1,5 +1,5 @@
 {
-  "version": "0.1.35",
+  "version": "0.1.4",
   "entry": [
     "app/core/registry.js",
     "app/core/columnPrefs.js",
@@ -9,6 +9,7 @@
     "app/transcripts/batchBuilder.js",
     "app/grid/resultsGrid.js",
     "app/player/mediaPlayer.js",
+    "app/player/playlist.js",
     "app/entry.js"
   ]
 }
