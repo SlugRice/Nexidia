@@ -807,9 +807,11 @@
         }
 
         // ── Normalization ─────────────────────────────────────────────────────
+        
         function splitValues(raw) {
-          return String(raw || "").replace(/\r\n/g, "\n").replace(/\t/g, "\n").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+            return String(raw || "").replace(/\r\n/g, "\n").replace(/\t/g, "\n").split(/[\n,]+/).map((s) => s.trim().replace(/^["']+|["']+$/g, "").trim()).filter(Boolean);
         }
+
         function isoStart(d) { return d + "T00:00:00Z"; }
         function isoEnd(d) { return d + "T23:59:59Z"; }
 
