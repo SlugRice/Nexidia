@@ -746,7 +746,7 @@
           selectAllCb.indeterminate = state.selected.size > 0 && !selectAllCb.checked;
 
           tbody.innerHTML = "";
-          const maxRender = Math.min(rows.length, 3000);
+          const maxRender = rows.length;
           for (let ri = 0; ri < maxRender; ri++) {
             const item = rows[ri];
             const smid = getSourceMediaId(item);
