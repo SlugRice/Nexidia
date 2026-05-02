@@ -122,13 +122,19 @@
         }
 
         async fetchResultsPage(page) {
-            const url = this.baseUrl + 'ClientServices/SearchResultsService.svc/GetSearchResults'
+            const url = this.baseUrl + 'ClientServices/SearchResultsService.svc/GetSearchResults/'
                 + '?appInstanceID=' + this.appInstanceId
                 + '&page=' + page
                 + '&mediaTypes=15'
                 + '&sortColumn=none'
-                + '&sortOrder=default';
-            const resp = await fetch(url);
+                + '&sortOrder=default'
+                + '&_=' + Date.now();
+            const resp = await fetch(url, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/json'
+                }
+            });
             return await resp.json();
         }
 
