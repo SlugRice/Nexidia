@@ -27,12 +27,17 @@
         mintAppInstanceId() {
             const sid = this.getSessionId();
             if (!sid) return null;
-            this.appInstanceId = sid + '-' + crypto.randomUUID();
-            return this.appInstanceId;
+            return sid + '-' + crypto.randomUUID();
         }
 
         async initialize(options = {}) {
-            if (!this.mintAppInstanceId()) throw new Error('No Nexidia session');
+            const tempId = this.mintAppInstanceId();
+            if (!tempId) throw new Error('No Nexidia session');
+
+            const frameHtml = await fetch(this.buildUrl('ForensicSearch.aspx', tempId)).then(r => r.text());
+            const m = frameHtml.match(/"appInstanceId":"([^"]+)"/);
+            if (!m) throw new Error('Could not extract server AppInstanceId');
+            this.appInstanceId = m[1];
 
             const paramHtml = await fetch(this.buildUrl('ParameterSelector.aspx')).then(r => r.text());
             this.paramFields = this.parseFormFields(paramHtml);
@@ -96,27 +101,21 @@
         }
 
         async harvestResults(options, status) {
-            const maxWait = options.maxWait || 120000;
-            const interval = options.pollInterval || 2000;
+            const maxWait = options.maxWait || 600000;
+            const interval = options.pollInterval || 5000;
             const start = Date.now();
-            let attempt = 0;
 
             while (Date.now() - start < maxWait) {
-                attempt++;
                 try {
                     const data = await this.fetchResultsPage(1);
-                    if (data && typeof data.PageCount !== 'undefined') {
-                        if (!data.Rows || data.Rows.length === 0) {
-                            if (attempt > 3) {
-                                status('Search complete. No results.');
-                                return { total: 0, pages: 0, rows: [] };
-                            }
-                        } else {
-                            status('Harvesting ' + (data.TotalResults || data.Rows.length) + ' results...');
-                            return await this.fetchAllPages(data);
-                        }
+                    if (data && data.PageCount > 0 && data.SearchResultRows && data.SearchResultRows.length > 0) {
+                        const total = data.TotalAudioResults + data.TotalChatResults + data.TotalEmailResults + data.TotalTextResults;
+                        status('Harvesting ' + total + ' results across ' + data.PageCount + ' pages...');
+                        return await this.fetchAllPages(data, total);
                     }
                 } catch (e) {}
+                const elapsed = Math.round((Date.now() - start) / 1000);
+                status('Searching... (' + elapsed + 's)');
                 await new Promise(r => setTimeout(r, interval));
             }
             throw new Error('Search timed out after ' + (maxWait / 1000) + 's');
@@ -133,20 +132,21 @@
             return await resp.json();
         }
 
-        async fetchAllPages(firstPage) {
-            const rows = [...(firstPage.Rows || [])];
-            const total = firstPage.PageCount || 1;
+        async fetchAllPages(firstPage, total) {
+            const rows = [...firstPage.SearchResultRows];
+            const pages = firstPage.PageCount;
 
-            for (let p = 2; p <= total; p++) {
+            for (let p = 2; p <= pages; p++) {
                 const data = await this.fetchResultsPage(p);
-                rows.push(...(data.Rows || []));
+                if (data.SearchResultRows) rows.push(...data.SearchResultRows);
             }
 
-            return { total: firstPage.TotalResults || rows.length, pages: total, rows };
+            return { total: total || rows.length, pages, rows };
         }
 
-        buildUrl(page) {
-            return this.baseUrl + page + '?AppInstanceID=' + this.appInstanceId + '&CurrentUICulture=en';
+        buildUrl(page, overrideId) {
+            const id = overrideId || this.appInstanceId;
+            return this.baseUrl + page + '?AppInstanceID=' + id + '&CurrentUICulture=en';
         }
 
         parseFormFields(html) {
