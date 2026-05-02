@@ -13,7 +13,10 @@
         }
 
         getSessionId() {
-            const m = document.cookie.match(/ASP\.NET_SessionId=([^;]+)/);
+            const entries = performance.getEntriesByType('resource');
+            const match = entries.find(e => e.name.includes('AppInstanceID='));
+            if (!match) return null;
+            const m = match.name.match(/AppInstanceID=([^-&]+)/);
             return m ? m[1] : null;
         }
 
