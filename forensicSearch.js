@@ -168,3 +168,4 @@ class ForensicSearchService {
             .join('&');
     }
 }
+window.ForensicSearchService = ForensicSearchService;
