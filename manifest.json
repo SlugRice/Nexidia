@@ -1,9 +1,10 @@
 {
-  "version": "0.1.4",
+  "version": "0.1.45",
   "entry": [
     "app/core/registry.js",
     "app/core/columnPrefs.js",
     "app/search.js",
+    "app/forensicSearch.js",
     "app/dispatcher.js",
     "app/export.js",
     "app/transcripts/batchBuilder.js",
