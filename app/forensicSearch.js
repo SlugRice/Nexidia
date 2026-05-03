@@ -25,67 +25,6 @@
       return !!this.getSessionId();
     }
 
-    async initialize(options = {}) {
-      LOG('=== INITIALIZE START ===');
-      LOG('Options:', JSON.stringify(options));
-
-      if (this.frame) {
-        this.frame.remove();
-        this.frame = null;
-      }
-      this.ready = false;
-
-      const sid = this.getSessionId();
-      if (!sid) throw new Error('No Nexidia session');
-      const tempId = sid + '-' + crypto.randomUUID();
-      LOG('Session:', sid);
-      LOG('TempId:', tempId);
-
-      this.frame = document.createElement('iframe');
-      this.frame.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;';
-      this.frame.src = '/NxIA/Search/ForensicSearch.aspx?AppInstanceID=' + tempId + '&CurrentUICulture=en';
-      document.body.appendChild(this.frame);
-      LOG('Hidden iframe created, loading ForensicSearch.aspx...');
-
-      await new Promise(resolve => this.frame.addEventListener('load', resolve));
-      LOG('ForensicSearch.aspx loaded');
-
-      await this.waitForChildFrames();
-
-      const win = this.getWin();
-      try {
-        this.appInstanceId = win.getAppInstanceId();
-      } catch (e) {
-        const m = win.document.documentElement.innerHTML.match(/"appInstanceId":"([^"]+)"/);
-        this.appInstanceId = m ? m[1] : null;
-      }
-      LOG('AppInstanceId:', this.appInstanceId);
-      if (!this.appInstanceId) throw new Error('Could not get AppInstanceId from frame');
-
-      const psDoc = this.getParamDoc();
-      if (options.startDate) {
-        const el = psDoc.querySelector('[name="StartDate$NXDateBox_StartDate"]');
-        if (el) { el.value = options.startDate; LOG('Set startDate:', options.startDate); }
-        else WARN('StartDate field not found');
-      }
-      if (options.endDate) {
-        const el = psDoc.querySelector('[name="EndDate$NXDateBox_EndDate"]');
-        if (el) { el.value = options.endDate; LOG('Set endDate:', options.endDate); }
-        else WARN('EndDate field not found');
-      }
-      if (options.filters) {
-        for (const [name, value] of Object.entries(options.filters)) {
-          const el = psDoc.querySelector('[name="' + name + '"]');
-          if (el) { el.value = value; LOG('Set filter:', name, '=', value); }
-          else WARN('Filter field not found:', name);
-        }
-      }
-
-      this.ready = true;
-      LOG('=== INITIALIZE COMPLETE ===');
-      return this.appInstanceId;
-    }
-
     getWin() {
       return this.frame.contentWindow;
     }
@@ -98,6 +37,81 @@
       return this.getWin().document.getElementById('iframeSearchBuilder').contentWindow.document;
     }
 
+    async initialize(options = {}) {
+      LOG('=== INITIALIZE START ===');
+      LOG('Options:', JSON.stringify(options));
+
+      if (this.frame) { this.frame.remove(); this.frame = null; }
+      this.ready = false;
+
+      const sid = this.getSessionId();
+      if (!sid) throw new Error('No Nexidia session');
+      const tempId = sid + '-' + crypto.randomUUID();
+      LOG('Session:', sid);
+      LOG('TempId:', tempId);
+
+      this.frame = document.createElement('iframe');
+      this.frame.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;';
+      this.frame.src = '/NxIA/Search/ForensicSearch.aspx?AppInstanceID=' + tempId + '&CurrentUICulture=en';
+      document.body.appendChild(this.frame);
+      LOG('Hidden iframe created');
+
+      await new Promise(resolve => this.frame.addEventListener('load', resolve));
+      LOG('ForensicSearch.aspx loaded');
+
+      await new Promise(r => setTimeout(r, 5000));
+
+      const win = this.getWin();
+      const html = win.document.documentElement.innerHTML;
+      const launchMatch = html.match(/launchParameters":"([^"]+)"/);
+      if (!launchMatch) throw new Error('Could not find launchParameters');
+      const launchParams = launchMatch[1].replace(/\\u0026/g, '&');
+      LOG('Launch params:', launchParams);
+
+      const childIdMatch = launchParams.match(/AppInstanceID=([^&]+)/);
+      if (!childIdMatch) throw new Error('Could not extract child AppInstanceId');
+      this.appInstanceId = childIdMatch[1];
+      LOG('Child AppInstanceId:', this.appInstanceId);
+
+      const ps = win.document.getElementById('iframeParameterSelector');
+      let psLoaded = false;
+      try {
+        const psDoc = ps.contentWindow.document;
+        psLoaded = psDoc.readyState === 'complete' && !!psDoc.querySelector('[name="StartDate$NXDateBox_StartDate"]');
+      } catch (e) {}
+
+      if (!psLoaded) {
+        LOG('ParameterSelector failed to load, fixing URL...');
+        ps.src = 'ParameterSelector.aspx?' + launchParams;
+        await new Promise(resolve => ps.addEventListener('load', resolve));
+        LOG('ParameterSelector reloaded');
+      } else {
+        LOG('ParameterSelector loaded OK');
+      }
+
+      await this.waitForChildFrames();
+
+      const psDoc = this.getParamDoc();
+      if (options.startDate) {
+        const el = psDoc.querySelector('[name="StartDate$NXDateBox_StartDate"]');
+        if (el) { el.value = options.startDate; LOG('Set startDate:', options.startDate); }
+      }
+      if (options.endDate) {
+        const el = psDoc.querySelector('[name="EndDate$NXDateBox_EndDate"]');
+        if (el) { el.value = options.endDate; LOG('Set endDate:', options.endDate); }
+      }
+      if (options.filters) {
+        for (const [name, value] of Object.entries(options.filters)) {
+          const el = psDoc.querySelector('[name="' + name + '"]');
+          if (el) { el.value = value; LOG('Set filter:', name, '=', value); }
+        }
+      }
+
+      this.ready = true;
+      LOG('=== INITIALIZE COMPLETE ===');
+      return this.appInstanceId;
+    }
+
     async waitForChildFrames() {
       const maxWait = 30000;
       const start = Date.now();
@@ -107,7 +121,6 @@
           const win = this.getWin();
           const ps = win.document.getElementById('iframeParameterSelector');
           const sb = win.document.getElementById('iframeSearchBuilder');
-          const sc = win.document.getElementById('iframeSearchController');
 
           const psReady = ps && ps.contentWindow && ps.contentWindow.document.readyState === 'complete'
             && ps.contentWindow.document.querySelector('[name="StartDate$NXDateBox_StartDate"]');
@@ -135,7 +148,6 @@
       LOG('Phrase:', phrase);
 
       const status = options.onStatus || (() => {});
-      const win = this.getWin();
       const sbDoc = this.getSearchDoc();
 
       const phraseInput = sbDoc.querySelector('[name="SearchExpressionBuilder$SearchTermTextBox_0"]');
@@ -162,16 +174,40 @@
       searchBtn.click();
       LOG('Search button clicked');
 
-      LOG('Waiting for search cascade to complete...');
-      await new Promise(r => setTimeout(r, 10000));
+      status('Search cascade in progress...');
+      const win = this.getWin();
+      const cascadeStart = Date.now();
+      while (Date.now() - cascadeStart < 60000) {
+        try {
+          const notification = win.LastNotification;
+          LOG('Cascade: LastNotification=' + notification + ' error=' + win.searchError + ' cancelled=' + win.searchCancelled);
+          if (notification === 'SearchLaunched') {
+            LOG('Search engine started!');
+            break;
+          }
+          if (win.searchError) {
+            ERR('Search error during cascade');
+            throw new Error('Search error during cascade');
+          }
+        } catch (e) {
+          if (e.message === 'Search error during cascade') throw e;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
 
       try {
-        const notification = win.LastNotification;
-        LOG('LastNotification:', notification);
+        const ps = win.document.getElementById('iframeParameterSelector');
+        const psUrl = ps.contentWindow.location.href;
+        const m = psUrl.match(/AppInstanceID=([^&]+)/);
+        if (m && m[1] !== this.appInstanceId) {
+          LOG('AppInstanceId updated:', m[1]);
+          this.appInstanceId = m[1];
+        }
       } catch (e) {}
 
       status('Waiting for results...');
       LOG('=== POLLING START ===');
+      LOG('Polling with AppInstanceId:', this.appInstanceId);
       return await this.harvestResults(options, status);
     }
 
@@ -240,10 +276,7 @@
     }
 
     destroy() {
-      if (this.frame) {
-        this.frame.remove();
-        this.frame = null;
-      }
+      if (this.frame) { this.frame.remove(); this.frame = null; }
       this.ready = false;
       this.appInstanceId = null;
       LOG('Destroyed');
