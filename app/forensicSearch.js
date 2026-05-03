@@ -128,13 +128,20 @@
 
       status('Submitting phrase search...');
       const fields = { ...this.searchFields };
+
+      delete fields['CancelSearchButton'];
+      delete fields['viewFilesButton'];
+      delete fields['ClearButton'];
+      delete fields['BuildQueryButton'];
+
       fields['SearchExpressionBuilder$SearchTermTextBox_0'] = phrase;
-      fields['SearchExpressionBuilder$ThresholdTextBox_0'] = options.threshold || '70';
-      fields['SearchButton'] = 'Search';
-      fields['uiDropDownListFindFiles'] = options.operator || 'do_any';
-      fields['DropDownListSpeakerRole'] = options.speaker || 'Either';
-      fields['DropDownListTimeBasis'] = options.timeBasis || 'Anywhere';
-      fields['DropDownListCustomThreshold'] = options.thresholdMode || 'Automatic';
+
+      if (options.threshold) fields['SearchExpressionBuilder$ThresholdTextBox_0'] = options.threshold;
+      if (options.operator) fields['uiDropDownListFindFiles'] = options.operator;
+      if (options.speaker) fields['DropDownListSpeakerRole'] = options.speaker;
+      if (options.timeBasis) fields['DropDownListTimeBasis'] = options.timeBasis;
+      if (options.thresholdMode) fields['DropDownListCustomThreshold'] = options.thresholdMode;
+
       this.setMediaTypes(fields, options);
 
       LOG('Search fields being submitted:');
@@ -159,6 +166,12 @@
       });
       const searchRespText = await searchResp.text();
       LOG('Search POST response: status=' + searchResp.status + ' size=' + searchRespText.length);
+
+      if (searchResp.status !== 200) {
+        ERR('Search POST failed. Response body:', searchRespText.substring(0, 500));
+        throw new Error('Search POST returned ' + searchResp.status);
+      }
+
       this.searchFields = this.parseFormFields(searchRespText);
       LOG('Search POST parsed fields:', Object.keys(this.searchFields).length);
 
