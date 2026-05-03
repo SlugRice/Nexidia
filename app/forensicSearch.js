@@ -12,6 +12,7 @@
       this.baseUrl = '/NxIA/Search/';
       this.paramFields = null;
       this.searchFields = null;
+      this.controllerFields = null;
       this.ready = false;
     }
 
@@ -72,8 +73,6 @@
       const paramHtml = await paramResp.text();
       this.paramFields = this.parseFormFields(paramHtml);
       LOG('ParameterSelector: status=' + paramResp.status + ' HTML=' + paramHtml.length + ' chars, fields=' + Object.keys(this.paramFields).length);
-      LOG('Has __VIEWSTATE:', !!this.paramFields['__VIEWSTATE']);
-      LOG('Has __EVENTVALIDATION:', !!this.paramFields['__EVENTVALIDATION']);
 
       const searchUrl = this.buildUrl('SearchBuilder.aspx');
       LOG('Fetching SearchBuilder:', searchUrl);
@@ -81,8 +80,13 @@
       const searchHtml = await searchResp.text();
       this.searchFields = this.parseFormFields(searchHtml);
       LOG('SearchBuilder: status=' + searchResp.status + ' HTML=' + searchHtml.length + ' chars, fields=' + Object.keys(this.searchFields).length);
-      LOG('Has __VIEWSTATE:', !!this.searchFields['__VIEWSTATE']);
-      LOG('Has __EVENTVALIDATION:', !!this.searchFields['__EVENTVALIDATION']);
+
+      const controllerUrl = this.buildUrl('SearchController.aspx');
+      LOG('Fetching SearchController:', controllerUrl);
+      const controllerResp = await fetch(controllerUrl);
+      const controllerHtml = await controllerResp.text();
+      this.controllerFields = this.parseFormFields(controllerHtml);
+      LOG('SearchController: status=' + controllerResp.status + ' HTML=' + controllerHtml.length + ' chars, fields=' + Object.keys(this.controllerFields).length);
 
       if (options.startDate) {
         this.paramFields['StartDate$NXDateBox_StartDate'] = options.startDate;
@@ -113,7 +117,6 @@
       status('Submitting filters...');
       LOG('POSTing ParameterSelector with', Object.keys(this.paramFields).length, 'fields');
       const paramPostUrl = this.buildUrl('ParameterSelector.aspx');
-      LOG('Param POST URL:', paramPostUrl);
       const paramBody = this.encode(this.paramFields);
       LOG('Param POST body length:', paramBody.length);
       const paramResp = await fetch(paramPostUrl, {
@@ -124,39 +127,24 @@
       const paramRespText = await paramResp.text();
       LOG('Param POST response: status=' + paramResp.status + ' size=' + paramRespText.length);
       this.paramFields = this.parseFormFields(paramRespText);
-      LOG('Param POST parsed fields:', Object.keys(this.paramFields).length);
 
       status('Submitting phrase search...');
       const fields = { ...this.searchFields };
-
       delete fields['CancelSearchButton'];
       delete fields['viewFilesButton'];
       delete fields['ClearButton'];
       delete fields['BuildQueryButton'];
-
       fields['SearchExpressionBuilder$SearchTermTextBox_0'] = phrase;
-
       if (options.threshold) fields['SearchExpressionBuilder$ThresholdTextBox_0'] = options.threshold;
       if (options.operator) fields['uiDropDownListFindFiles'] = options.operator;
       if (options.speaker) fields['DropDownListSpeakerRole'] = options.speaker;
       if (options.timeBasis) fields['DropDownListTimeBasis'] = options.timeBasis;
       if (options.thresholdMode) fields['DropDownListCustomThreshold'] = options.thresholdMode;
-
       this.setMediaTypes(fields, options);
 
-      LOG('Search fields being submitted:');
-      LOG('  Phrase:', fields['SearchExpressionBuilder$SearchTermTextBox_0']);
-      LOG('  Threshold:', fields['SearchExpressionBuilder$ThresholdTextBox_0']);
-      LOG('  Operator:', fields['uiDropDownListFindFiles']);
-      LOG('  Speaker:', fields['DropDownListSpeakerRole']);
-      LOG('  TimeBasis:', fields['DropDownListTimeBasis']);
-      LOG('  ThresholdMode:', fields['DropDownListCustomThreshold']);
-      LOG('  Total field count:', Object.keys(fields).length);
-      LOG('  Has __VIEWSTATE:', !!fields['__VIEWSTATE']);
-      LOG('  Has __EVENTVALIDATION:', !!fields['__EVENTVALIDATION']);
+      LOG('Search fields: phrase=' + phrase + ' threshold=' + fields['SearchExpressionBuilder$ThresholdTextBox_0'] + ' operator=' + fields['uiDropDownListFindFiles'] + ' fields=' + Object.keys(fields).length);
 
       const searchPostUrl = this.buildUrl('SearchBuilder.aspx');
-      LOG('Search POST URL:', searchPostUrl);
       const searchBody = this.encode(fields);
       LOG('Search POST body length:', searchBody.length);
       const searchResp = await fetch(searchPostUrl, {
@@ -166,14 +154,35 @@
       });
       const searchRespText = await searchResp.text();
       LOG('Search POST response: status=' + searchResp.status + ' size=' + searchRespText.length);
-
       if (searchResp.status !== 200) {
-        ERR('Search POST failed. Response body:', searchRespText.substring(0, 500));
+        ERR('Search POST failed. Response:', searchRespText.substring(0, 500));
         throw new Error('Search POST returned ' + searchResp.status);
       }
-
       this.searchFields = this.parseFormFields(searchRespText);
-      LOG('Search POST parsed fields:', Object.keys(this.searchFields).length);
+
+      status('Starting search engine...');
+      const ctrlFields = { ...this.controllerFields };
+      delete ctrlFields['endSearchButton'];
+      delete ctrlFields['getMetadataButton'];
+      delete ctrlFields['loadButton'];
+      delete ctrlFields['saveButton'];
+
+      const ctrlPostUrl = this.buildUrl('SearchController.aspx');
+      const ctrlBody = this.encode(ctrlFields);
+      LOG('Controller POST URL:', ctrlPostUrl);
+      LOG('Controller POST body length:', ctrlBody.length);
+      const ctrlResp = await fetch(ctrlPostUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: ctrlBody
+      });
+      const ctrlRespText = await ctrlResp.text();
+      LOG('Controller POST response: status=' + ctrlResp.status + ' size=' + ctrlRespText.length);
+      if (ctrlResp.status !== 200) {
+        ERR('Controller POST failed. Response:', ctrlRespText.substring(0, 500));
+        throw new Error('Controller POST returned ' + ctrlResp.status);
+      }
+      this.controllerFields = this.parseFormFields(ctrlRespText);
 
       status('Waiting for results...');
       LOG('=== POLLING START ===');
@@ -244,7 +253,7 @@
         }
       });
       const json = await resp.json();
-      if (page === 1) {
+      if (page === 1 && pollCount <= 1) {
         LOG('Results URL:', url);
         LOG('Results status:', resp.status);
       }
