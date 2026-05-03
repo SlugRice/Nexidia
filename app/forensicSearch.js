@@ -72,21 +72,21 @@
       const paramResp = await fetch(paramUrl);
       const paramHtml = await paramResp.text();
       this.paramFields = this.parseFormFields(paramHtml);
-      LOG('ParameterSelector: status=' + paramResp.status + ' HTML=' + paramHtml.length + ' chars, fields=' + Object.keys(this.paramFields).length);
+      LOG('ParameterSelector: status=' + paramResp.status + ' fields=' + Object.keys(this.paramFields).length);
 
       const searchUrl = this.buildUrl('SearchBuilder.aspx');
       LOG('Fetching SearchBuilder:', searchUrl);
       const searchResp = await fetch(searchUrl);
       const searchHtml = await searchResp.text();
       this.searchFields = this.parseFormFields(searchHtml);
-      LOG('SearchBuilder: status=' + searchResp.status + ' HTML=' + searchHtml.length + ' chars, fields=' + Object.keys(this.searchFields).length);
+      LOG('SearchBuilder: status=' + searchResp.status + ' fields=' + Object.keys(this.searchFields).length);
 
       const controllerUrl = this.buildUrl('SearchController.aspx');
       LOG('Fetching SearchController:', controllerUrl);
       const controllerResp = await fetch(controllerUrl);
       const controllerHtml = await controllerResp.text();
       this.controllerFields = this.parseFormFields(controllerHtml);
-      LOG('SearchController: status=' + controllerResp.status + ' HTML=' + controllerHtml.length + ' chars, fields=' + Object.keys(this.controllerFields).length);
+      LOG('SearchController: status=' + controllerResp.status + ' fields=' + Object.keys(this.controllerFields).length);
 
       if (options.startDate) {
         this.paramFields['StartDate$NXDateBox_StartDate'] = options.startDate;
@@ -116,10 +116,9 @@
 
       status('Submitting filters...');
       LOG('POSTing ParameterSelector with', Object.keys(this.paramFields).length, 'fields');
-      const paramPostUrl = this.buildUrl('ParameterSelector.aspx');
       const paramBody = this.encode(this.paramFields);
       LOG('Param POST body length:', paramBody.length);
-      const paramResp = await fetch(paramPostUrl, {
+      const paramResp = await fetch(this.buildUrl('ParameterSelector.aspx'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: paramBody
@@ -143,11 +142,9 @@
       this.setMediaTypes(fields, options);
 
       LOG('Search fields: phrase=' + phrase + ' threshold=' + fields['SearchExpressionBuilder$ThresholdTextBox_0'] + ' operator=' + fields['uiDropDownListFindFiles'] + ' fields=' + Object.keys(fields).length);
-
-      const searchPostUrl = this.buildUrl('SearchBuilder.aspx');
       const searchBody = this.encode(fields);
       LOG('Search POST body length:', searchBody.length);
-      const searchResp = await fetch(searchPostUrl, {
+      const searchResp = await fetch(this.buildUrl('SearchBuilder.aspx'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: searchBody
@@ -155,10 +152,24 @@
       const searchRespText = await searchResp.text();
       LOG('Search POST response: status=' + searchResp.status + ' size=' + searchRespText.length);
       if (searchResp.status !== 200) {
-        ERR('Search POST failed. Response:', searchRespText.substring(0, 500));
+        ERR('Search POST failed:', searchRespText.substring(0, 500));
         throw new Error('Search POST returned ' + searchResp.status);
       }
       this.searchFields = this.parseFormFields(searchRespText);
+
+      status('Binding filters to search...');
+      const paramFields2 = { ...this.paramFields };
+      paramFields2['hdnGetSourceMedia'] = 'GetSourceMedia';
+      const paramBody2 = this.encode(paramFields2);
+      LOG('GetSourceMedia POST body length:', paramBody2.length);
+      const paramResp2 = await fetch(this.buildUrl('ParameterSelector.aspx'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: paramBody2
+      });
+      const paramRespText2 = await paramResp2.text();
+      LOG('GetSourceMedia POST response: status=' + paramResp2.status + ' size=' + paramRespText2.length);
+      this.paramFields = this.parseFormFields(paramRespText2);
 
       status('Starting search engine...');
       const ctrlFields = { ...this.controllerFields };
@@ -166,12 +177,9 @@
       delete ctrlFields['getMetadataButton'];
       delete ctrlFields['loadButton'];
       delete ctrlFields['saveButton'];
-
-      const ctrlPostUrl = this.buildUrl('SearchController.aspx');
       const ctrlBody = this.encode(ctrlFields);
-      LOG('Controller POST URL:', ctrlPostUrl);
       LOG('Controller POST body length:', ctrlBody.length);
-      const ctrlResp = await fetch(ctrlPostUrl, {
+      const ctrlResp = await fetch(this.buildUrl('SearchController.aspx'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: ctrlBody
@@ -179,10 +187,15 @@
       const ctrlRespText = await ctrlResp.text();
       LOG('Controller POST response: status=' + ctrlResp.status + ' size=' + ctrlRespText.length);
       if (ctrlResp.status !== 200) {
-        ERR('Controller POST failed. Response:', ctrlRespText.substring(0, 500));
+        ERR('Controller POST failed:', ctrlRespText.substring(0, 500));
         throw new Error('Controller POST returned ' + ctrlResp.status);
       }
+      if (ctrlRespText.includes('SearchError')) {
+        ERR('Server returned SearchError');
+        throw new Error('Search engine returned an error');
+      }
       this.controllerFields = this.parseFormFields(ctrlRespText);
+      LOG('Controller response OK');
 
       status('Waiting for results...');
       LOG('=== POLLING START ===');
@@ -252,12 +265,11 @@
           'Content-Type': 'application/json'
         }
       });
-      const json = await resp.json();
       if (page === 1) {
         LOG('Results URL:', url);
         LOG('Results status:', resp.status);
       }
-      return json;
+      return await resp.json();
     }
 
     async fetchAllPages(firstPage, total) {
