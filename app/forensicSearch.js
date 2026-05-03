@@ -253,7 +253,7 @@
         }
       });
       const json = await resp.json();
-      if (page === 1 && pollCount <= 1) {
+      if (page === 1) {
         LOG('Results URL:', url);
         LOG('Results status:', resp.status);
       }
