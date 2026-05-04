@@ -164,7 +164,9 @@
     for (const r of rows) {
       const speakerRaw = (r.Speaker || r.speaker || "").toString().trim().toLowerCase();
       let text = (r.Text || r.text || "").toString();
-      const ts = (typeof r.TotalSecondsFromStart === "number") ? r.TotalSecondsFromStart : null;
+      const tsRaw = r.TotalSecondsFromStart ?? r.totalSecondsFromStart;
+      const tsParsed = (typeof tsRaw === "number") ? tsRaw : (typeof tsRaw === "string") ? parseFloat(tsRaw) : NaN;
+      const ts = isNaN(tsParsed) ? null : tsParsed;
       text = text.replace(/<unk>/gi, "").trim().replace(/\s+/g, " ").trim();
       if (!text) { if (ts !== null) lastTs = ts; continue; }
       let sp = "";
