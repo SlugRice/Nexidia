@@ -445,9 +445,25 @@
           const picker = isPhrase ? null : makeFieldPicker((f) => {
             fieldLabelWrap.textContent = f.displayName;
             fieldLabelWrap.title = f.displayName;
-            syncFieldAcrossPanes(entry, f.storageName, f.displayName);
-          });
-          if (picker) picker.wrapper.style.display = "none";
+            fieldLabelWrap.style.display = "";
+            if (picker) picker.wrapper.style.display = "none";
+  syncFieldAcrossPanes(entry, f.storageName, f.displayName);
+});
+if (picker) {
+  if (storageName) {
+    picker.wrapper.style.display = "none";
+    fieldLabelWrap.style.display = "";
+  } else {
+    picker.wrapper.style.display = "";
+    fieldLabelWrap.style.display = "none";
+  }
+  fieldLabelWrap.style.cursor = "pointer";
+  fieldLabelWrap.onclick = () => {
+    fieldLabelWrap.style.display = "none";
+    picker.wrapper.style.display = "";
+    picker.input.focus();
+  };
+}
           entry.picker = picker;
           if (isPhrase) {
             fieldLabelWrap.textContent = "Phrase";
