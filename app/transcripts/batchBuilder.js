@@ -37,6 +37,13 @@
     fileSubIncrement: "a"
   };
 
+  const METADATA_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
+  const PINNED_NAMING = [
+    { storageName: "UDFVarchar110", displayName: "Trans_Id" },
+    { storageName: "UDFVarchar1", displayName: "User to User" },
+    { storageName: "mediaFileName", displayName: "Media File Name" }
+  ];
+
   // ── Config resolution ────────────────────────────────────────────────────
   function resolveConfig(overrides) {
     return Object.assign({}, DEFAULTS, overrides || {});
@@ -111,6 +118,10 @@
 
   function uniq(arr) { return [...new Set(arr)]; }
 
+
+  function sanitizeFilename(name) {
+    return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "unnamed";
+  }
   //##> ID DETECTION: UCIDs are always exactly 20 digits. Trans_Ids are 8-10 digits.
   //##> These length rules are load-bearing for auto-routing pasted IDs to the correct
   //##> search parameter (UDFVarchar1 vs UDFVarchar110). Do not change without verifying
@@ -270,6 +281,71 @@
     return el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" });
   }
 
+  function makeNamingPicker(metadataFields) {
+    const wrapper = el("div", { style: "position:relative;" });
+    const input = el("input", { type: "text", placeholder: "Search fields...", style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
+    const dropdown = el("div", { style: "display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #ccc;border-top:none;border-radius:0 0 6px 6px;z-index:1000010;box-shadow:0 4px 12px rgba(0,0,0,.15);" });
+    let hi = -1, vis = [];
+    const pinnedSet = new Set(PINNED_NAMING.map((p) => p.storageName));
+    function getOrderedFields(query) {
+      const ql = query.toLowerCase().trim();
+      const pinned = [];
+      for (const p of PINNED_NAMING) {
+        if (ql && !p.displayName.toLowerCase().includes(ql)) continue;
+        const meta = metadataFields.find((f) => f.storageName === p.storageName);
+        pinned.push({ storageName: p.storageName, displayName: meta ? meta.displayName : p.displayName });
+      }
+      const rest = metadataFields.filter((f) => {
+        if (pinnedSet.has(f.storageName)) return false;
+        return ql ? f.displayName.toLowerCase().includes(ql) : true;
+      });
+      return { pinned, rest };
+    }
+    function render(q) {
+      dropdown.innerHTML = ""; vis = []; hi = -1;
+      const { pinned, rest } = getOrderedFields(q);
+      if (!pinned.length && !rest.length) { dropdown.style.display = "none"; return; }
+      function addItem(f) {
+        const item = el("div", { style: "padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;" }, f.displayName);
+        item.onmouseenter = () => { for (let j = 0; j < vis.length; j++) vis[j].style.background = vis[j] === item ? "#e8f0fe" : ""; hi = vis.indexOf(item); };
+        item.onmouseleave = () => { item.style.background = ""; };
+        item.onmousedown = (e) => { e.preventDefault(); pick(f); };
+        dropdown.appendChild(item); vis.push(item);
+      }
+      for (const p of pinned) addItem(p);
+      if (pinned.length && rest.length) {
+        dropdown.appendChild(el("div", { style: "height:1px;background:#e5e7eb;margin:2px 0;" }));
+      }
+      for (let i = 0; i < Math.min(rest.length, 80); i++) addItem(rest[i]);
+      dropdown.style.display = "block";
+    }
+    function pick(f) {
+      input.value = f.displayName;
+      input.dataset.storageName = f.storageName;
+      dropdown.style.display = "none";
+      hi = -1;
+    }
+    input.addEventListener("input", () => { delete input.dataset.storageName; render(input.value); });
+    input.addEventListener("focus", () => { render(input.value); });
+    input.addEventListener("blur", () => { setTimeout(() => { dropdown.style.display = "none"; }, 150); });
+    input.addEventListener("keydown", (e) => {
+      if (!vis.length) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); for (let i = 0; i < vis.length; i++) vis[i].style.background = ""; hi = Math.min(hi + 1, vis.length - 1); vis[hi].style.background = "#e8f0fe"; vis[hi].scrollIntoView({ block: "nearest" }); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); for (let i = 0; i < vis.length; i++) vis[i].style.background = ""; hi = Math.max(hi - 1, 0); vis[hi].style.background = "#e8f0fe"; vis[hi].scrollIntoView({ block: "nearest" }); }
+      else if (e.key === "Enter") { e.preventDefault(); if (hi >= 0 && vis[hi]) vis[hi].onmousedown(e); }
+      else if (e.key === "Escape") { dropdown.style.display = "none"; }
+    });
+    wrapper.appendChild(input);
+    wrapper.appendChild(dropdown);
+    const defaultField = PINNED_NAMING[0];
+    const defaultMeta = metadataFields.find((f) => f.storageName === defaultField.storageName);
+    pick({ storageName: defaultField.storageName, displayName: defaultMeta ? defaultMeta.displayName : defaultField.displayName });
+    return {
+      wrapper, input,
+      getStorageName: () => input.dataset.storageName || "",
+      getDisplayName: () => input.value
+    };
+  }
   // ── Settings modal ───────────────────────────────────────────────────────
   function openSettingsModal(currentCfg, onSave) {
     let draft = Object.assign({}, currentCfg);
@@ -628,6 +704,15 @@
         // Resolve config — saved settings override defaults
         let cfg = resolveConfig(loadSavedSettings());
 
+        let metadataFields = [];
+        try {
+          const mRes = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
+          if (mRes.ok) {
+            const mJson = await mRes.json();
+            metadataFields = Array.isArray(mJson) ? mJson.filter((f) => f.isEnabled !== false) : [];
+          }
+        } catch (_) {}
+
         // ── Launcher modal ────────────────────────────────────────────────
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const card = el("div", { style: "background:#fff;width:540px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -661,6 +746,34 @@
           textarea.value = preload;
           api.setShared("batchBuilderPreload", null);
         }
+
+        let singleFileEnabled = false;
+        const namingPicker = makeNamingPicker(metadataFields);
+
+        const toggleRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:12px;" });
+        const pill = el("div", { style: "width:36px;height:20px;border-radius:10px;background:#d1d5db;position:relative;cursor:pointer;transition:background .2s;" });
+        const knob = el("div", { style: "width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);" });
+        pill.appendChild(knob);
+        const toggleLabel = el("span", { style: "font-size:13px;color:#374151;user-select:none;cursor:pointer;" }, "Single File Export");
+        toggleRow.appendChild(pill);
+        toggleRow.appendChild(toggleLabel);
+
+        const namingArea = el("div", { style: "display:none;padding:10px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;" });
+        namingArea.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name files using:"));
+        namingArea.appendChild(namingPicker.wrapper);
+
+        function toggleSingle() {
+          singleFileEnabled = !singleFileEnabled;
+          pill.style.background = singleFileEnabled ? "#3b82f6" : "#d1d5db";
+          knob.style.left = singleFileEnabled ? "19px" : "3px";
+          namingArea.style.display = singleFileEnabled ? "block" : "none";
+          submitBtn.textContent = singleFileEnabled ? "Export Files" : "Build Batches";
+        }
+        pill.onclick = toggleSingle;
+        toggleLabel.onclick = toggleSingle;
+
+        card.appendChild(toggleRow);
+        card.appendChild(namingArea);
 
         // Bottom row: settings button + submit + save checkbox + clear
         const bottomRow = el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
@@ -713,7 +826,8 @@
           }
 
           modal.remove();
-          await runBatchBuild(cfg, userToUser, transIds, ignored, total);
+          const singleFileConfig = { enabled: singleFileEnabled, namingField: namingPicker.getStorageName(), namingDisplay: namingPicker.getDisplayName() };
+          await runBatchBuild(cfg, userToUser, transIds, ignored, total, singleFileConfig);
         };
 
       } catch (e) {
@@ -724,7 +838,7 @@
   }
 
   // ── Core batch build ─────────────────────────────────────────────────────
-  async function runBatchBuild(cfg, userToUser, transIds, ignored, total) {
+  async function runBatchBuild(cfg, userToUser, transIds, ignored, total, singleFileConfig) {
     const UI = makeProgressUI();
     const TARGET_CHARS = Math.floor(cfg.targetTokens * cfg.charsPerToken);
 
@@ -738,9 +852,14 @@
     if (transIds.length) filters.push({ operator: "IN", type: "KEYWORD", parameterName: "UDFVarchar110", value: transIds });
     if (userToUser.length) filters.push({ operator: "IN", type: "KEYWORD", parameterName: "UDFVarchar1", value: userToUser });
 
+    const searchFields = ["sourceMediaId","recordeddate","UDFVarchar1","UDFVarchar110"];
+    if (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField && !searchFields.includes(singleFileConfig.namingField)) {
+      searchFields.push(singleFileConfig.namingField);
+    }
+
     const searchPayload = {
       from: 0, to: cfg.searchTo,
-      fields: ["sourceMediaId","recordeddate","UDFVarchar1","UDFVarchar110"],
+      fields: searchFields,
       query: { operator: "AND", filters: [{ filterType: "interactions", filters }] }
     };
 
@@ -778,7 +897,8 @@
           recordeddate: (r.recordeddate || "").toString(),
           transId: (r.UDFVarchar110 || "").toString(),
           userToUser: (r.UDFVarchar1 || "").toString(),
-          leg: isSet ? (idx + 1) : null
+          leg: isSet ? (idx + 1) : null,
+          namingValue: (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField) ? (r[singleFileConfig.namingField] || "").toString().trim() : ""
         });
       });
     }
@@ -845,6 +965,46 @@
 
     await Promise.all(Array.from({ length: Math.min(cfg.concurrency, items.length) }, () => worker()));
     UI.appendLog(`Fetch complete. Failed: ${failed.length}`);
+
+    if (singleFileConfig && singleFileConfig.enabled) {
+      UI.setProgress(62, "Building single files...", "");
+      const singleFiles = [];
+      const usedNames = new Map();
+      for (const it of out) {
+        let baseName = sanitizeFilename(it.namingValue || it.sourceMediaId);
+        if (usedNames.has(baseName)) {
+          const count = usedNames.get(baseName) + 1;
+          usedNames.set(baseName, count);
+          baseName = baseName + "_" + count;
+        } else {
+          usedNames.set(baseName, 1);
+        }
+        let body = "SourceMediaId=" + it.sourceMediaId + "\n";
+        body += "RecordedDate=" + it.recordeddate + "\n";
+        body += "Trans_Id=" + it.transId + "\n";
+        body += "UserToUser=" + it.userToUser + "\n";
+        body += "CharCount=" + it.charCount + "\n\n";
+        body += (it.text || "").trim() + "\n";
+        singleFiles.push({ name: baseName + ".txt", text: body });
+      }
+      UI.setProgress(90, "Creating ZIP...", `Files: ${singleFiles.length}`);
+      const zip = makeZip(singleFiles);
+      const zipName = `nexidia_singles_${nowStamp()}.zip`;
+      const blobUrl = URL.createObjectURL(zip);
+      UI.appendLog(`ZIP READY: ${zipName}`);
+      UI.appendLog(`Click "Download ZIP"`);
+      UI.btnDownload.disabled = false;
+      UI.btnDownload.style.opacity = "1";
+      UI.btnDownload.onclick = () => {
+        const a = document.createElement("a");
+        a.href = blobUrl; a.download = zipName;
+        document.body.appendChild(a); a.click(); a.remove();
+        UI.appendLog("Download triggered.");
+        UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
+      };
+      UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
+      return;
+    }
 
     // ── Batch assembly ────────────────────────────────────────────────────
     UI.setProgress(62, "Batching...", "");
