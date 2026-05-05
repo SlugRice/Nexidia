@@ -865,11 +865,17 @@ headerRow.appendChild(clearAllBtn);
           for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
             const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
             e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
-          }
           updateDots();
-          setTimeout(() => {
-            dismissDateAnim = runDateFocusAnimation(card, dateSectionWrapper, () => { dismissDateAnim = null; });
-          }, 120);
+          const returnConfig = api.getShared("lastSearchConfig");
+          const isReturn = api.getShared("returnToSearch");
+          if (isReturn && returnConfig) {
+              api.setShared("returnToSearch", false);
+              deserializeSearch(returnConfig);
+          } else {
+              setTimeout(() => {
+                  dismissDateAnim = runDateFocusAnimation(card, dateSectionWrapper, () => { dismissDateAnim = null; });
+              }, 120);
+          }
         });
         window.addEventListener("resize", resizePanes);
 
@@ -1080,9 +1086,9 @@ function getSavedSearches() {
 }
 
 function saveSearchToStorage(name, payload) {
-  const all = getSavedSearches();
-  all[name] = payload;
-  localStorage.setItem(LS_KEY, JSON.stringify(all));
+ const all = getSavedSearches();
+ all[name] = { panes: payload.panes, keys: payload.keys };
+ localStorage.setItem(LS_KEY, JSON.stringify(all));
 }
 
 function deleteSearchFromStorage(name) {
@@ -1092,7 +1098,7 @@ function deleteSearchFromStorage(name) {
 }
 
 function exportSearchAsFile(name, payload) {
-  const out = JSON.stringify({ name: name, dateFrom: payload.dateFrom, dateTo: payload.dateTo, panes: payload.panes, keys: payload.keys });
+  const out = JSON.stringify({ name: name, panes: payload.panes, keys: payload.keys });
   const blob = new Blob([out], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1522,8 +1528,8 @@ async function runSearch() {
   const mk = (tag, props, ...ch) => { const n = document.createElement(tag); Object.assign(n, props || {}); for (const c of ch) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); return n; };
   const LS_G = "NEXIDIA_SAVED_SEARCHES";
   function getAll() { try { return JSON.parse(localStorage.getItem(LS_G)) || {}; } catch (_) { return {}; } }
-  function saveIt(name, data) { const a = getAll(); a[name] = data; localStorage.setItem(LS_G, JSON.stringify(a)); }
-  function exportIt(name, data) { const b = new Blob([JSON.stringify({ name: name, dateFrom: data.dateFrom, dateTo: data.dateTo, panes: data.panes, keys: data.keys })], { type: "text/plain" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = name.replace(/[^a-zA-Z0-9_\- ]/g, "_") + ".txt"; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); }
+  function saveIt(name, data) { const a = getAll(); a[name] = { panes: data.panes, keys: data.keys }; localStorage.setItem(LS_G, JSON.stringify(a)); }
+  function exportIt(name, data) { const b = new Blob([JSON.stringify({ name: name, panes: data.panes, keys: data.keys })], { type: "text/plain" });
   const overlay = mk("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
   const box = mk("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
   box.appendChild(mk("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Save Search"));
