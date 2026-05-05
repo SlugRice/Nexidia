@@ -1344,6 +1344,19 @@ function openLoadPanel() {
           else { alert("Dispatcher not loaded. Check manifest."); }
         }
 
+        var MAX_BOOST_TOKENS = 25;
+        function digitToWords(numStr) {
+          var map = { '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four', '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine' };
+          var out = [];
+          for (var i = 0; i < numStr.length; i++) out.push(map[numStr[i]] || numStr[i]);
+          return out.join(' ');
+        }
+        function buildBoostPhrases(numStr) {
+          var base = digitToWords(numStr);
+          var result = [base];
+          if (numStr.indexOf('0') !== -1) result.push(base.replace(/zero/g, 'oh'));
+          return result;
+        }
 async function runSearch() {
           try {
             const fromVal = fromDate.input.value;
@@ -1356,20 +1369,38 @@ async function runSearch() {
 
             const runSets = [];
             const globalExcludes = [];
+            let boostTokenCount = 0;
             for (let pi = 0; pi < panes.length; pi++) {
               const pane = panes[pi];
               const filterEntries = allRows.filter((r) => r.type === "filter" && !r.isPhrase && r.paneIndex === pane.index);
               const phraseEntries = allRows.filter((r) => r.type === "filter" && r.isPhrase && r.paneIndex === pane.index);
-              const includeKw = [];
+              const includeKwEntries = [];
               const excludeKw = [];
+              const paneBoostTokens = [];
               for (let i = 0; i < filterEntries.length; i++) {
-                const e = filterEntries[i];
-                const sn = e.picker ? e.picker.getStorageName() : "";
-                const val = e.valueInput.value.trim();
-                if (sn && val) {
-                  (e.exclude ? excludeKw : includeKw).push(buildKeywordFilter(sn, splitValues(val)));
-                }
+                  const e = filterEntries[i];
+                  const sn = e.picker ? e.picker.getStorageName() : "";
+                  const val = e.valueInput.value.trim();
+                  if (sn && val) {
+                      if (e.exclude) {
+                          excludeKw.push(buildKeywordFilter(sn, splitValues(val)));
+                      } else {
+                          const raw = splitValues(val);
+                          const allVals = [];
+                          for (let vi = 0; vi < raw.length; vi++) {
+                              if (raw[vi].endsWith('*')) {
+                                  const stripped = raw[vi].slice(0, -1);
+                                  if (stripped) allVals.push(stripped);
+                                  if (stripped && /^\d+$/.test(stripped)) paneBoostTokens.push({ storageName: sn, value: stripped });
+                              } else {
+                                  allVals.push(raw[vi]);
+                              }
+                          }
+                          if (allVals.length) includeKwEntries.push({ storageName: sn, filter: buildKeywordFilter(sn, allVals) });
+                      }
+                  }
               }
+              const includeKw = includeKwEntries.map(function(x) { return x.filter; });
               const phraseResult = buildPhraseGroups(phraseEntries);
               for (let ei = 0; ei < excludeKw.length; ei++) globalExcludes.push(excludeKw[ei]);
               for (let ei = 0; ei < phraseResult.exclude.length; ei++) globalExcludes.push(phraseResult.exclude[ei].group);
@@ -1377,6 +1408,22 @@ async function runSearch() {
               const phraseGroups = phraseResult.include;
               if (!keywordGroup && !phraseGroups.length) continue;
               runSets.push({ keywordGroup, phraseGroups, keyFilters: [], label: "Search " + String.fromCharCode(65 + pane.index) });
+              for (let bi = 0; bi < paneBoostTokens.length; bi++) {
+                  if (boostTokenCount >= MAX_BOOST_TOKENS) break;
+                  boostTokenCount++;
+                  const bt = paneBoostTokens[bi];
+                  const otherFilters = [];
+                  for (let ofi = 0; ofi < includeKwEntries.length; ofi++) {
+                      if (includeKwEntries[ofi].storageName !== bt.storageName) otherFilters.push(includeKwEntries[ofi].filter);
+                  }
+                  const boostKwGroup = otherFilters.length ? { operator: "AND", invertOperator: false, filters: otherFilters } : null;
+                  const bPhrases = buildBoostPhrases(bt.value);
+                  const boostPhraseGroups = [];
+                  for (let bpi = 0; bpi < bPhrases.length; bpi++) {
+                      boostPhraseGroups.push({ group: buildTextFilter(bPhrases[bpi], "transcript"), display: null });
+                  }
+                  runSets.push({ keywordGroup: boostKwGroup, phraseGroups: boostPhraseGroups, keyFilters: [], label: "Boost " + String.fromCharCode(65 + pane.index) });
+              }
             }
 
             const keyEntries = allRows.filter((r) => r.type === "key" && !r.isPhrase);
