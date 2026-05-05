@@ -1428,16 +1428,33 @@ async function runSearch() {
 
             const keyEntries = allRows.filter((r) => r.type === "key" && !r.isPhrase);
             const keyPhraseEntries = allRows.filter((r) => r.type === "key" && r.isPhrase);
-            const keyIncludeKw = [];
+            const keyIncludeKwEntries = [];
             const keyExcludeKw = [];
+            const keyBoostTokens = [];
             for (let i = 0; i < keyEntries.length; i++) {
-              const e = keyEntries[i];
-              const sn = e.picker ? e.picker.getStorageName() : "";
-              const val = e.valueInput.value.trim();
-              if (sn && val) {
-                (e.exclude ? keyExcludeKw : keyIncludeKw).push(buildKeywordFilter(sn, splitValues(val)));
-              }
+                const e = keyEntries[i];
+                const sn = e.picker ? e.picker.getStorageName() : "";
+                const val = e.valueInput.value.trim();
+                if (sn && val) {
+                    if (e.exclude) {
+                        keyExcludeKw.push(buildKeywordFilter(sn, splitValues(val)));
+                    } else {
+                        const raw = splitValues(val);
+                        const allVals = [];
+                        for (let vi = 0; vi < raw.length; vi++) {
+                            if (raw[vi].endsWith('*')) {
+                                const stripped = raw[vi].slice(0, -1);
+                                if (stripped) allVals.push(stripped);
+                                if (stripped && /^\d+$/.test(stripped)) keyBoostTokens.push({ storageName: sn, value: stripped });
+                            } else {
+                                allVals.push(raw[vi]);
+                            }
+                        }
+                        if (allVals.length) keyIncludeKwEntries.push({ storageName: sn, filter: buildKeywordFilter(sn, allVals) });
+                    }
+                }
             }
+            const keyIncludeKw = keyIncludeKwEntries.map(function(x) { return x.filter; });
             const keyPhraseResult = buildPhraseGroups(keyPhraseEntries);
             for (let ei = 0; ei < keyExcludeKw.length; ei++) globalExcludes.push(keyExcludeKw[ei]);
             for (let ei = 0; ei < keyPhraseResult.exclude.length; ei++) globalExcludes.push(keyPhraseResult.exclude[ei].group);
@@ -1448,6 +1465,21 @@ async function runSearch() {
             } else if (!runSets.length && keyAndFilters.length) {
               runSets.push({ keywordGroup: null, phraseGroups: [], keyFilters: keyAndFilters, label: "Key Search" });
             }
+            for (let bi = 0; bi < keyBoostTokens.length; bi++) {
+              if (boostTokenCount >= MAX_BOOST_TOKENS) break;
+              boostTokenCount++;
+              const bt = keyBoostTokens[bi];
+              const otherKeyFilters = [];
+              for (let ofi = 0; ofi < keyIncludeKwEntries.length; ofi++) {
+                  if (keyIncludeKwEntries[ofi].storageName !== bt.storageName) otherKeyFilters.push(keyIncludeKwEntries[ofi].filter);
+              }
+              const bPhrases = buildBoostPhrases(bt.value);
+              const boostPhraseGroups = [];
+              for (let bpi = 0; bpi < bPhrases.length; bpi++) {
+                  boostPhraseGroups.push({ group: buildTextFilter(bPhrases[bpi], "transcript"), display: null });
+              }
+              runSets.push({ keywordGroup: null, phraseGroups: boostPhraseGroups, keyFilters: otherKeyFilters, label: "Key Boost" });
+          }
 
             if (!runSets.length) {
               const ok = confirm("No search values entered. This will pull the entire date range. Continue?");
