@@ -32,6 +32,18 @@
 
         const DEFAULT_FILTER_STORAGES = ["UDFVarchar10","UDFVarchar126","DNIS","siteName","UDFVarchar120","UDFVarchar41"];
         const DEFAULT_KEY_LIST = ["experienceId","UDFVarchar122","UDFVarchar1","UDFVarchar110"];
+const DISPLAY_NAME_MAP = {
+  "UDFVarchar10": "Group Number",
+  "UDFVarchar110": "Transaction ID",
+  "experienceId": "Experience ID",
+  "siteName": "Site Name",
+  "DNIS": "DNIS",
+  "UDFVarchar126": "UDFVarchar126",
+  "UDFVarchar120": "UDFVarchar120",
+  "UDFVarchar41": "UDFVarchar41",
+  "UDFVarchar122": "UDFVarchar122",
+  "UDFVarchar1": "UDFVarchar1"
+};
 
         // ── Session token ─────────────────────────────────────────────────────
         // Incremented on every new search run. Stale runs that complete after a
@@ -65,6 +77,13 @@
             metadataFields = Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : [];
           }
         } catch (_) {}
+
+function getDisplayName(sn) {
+  if (!sn) return sn;
+  const f = metadataFields.find((x) => x.storageName === sn);
+  if (f) return f.displayName;
+  return DISPLAY_NAME_MAP[sn] || sn;
+}
 
         // ── Progress UI ───────────────────────────────────────────────────────
         const progressUI = (() => {
@@ -281,7 +300,7 @@
             getDisplayName: () => input.value,
             preselect(sn) {
               const f = metadataFields.find((x) => x.storageName === sn);
-              if (f) { pick(f); } else { input.value = sn; input.dataset.storageName = sn; }
+              if (f) { pick(f); } else { input.value = getDisplayName(sn); input.dataset.storageName = sn; }
             }
           };
         }
@@ -445,25 +464,9 @@
           const picker = isPhrase ? null : makeFieldPicker((f) => {
             fieldLabelWrap.textContent = f.displayName;
             fieldLabelWrap.title = f.displayName;
-            fieldLabelWrap.style.display = "";
-            if (picker) picker.wrapper.style.display = "none";
-  syncFieldAcrossPanes(entry, f.storageName, f.displayName);
-});
-if (picker) {
-  if (storageName) {
-    picker.wrapper.style.display = "none";
-    fieldLabelWrap.style.display = "";
-  } else {
-    picker.wrapper.style.display = "";
-    fieldLabelWrap.style.display = "none";
-  }
-  fieldLabelWrap.style.cursor = "pointer";
-  fieldLabelWrap.onclick = () => {
-    fieldLabelWrap.style.display = "none";
-    picker.wrapper.style.display = "";
-    picker.input.focus();
-  };
-}
+            syncFieldAcrossPanes(entry, f.storageName, f.displayName);
+          });
+          if (picker) picker.wrapper.style.display = "none";
           entry.picker = picker;
           if (isPhrase) {
             fieldLabelWrap.textContent = "Phrase";
@@ -498,9 +501,8 @@ if (picker) {
           };
           if (storageName && picker) {
             picker.preselect(storageName);
-            const f = metadataFields.find((x) => x.storageName === storageName);
-            fieldLabelWrap.textContent = f ? f.displayName : storageName;
-            fieldLabelWrap.title = f ? f.displayName : storageName;
+            fieldLabelWrap.textContent = getDisplayName(storageName);
+    fieldLabelWrap.title = getDisplayName(storageName);
           }
           return entry;
         }
@@ -700,7 +702,50 @@ if (picker) {
         stickyClose.onclick = closeAll;
 
         const card = el("div", { style: "background:#f8fafc;width:1080px;max-height:90vh;overflow:auto;border-radius:14px;padding:18px 18px 22px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-        const headerRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:4px;" });
+        function clearAllFields() {
+  const newToday = new Date();
+  const newMonthAgo = new Date(newToday);
+  newMonthAgo.setMonth(newToday.getMonth() - 1);
+  fromDate.input.valueAsDate = newMonthAgo;
+  toDate.input.valueAsDate = newToday;
+  dateChanged = false;
+  while (panes.length > 1) {
+    const last = panes[panes.length - 1];
+    for (let i = 0; i < last.rows.length; i++) { const idx = allRows.indexOf(last.rows[i]); if (idx !== -1) allRows.splice(idx, 1); }
+    if (last.el.parentNode) last.el.parentNode.removeChild(last.el);
+    panes.pop();
+  }
+  const fp = panes[0];
+  while (fp.rows.length) {
+    const row = fp.rows.pop();
+    const idx = allRows.indexOf(row);
+    if (idx !== -1) allRows.splice(idx, 1);
+    if (row.rowEl.parentNode) row.rowEl.parentNode.removeChild(row.rowEl);
+  }
+  fp.rowsContainer.innerHTML = "";
+  const keyEntries = allRows.filter((r) => r.type === "key");
+  for (let i = keyEntries.length - 1; i >= 0; i--) {
+    const row = keyEntries[i];
+    const idx = allRows.indexOf(row);
+    if (idx !== -1) allRows.splice(idx, 1);
+    if (row.rowEl.parentNode) row.rowEl.parentNode.removeChild(row.rowEl);
+  }
+  keyRowsContainer.innerHTML = "";
+  populatePaneDefaults(fp);
+  if (ghostPaneEl && ghostPaneEl.parentNode) ghostPaneEl.parentNode.removeChild(ghostPaneEl);
+  ghostPaneEl = buildGhostPane(1);
+  carouselTrack.appendChild(ghostPaneEl);
+  for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
+    const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
+    e.paneIndex = -1;
+    keyRowsContainer.appendChild(e.rowEl);
+  }
+  resizePanes();
+  updateDots();
+  slideTo(0);
+}
+
+const headerRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:4px;" });
         headerRow.appendChild(el("div", { style: "font-size:18px;font-weight:600;flex:1;" }, "Nexidia Search"));
         const loadSearchBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;" }, "\uD83D\uDCC2 Load");
         loadSearchBtn.onclick = () => { openLoadPanel(); };
@@ -708,6 +753,11 @@ if (picker) {
         saveSearchBtn.onclick = () => { openSavePrompt(serializeSearch(), ""); };
         headerRow.appendChild(loadSearchBtn);
         headerRow.appendChild(saveSearchBtn);
+const clearAllBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #ef4444;background:#fff;color:#ef4444;cursor:pointer;font-size:12px;" }, "🗑 Clear All");
+clearAllBtn.addEventListener("mouseenter", () => { clearAllBtn.style.background = "#fef2f2"; });
+clearAllBtn.addEventListener("mouseleave", () => { clearAllBtn.style.background = "#fff"; });
+clearAllBtn.onclick = () => { clearAllFields(); };
+headerRow.appendChild(clearAllBtn);
         card.appendChild(headerRow);
 
         // ── Column prefs warning ──────────────────────────────────────────────
@@ -793,22 +843,14 @@ if (picker) {
         var dismissDateAnim = null;
         requestAnimationFrame(() => {
           resizePanes();
-          const savedConfig = api.getShared("returnToSearch") ? api.getShared("lastSearchConfig") : null;
-          api.setShared("returnToSearch", false);
-          if (savedConfig) {
-            deserializeSearch(savedConfig);
-          } else {
-            for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
-              const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
-              e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
-            }
+          for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
+            const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
+            e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
           }
           updateDots();
-          if (!savedConfig) {
-            setTimeout(() => {
-              dismissDateAnim = runDateFocusAnimation(card, dateSectionWrapper, () => { dismissDateAnim = null; });
-            }, 120);
-          }
+          setTimeout(() => {
+            dismissDateAnim = runDateFocusAnimation(card, dateSectionWrapper, () => { dismissDateAnim = null; });
+          }, 120);
         });
         window.addEventListener("resize", resizePanes);
 
@@ -831,11 +873,9 @@ if (picker) {
         }
 
         // ── Normalization ─────────────────────────────────────────────────────
-        
         function splitValues(raw) {
-            return String(raw || "").replace(/\r\n/g, "\n").replace(/\t/g, "\n").split(/[\n,]+/).map((s) => s.trim().replace(/^["']+|["']+$/g, "").trim()).filter(Boolean);
+          return String(raw || "").replace(/\r\n/g, "\n").replace(/\t/g, "\n").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
         }
-
         function isoStart(d) { return d + "T00:00:00Z"; }
         function isoEnd(d) { return d + "T23:59:59Z"; }
 
@@ -1335,10 +1375,7 @@ async function runSearch() {
             const keyPhraseResult = buildPhraseGroups(keyPhraseEntries);
             for (let ei = 0; ei < keyExcludeKw.length; ei++) globalExcludes.push(keyExcludeKw[ei]);
             for (let ei = 0; ei < keyPhraseResult.exclude.length; ei++) globalExcludes.push(keyPhraseResult.exclude[ei].group);
-            const keyPhraseFilters = keyPhraseResult.include.map((p) => p.group);
-            const keyAndFilters = [...keyIncludeKw];
-            if (keyPhraseFilters.length === 1) keyAndFilters.push(keyPhraseFilters[0]);
-            else if (keyPhraseFilters.length > 1) keyAndFilters.push({ operator: "OR", invertOperator: false, filters: keyPhraseFilters });
+            const keyAndFilters = [...keyIncludeKw, ...keyPhraseResult.include.map((p) => p.group)];
 
             if (runSets.length && keyAndFilters.length) {
               for (let i = 0; i < runSets.length; i++) runSets[i].keyFilters = keyAndFilters;
