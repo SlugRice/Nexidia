@@ -390,6 +390,38 @@
           pop.appendChild(rulesWrap);
           pop.appendChild(opSelect); pop.appendChild(valInput); pop.appendChild(val2Input);
           pop.appendChild(addBtnRow); pop.appendChild(clearBtn);
+          const copyHr = el("div", { style: "height:1px;background:#e5e7eb;margin:10px 0 8px;" });
+          const cbRow = el("div", { style: "display:flex;align-items:center;gap:4px;margin-bottom:6px;" });
+          const entireCb = el("input", { type: "checkbox" });
+          entireCb.checked = true;
+          const entireLabel = el("label", { style: "font-size:11px;color:#374151;cursor:pointer;user-select:none;" }, "Copy Entire Column");
+          entireLabel.onclick = () => { entireCb.checked = !entireCb.checked; entireCb.onchange(); };
+          cbRow.appendChild(entireCb); cbRow.appendChild(entireLabel);
+          const countInput = el("input", { type: "number", min: 1, placeholder: "Row count", style: "width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;display:none;box-sizing:border-box;margin-bottom:6px;" });
+          entireCb.onchange = () => { countInput.style.display = entireCb.checked ? "none" : ""; };
+          const copyBtn = el("button", { style: "width:100%;padding:6px;border-radius:6px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:12px;cursor:pointer;font-weight:600;" }, "Copy Column");
+          copyBtn.onclick = () => {
+              const rows = getFilteredSortedRows();
+              let limit = rows.length;
+              if (!entireCb.checked) {
+                  const parsed = parseInt(countInput.value, 10);
+                  if (!isNaN(parsed) && parsed > 0) limit = Math.min(parsed, rows.length);
+              }
+              const values = [];
+              for (let ci = 0; ci < limit; ci++) values.push(getCellValue(rows[ci], field));
+              navigator.clipboard.writeText(values.join("\n")).then(() => {
+                  copyBtn.textContent = "Copied!";
+                  setTimeout(() => { copyBtn.textContent = "Copy Column"; }, 1500);
+              }).catch(() => {
+                  const ta = document.createElement("textarea");
+                  ta.value = values.join("\n");
+                  ta.style.cssText = "position:fixed;left:-9999px;";
+                  document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+                  copyBtn.textContent = "Copied!";
+                  setTimeout(() => { copyBtn.textContent = "Copy Column"; }, 1500);
+            });
+          };
+          pop.appendChild(copyHr); pop.appendChild(cbRow); pop.appendChild(countInput); pop.appendChild(copyBtn);
           document.body.appendChild(pop);
           setTimeout(() => { if (valInput.style.display !== "none") valInput.focus(); }, 30);
           function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchorEl) { pop.remove(); document.removeEventListener("mousedown", onOutside); } }
