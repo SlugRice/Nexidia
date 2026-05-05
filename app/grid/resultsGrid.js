@@ -784,4 +784,131 @@
           renderQList("");
           box.appendChild(listWrap); box.appendChild(queueWrap);
           runBtn.onclick = async () => { if (!queryQueue.length) return; const toRun = queryQueue.slice(); overlay.remove(); await runQueryEnrichment(toRun); };
-          const cancelBtn = el("button", { style: "width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;
+          const cancelBtn = el("button", { style: "width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;color:#6b7280;" }, "Cancel");
+          cancelBtn.onclick = () => overlay.remove();
+          box.appendChild(runBtn); box.appendChild(cancelBtn);
+          overlay.appendChild(box); document.body.appendChild(overlay);
+          setTimeout(() => searchInput.focus(), 50);
+        }
+        async function runQueryEnrichment(queries) {
+          if (!Array.isArray(queries)) queries = [queries];
+          const HITS_URL = (smid) => "https://apug01.nxondemand.com/NxIA/api/hits/fetch/" + smid;
+          const BATCH = 50;
+          const smids = [];
+          for (let si = 0; si < state.rows.length; si++) {
+            const smid = getSourceMediaId(state.rows[si]);
+            if (smid) smids.push({ idx: si, smid: String(smid) });
+          }
+          if (!smids.length) { alert("No SMIDs found in results."); return; }
+          const scoreMaps = new Map();
+          for (let qmi = 0; qmi < queries.length; qmi++) { scoreMaps.set(queries[qmi].id, new Map()); }
+          const progOverlay = el("div", { style: "position:fixed;top:16px;right:16px;z-index:1000010;width:360px;background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:12px;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 12px 28px rgba(0,0,0,.35);" });
+          const progTitle = el("div", { style: "font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;" }, "Searching " + queries.length + " quer" + (queries.length === 1 ? "y" : "ies"));
+          const progStatus = el("div", { style: "font-size:12px;margin-bottom:6px;" }, "Starting...");
+          const progBarOuter = el("div", { style: "height:8px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151;" });
+          const progBarInner = el("div", { style: "height:100%;width:0%;background:#8b5cf6;transition:width 0.3s;" });
+          progBarOuter.appendChild(progBarInner);
+          const progEta = el("div", { style: "font-size:10px;color:#94a3b8;margin-top:4px;" });
+          const progCancel = el("div", { style: "margin-top:6px;font-size:11px;color:#f87171;cursor:pointer;text-decoration:underline;" }, "Cancel");
+          let cancelled = false;
+          progCancel.onclick = () => { cancelled = true; };
+          progOverlay.appendChild(progTitle); progOverlay.appendChild(progStatus);
+          progOverlay.appendChild(progBarOuter); progOverlay.appendChild(progEta); progOverlay.appendChild(progCancel);
+          document.body.appendChild(progOverlay);
+          let done = 0;
+          const startTime = Date.now();
+          for (let bi = 0; bi < smids.length; bi += BATCH) {
+            if (cancelled) break;
+            const batch = smids.slice(bi, bi + BATCH);
+            const promises = batch.map((entry) => {
+              return fetch(HITS_URL(entry.smid), { credentials: "include" })
+                .then((r) => r.ok ? r.json() : [])
+                .then((hits) => {
+                  const arr = Array.isArray(hits) ? hits : (hits && Array.isArray(hits.data) ? hits.data : []);
+                  for (let qi = 0; qi < queries.length; qi++) {
+                    const query = queries[qi];
+                    const matches = arr.filter((h) => h.id === query.id || h.name === query.name);
+                    let best = 0;
+                    for (let mi = 0; mi < matches.length; mi++) { if ((matches[mi].score || 0) > best) best = matches[mi].score; }
+                    scoreMaps.get(query.id).set(entry.smid, best);
+                  }
+                })
+                .catch(() => {
+                  for (let qi = 0; qi < queries.length; qi++) { scoreMaps.get(queries[qi].id).set(entry.smid, 0); }
+                });
+            });
+            await Promise.all(promises);
+            done += batch.length;
+            const pct = Math.round((done / smids.length) * 100);
+            const elapsed = (Date.now() - startTime) / 1000;
+            const rate = done / elapsed;
+            const remaining = rate > 0 ? Math.ceil((smids.length - done) / rate) : 0;
+            progStatus.textContent = done + " / " + smids.length + " calls checked";
+            progBarInner.style.width = pct + "%";
+            progEta.textContent = remaining > 0 ? "~" + remaining + "s remaining" : "";
+            if (bi + BATCH < smids.length && !cancelled) await new Promise((r) => setTimeout(r, 100));
+          }
+          progOverlay.remove();
+          if (cancelled) return;
+          for (let qi = 0; qi < queries.length; qi++) {
+            const query = queries[qi];
+            const colName = "__QUERY_" + query.id + "__";
+            const colHeader = query.name;
+            const qScoreMap = scoreMaps.get(query.id);
+            for (let ri = 0; ri < state.rows.length; ri++) {
+              const item = state.rows[ri];
+              const rowSmid = String(getSourceMediaId(item) || "");
+              const r = item.row || item;
+              r[colName] = qScoreMap.has(rowSmid) ? qScoreMap.get(rowSmid) : "";
+            }
+            if (!state.fields.includes(colName)) {
+              state.fields.unshift(colName);
+              state.headers.unshift(colHeader);
+              state.visible.add(colName);
+            }
+          }
+          rebuildColumnPanel();
+          renderSortBadges();
+          recomputeAndRender();
+        }
+        body.appendChild(colPanel);
+        body.appendChild(gridWrap);
+        card.appendChild(toolbar);
+        card.appendChild(sortBar);
+        card.appendChild(body);
+        modal.appendChild(card);
+        document.body.appendChild(modal);
+        document.body.appendChild(stickyClose);
+        let stopPlayer = null;
+        function close() {
+          if (typeof stopPlayer === "function") stopPlayer();
+          removeDragGhost();
+          try { modal.remove(); } catch (_) {}
+          try { stickyClose.remove(); } catch (_) {}
+          document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
+        }
+        stickyClose.onclick = close;
+        backToSearchBtn.onclick = () => {
+          close();
+          api.setShared("returnToSearch", true);
+          const searchTool = api.listTools().find((t) => t.id === "search");
+          if (searchTool) searchTool.open();
+        };
+        try {
+          const res = await fetch("https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names", { credentials: "include", cache: "no-store" });
+          if (res.ok) {
+            const json = await res.json();
+            api.setShared("metadataFields", Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : []);
+          }
+        } catch (_) {}
+        rebuildColumnPanel();
+        renderSortBadges();
+        recomputeAndRender();
+      } catch (e) {
+        console.error(e);
+        alert("Failed to open grid. Check console for details.");
+      }
+    })();
+  }
+  api.registerTool({ id: "resultsGrid", label: "Results Grid", hidden: true, open: openResultsGrid });
+})();
