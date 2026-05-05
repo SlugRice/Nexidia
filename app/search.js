@@ -282,6 +282,7 @@ function getDisplayName(sn) {
             input.value = f.displayName; input.dataset.storageName = f.storageName;
             dropdown.style.display = "none"; hi = -1;
             if (onSelect) onSelect(f);
+                       
           }
           input.addEventListener("input", () => { delete input.dataset.storageName; render(input.value); });
           input.addEventListener("focus", () => { render(input.value); });
@@ -342,10 +343,19 @@ function getDisplayName(sn) {
           return wrap;
         }
         function removeAdjacentAndLabel(rowEl) {
-          const prev = rowEl.previousSibling;
-          if (prev && prev.dataset && prev.dataset.andLabel) { prev.remove(); return; }
-          const next = rowEl.nextSibling;
-          if (next && next.dataset && next.dataset.andLabel) next.remove();
+          let prev = rowEl.previousSibling;
+          let next = rowEl.nextSibling;
+
+          // Skip phrase sub-rows
+          if (prev && !prev.dataset?.andLabel && prev.previousSibling) {
+            prev = prev.previousSibling;
+          }
+          if (next && !next.dataset?.andLabel && next.nextSibling) {
+            next = next.nextSibling;
+          }
+
+          if (prev?.dataset?.andLabel) prev.remove();
+          else if (next?.dataset?.andLabel) next.remove();
         }
 
         // ── Pane / carousel state ─────────────────────────────────────────────
@@ -373,6 +383,13 @@ function getDisplayName(sn) {
           entry.toggle = toggle;
           const removeBtn = el("button", { style: "width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#aaa;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;align-self:center;", title: "Remove" }, "X");
           const fieldLabelWrap = el("div", { style: "flex:0 0 180px;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;background:#f3f4f6;font-size:13px;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;" });
+          fieldLabelWrap.style.cursor = "pointer";
+          fieldLabelWrap.onclick = () => {
+            if (!entry.picker) return;
+            fieldLabelWrap.style.display = "none";
+            entry.picker.wrapper.style.display = "block";
+            entry.picker.input.focus();
+          };
           entry.fieldLabelWrap = fieldLabelWrap;
           let valueInput;
           if (isPhrase) {
@@ -464,6 +481,8 @@ function getDisplayName(sn) {
           const picker = isPhrase ? null : makeFieldPicker((f) => {
             fieldLabelWrap.textContent = f.displayName;
             fieldLabelWrap.title = f.displayName;
+            fieldLabelWrap.style.display = "block";
+            if (entry.picker) entry.picker.wrapper.style.display = "none";
             syncFieldAcrossPanes(entry, f.storageName, f.displayName);
           });
           if (picker) picker.wrapper.style.display = "none";
