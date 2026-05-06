@@ -423,6 +423,60 @@
           entry.rowEl = rowEl;
           allRows.push(entry);
 
+          rowEl.draggable = true;
+          rowEl.style.cursor = "grab";
+          rowEl.addEventListener("dragstart", (e) => {
+            dragState = { entry };
+            rowEl.style.opacity = "0.35";
+            rowEl.style.cursor = "grabbing";
+            e.dataTransfer.effectAllowed = "move";
+          });
+          rowEl.addEventListener("dragend", () => {
+            rowEl.style.opacity = "1";
+            rowEl.style.cursor = "grab";
+            dragState = null;
+          });
+          rowEl.addEventListener("dragover", (e) => {
+            if (!dragState || dragState.entry === entry) return;
+            if (getPaneForEntry(dragState.entry) !== getPaneForEntry(entry)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            const rect = rowEl.getBoundingClientRect();
+            const mid = rect.top + rect.height / 2;
+            if (e.clientY < mid) {
+              rowEl.style.boxShadow = "inset 0 2px 0 0 #3b82f6";
+            } else {
+              rowEl.style.boxShadow = "inset 0 -2px 0 0 #3b82f6";
+            }
+          });
+          rowEl.addEventListener("dragleave", () => {
+            rowEl.style.boxShadow = "";
+          });
+          rowEl.addEventListener("drop", (e) => {
+            e.preventDefault();
+            rowEl.style.boxShadow = "";
+            if (!dragState || dragState.entry === entry) return;
+            const pane = getPaneForEntry(entry);
+            if (!pane || pane !== getPaneForEntry(dragState.entry)) return;
+            const srcIdx = pane.rows.indexOf(dragState.entry);
+            const dstIdx = pane.rows.indexOf(entry);
+            if (srcIdx === -1 || dstIdx === -1) return;
+            const rect = rowEl.getBoundingClientRect();
+            const insertAfter = e.clientY >= rect.top + rect.height / 2;
+            pane.rows.splice(srcIdx, 1);
+            const newIdx = pane.rows.indexOf(entry);
+            pane.rows.splice(insertAfter ? newIdx + 1 : newIdx, 0, dragState.entry);
+            if (insertAfter) {
+              const next = entry.rowEl.nextSibling;
+              pane.rowsContainer.insertBefore(dragState.entry.rowEl, next);
+            } else {
+              pane.rowsContainer.insertBefore(dragState.entry.rowEl, entry.rowEl);
+            }
+            rebuildAndLabels(pane);
+          });
+
+          removeBtn.onclick = () => {
+
           removeBtn.onclick = () => {
             removeAdjacentAndLabel(rowEl); rowEl.remove();
             const idx = allRows.indexOf(entry); if (idx !== -1) allRows.splice(idx, 1);
