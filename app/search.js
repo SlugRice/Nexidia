@@ -808,156 +808,7 @@
           }
           return total;
         }
-
-        function handleBoostDecision(totalSearches, fields) {
-          if (totalSearches < BOOST_WARN) return "full";
-
-          const msg =
-            "Boosted search is active on values in: " + fields.join(", ") + "\n\n" +
-            "This will result in approximately " + totalSearches + " transcript searches.\n\n" +
-            "Continue to run full search\n" +
-            "Simplify to reduce variants\n" +
-            "Cancel to edit search";
-
-          const choice = confirm(msg);
-          if (!choice) return "cancel";
-
-          if (totalSearches >= BOOST_SEVERE) return "simplified";
-          return "full";
-        }
-
-        async function runSearch() {
-          try {
-            const fromVal = fromDate.input.value;
-            const toVal = toDate.input.value;
-            if (!fromVal || !toVal) {
-              alert("Please select both From and To dates.");
-              return;
-            }
-            if (!confirmDateRange(fromVal, toVal)) return;
-
-            resetSession();
-            const myToken = api.getShared("searchSessionToken");
-
-            const dateFilter = {
-              parameterName: "recordedDateTime",
-              operator: "BETWEEN",
-              type: "DATE",
-              value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) }
-            };
-
-            const runSets = [];
-            let boostCandidates = [];
-            let boostFields = new Set();
-
-            for (let pi = 0; pi < panes.length; pi++) {
-              const pane = panes[pi];
-
-              const filterEntries = allRows.filter(r => !r.isPhrase && r.paneIndex === pane.index);
-              const phraseEntries = allRows.filter(r => r.isPhrase && r.paneIndex === pane.index);
-
-              const includeKw = [];
-              const excludeKw = [];
-
-              for (const e of filterEntries) {
-                const sn = e.picker ? e.picker.getStorageName() : "";
-                const val = e.valueInput.value.trim();
-                if (!sn || !val) continue;
-
-                const values = splitValues(val);
-
-                if (e.exclude) {
-                  excludeKw.push(buildKeywordFilter(sn, values));
-                } else {
-                  includeKw.push(buildKeywordFilter(sn, values));
-
-                  for (const v of values) {
-                    if (/^\d+$/.test(v)) {
-                      boostCandidates.push(v);
-                      boostFields.add(sn);
-                    }
-                  }
-                }
-              }
-
-              const phraseGroups = phraseEntries.flatMap(pe =>
-                splitValues(pe.valueInput.value).map(p => ({
-                  group: buildTextFilter(p, pe.speaker),
-                  display: `"${p}"`
-                }))
-              );
-
-              const keywordGroup = includeKw.length
-                ? { operator: "AND", invertOperator: false, filters: includeKw }
-                : null;
-
-              runSets.push({
-                keywordGroup,
-                phraseGroups,
-                excludeKw,
-                label: "Search " + String.fromCharCode(65 + pane.index)
-              });
-            }
-
-            const totalBoost = estimateBoostLoad(boostCandidates);
-            const decision = handleBoostDecision(totalBoost, Array.from(boostFields));
-
-            if (decision === "cancel") return;
-
-            if (decision !== "simplified") {
-              for (const val of boostCandidates) {
-                const variants = buildBoostVariants(val);
-
-                for (const phrase of variants) {
-                  runSets.push({
-                    keywordGroup: null,
-                    phraseGroups: [{ group: buildTextFilter(phrase, "transcript"), display: null }],
-                    excludeKw: [],
-                    label: "Boost"
-                  });
-                }
-              }
-            }
-
-            modal.remove();
-            stickyClose.remove();
-
-            progressUI.show();
-            progressUI.set("Searching...", 10, "");
-
-            const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
-            const searchFields = colPrefs.fields.includes("sourceMediaId")
-              ? colPrefs.fields
-              : colPrefs.fields.concat(["sourceMediaId"]);
-
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Search", myToken, null);
-
-            if (result === null) {
-              progressUI.remove();
-              return;
-            }
-
-            if (!result.finalRows.length) {
-              progressUI.set("No results returned.", 100, "");
-              alert("No results returned.");
-              return;
-            }
-
-            progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
-            sendToDispatcher(result, colPrefs);
-
-          } catch (err) {
-            if (err.name === "AbortError") {
-              progressUI.remove();
-              return;
-            }
-            console.error(err);
-            try { progressUI.remove(); } catch (_) {}
-            alert("Search failed. Check console.");
-          }
-        }
-
-      
+        
         function buildBoostSimple(numStr) {
           const base = digitToWords(numStr);
           const result = [base];
@@ -965,7 +816,10 @@
           return result;
         }
 
-        function handleSEVERE;        function handleBoostDecision(totalSearches, fieldNames) {
+        function handleBoostDecision(totalSearches, fieldNames) {
+          return new Promise((resolve) => {
+            if (totalSearches < BOOST_WARN) { resolve("full"); return; }
+            const severe = totalSearches >= BOOST_SEVERE;
             const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
             const box = el("div", { style: "background:#fff;width:500px;border-radius:12px;padding:24px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
             box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:12px;" },
@@ -1017,12 +871,14 @@
             const globalExcludes = [];
             const boostCandidates = [];
             const boostFieldNames = new Set();
+            const boostValues = [];
 
             for (let pi = 0; pi < panes.length; pi++) {
               const pane = panes[pi];
               const fieldEntries = allRows.filter(r => !r.isPhrase && r.paneIndex === pane.index);
               const phraseEntries = allRows.filter(r => r.isPhrase && r.paneIndex === pane.index);
-              const includeKw = [];
+              const includeKwEntries = [];
+              const paneBoosts = [];
 
               for (const e of fieldEntries) {
                 const sn = e.picker ? e.picker.getStorageName() : "";
@@ -1036,8 +892,9 @@
                     if (stripped) {
                       cleanVals.push(stripped);
                       if (/^\d+$/.test(stripped)) {
-                        boostCandidates.push(stripped);
+                        paneBoosts.push({ value: stripped, storageName: sn });
                         boostFieldNames.add(getDisplayName(sn));
+                        boostValues.push(stripped);
                       }
                     }
                   } else {
@@ -1048,8 +905,22 @@
                 if (e.exclude) {
                   globalExcludes.push(buildKeywordFilter(sn, cleanVals));
                 } else {
-                  includeKw.push(buildKeywordFilter(sn, cleanVals));
+                  includeKwEntries.push({ storageName: sn, filter: buildKeywordFilter(sn, cleanVals) });
                 }
+              }
+
+              const includeKw = includeKwEntries.map(x => x.filter);
+
+              for (const bc of paneBoosts) {
+                const otherFilters = includeKwEntries
+                  .filter(e => e.storageName !== bc.storageName)
+                  .map(e => e.filter);
+                boostCandidates.push({
+                  value: bc.value,
+                  keywordGroup: otherFilters.length
+                    ? { operator: "AND", invertOperator: false, filters: otherFilters }
+                    : null
+                });
               }
 
               const phraseGroups = [];
@@ -1072,15 +943,15 @@
               runSets.push({ keywordGroup, phraseGroups, label: "Search " + String.fromCharCode(65 + pane.index) });
             }
 
-            const totalBoost = estimateBoostLoad(boostCandidates);
+            const totalBoost = estimateBoostLoad(boostValues);
             const decision = await handleBoostDecision(totalBoost, Array.from(boostFieldNames));
             if (decision === "cancel") return;
 
-            for (const val of boostCandidates) {
-              const variants = decision === "full" ? buildBoostVariants(val) : buildBoostSimple(val);
+            for (const bc of boostCandidates) {
+              const variants = decision === "full" ? buildBoostVariants(bc.value) : buildBoostSimple(bc.value);
               for (const phrase of variants) {
                 runSets.push({
-                  keywordGroup: null,
+                  keywordGroup: bc.keywordGroup,
                   phraseGroups: [{ group: buildTextFilter(phrase, "transcript"), display: null }],
                   label: "Boost"
                 });
@@ -1114,7 +985,6 @@
             alert("Search failed. Check console.");
           }
         }
-
         async function safeRead(res) {
           const ct = (res.headers.get("content-type") || "").toLowerCase();
           const text = await res.text();
