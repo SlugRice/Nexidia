@@ -22,7 +22,7 @@
         const PHRASE_PLACEHOLDER = "Enter phrases, one per line.";
         const PAGE_SIZE = 1000;
         const MAX_ROWS = 50000;
-        const BOOST_WARN = 30;
+        const BOOST_WARN = 100;
         const BOOST_SEVERE = 150;
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -30,7 +30,7 @@
           "UDFVarchar1","UDFVarchar122","UDFVarchar110","UDFVarchar41",
           "UDFVarchar115","UDFVarchar136","UDFVarchar50","UDFVarchar104","UDFVarchar105"
         ]);
-        const DEFAULT_FILTER_STORAGES = ["UDFVarchar10","UDFVarchar126","DNIS","siteName","UDFVarchar120","UDFVarchar41"];
+        const DEFAULT_FILTER_STORAGES = ["UDFVarchar10","UDFVarchar126","DNIS","siteName","UDFVarchar120","UDFVarchar41","UDFVarchar110","UDFVarchar122","UDFVarchar115","UDFVarchar136"];
         const DISPLAY_NAME_MAP = {
           "UDFVarchar10": "Group Number",
           "UDFVarchar110": "Transaction ID",
@@ -41,7 +41,9 @@
           "UDFVarchar120": "UDFVarchar120",
           "UDFVarchar41": "UDFVarchar41",
           "UDFVarchar122": "UDFVarchar122",
-          "UDFVarchar1": "UDFVarchar1"
+          "UDFVarchar1": "UDFVarchar1",
+          "UDFVarchar115": "Orig ANI",
+          "UDFVarchar136": "Provider Tax ID"
         };
 
         let currentToken = (api.getShared("searchSessionToken") || 0) + 1;
@@ -391,7 +393,10 @@
             if (entry.picker) entry.picker.wrapper.style.display = "none";
             syncFieldAcrossPanes(entry, f.storageName, f.displayName);
           });
-          if (picker) picker.wrapper.style.display = "none";
+          if (picker) {
+            if (storageName) { picker.wrapper.style.display = "none"; }
+            else { fieldLabelWrap.style.display = "none"; }
+          }
           entry.picker = picker;
 
           if (isPhrase) {
@@ -405,8 +410,8 @@
           rowEl.appendChild(removeBtn);
           rowEl.appendChild(excludeToggle.wrap);
           rowEl.appendChild(fieldLabelWrap);
-          rowEl.appendChild(valueInput);
           if (picker) rowEl.appendChild(picker.wrapper);
+          rowEl.appendChild(valueInput);
 
           if (isPhrase) {
             const subRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin:4px 0 2px 30px;" });
@@ -558,7 +563,7 @@
           const tx = -(index * (pw + GAP)) + leftPeekOffset;
           carouselTrack.style.transition = animate ? "transform 0.4s cubic-bezier(0.4,0,0.2,1)" : "none";
           carouselTrack.style.transform = "translateX(" + tx + "px)";
-          if (fadeMaskLeft) fadeMaskLeft.style.opacity = index > 0 ? "1" : "0";
+          if (fadeMaskLeft) { fadeMaskLeft.style.opacity = index > 0 ? "1" : "0"; fadeMaskLeft.style.pointerEvents = index > 0 ? "auto" : "none"; }
         }
         function slideTo(index) {
           if (index < 0 || index >= panes.length) return;
@@ -624,15 +629,6 @@
         headerRow.appendChild(clearAllBtn);
         card.appendChild(headerRow);
 
-        const prefsError = api.getShared("columnPrefsError");
-        if (prefsError) {
-          const link = el("a", { href: "https://apug01.nxondemand.com/NxIA/Search/ForensicSearch.aspx", target: "_blank", style: "color:#92400e;font-weight:600;" }, "Open Nexidia Search");
-          const warn = el("div", { style: "background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:12px;color:#92400e;margin-bottom:10px;display:flex;align-items:center;gap:6px;" },
-            "\u26A0\uFE0F Column preferences could not be loaded. ");
-          warn.appendChild(link);
-          warn.appendChild(document.createTextNode(" and relaunch to use your saved column layout."));
-          card.appendChild(warn);
-        }
         card.appendChild(hr());
 
         const dateSectionWrapper = el("div", { style: "margin-bottom:0;" });
@@ -654,7 +650,7 @@
 
         const carouselOuter = el("div", { style: "position:relative;" });
         carouselViewport = el("div", { style: "overflow:hidden;border-radius:14px;position:relative;" });
-        fadeMaskLeft = el("div", { style: "position:absolute;top:0;left:0;bottom:0;width:" + PEEK + "px;background:linear-gradient(to right,rgba(248,250,252,0.97),rgba(248,250,252,0));z-index:6;pointer-events:auto;cursor:pointer;opacity:0;transition:opacity 0.3s;" });
+        fadeMaskLeft = el("div", { style: "position:absolute;top:0;left:0;bottom:0;width:" + PEEK + "px;background:linear-gradient(to right,rgba(248,250,252,0.97),rgba(248,250,252,0));z-index:6;pointer-events:none;cursor:pointer;opacity:0;transition:opacity 0.3s;" });
         fadeMaskLeft.onclick = () => { if (activePaneIndex > 0) slideTo(activePaneIndex - 1); };
         const fadeMaskRight = el("div", { style: "position:absolute;top:0;right:0;bottom:0;width:" + PEEK + "px;background:linear-gradient(to left,rgba(248,250,252,0.6),rgba(248,250,252,0));z-index:6;pointer-events:auto;cursor:pointer;" });
         fadeMaskRight.onclick = () => { if (activePaneIndex < panes.length - 1) { slideTo(activePaneIndex + 1); } else { activateNextPane(); } };
@@ -664,8 +660,8 @@
         dotsRow = el("div", { style: "display:flex;justify-content:center;gap:6px;margin-top:10px;" });
         card.appendChild(carouselOuter); card.appendChild(dotsRow); card.appendChild(hr());
 
-        const searchBar = el("div", { style: "position:sticky;bottom:0;padding:16px 0 4px;background:linear-gradient(to bottom, rgba(248,250,252,0) 0%, #f8fafc 30%);display:flex;justify-content:center;z-index:10;" });
-        const mainSearchBtn = el("button", { style: "padding:12px 72px;border-radius:24px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(59,130,246,0.4);letter-spacing:0.5px;transition:box-shadow 0.2s;" }, "Search");
+        const searchBar = el("div", { style: "position:sticky;bottom:0;padding:16px 0 4px;background:linear-gradient(to bottom, rgba(248,250,252,0) 0%, #f8fafc 30%);display:flex;justify-content:center;z-index:10;pointer-events:none;" });
+        const mainSearchBtn = el("button", { style: "padding:12px 72px;border-radius:24px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(59,130,246,0.4);letter-spacing:0.5px;transition:box-shadow 0.2s;pointer-events:auto;" }, "Search");
         mainSearchBtn.onmouseenter = () => { mainSearchBtn.style.boxShadow = "0 6px 22px rgba(59,130,246,0.55)"; };
         mainSearchBtn.onmouseleave = () => { mainSearchBtn.style.boxShadow = "0 4px 16px rgba(59,130,246,0.4)"; };
         mainSearchBtn.onclick = () => { runSearch(); };
