@@ -1530,7 +1530,19 @@ async function runSearch() {
   const LS_G = "NEXIDIA_SAVED_SEARCHES";
   function getAll() { try { return JSON.parse(localStorage.getItem(LS_G)) || {}; } catch (_) { return {}; } }
   function saveIt(name, data) { const a = getAll(); a[name] = { panes: data.panes, keys: data.keys }; localStorage.setItem(LS_G, JSON.stringify(a)); }
-  function exportIt(name, data) { const b = new Blob([JSON.stringify({ name: name, panes: data.panes, keys: data.keys })], { type: "text/plain" });
+  function exportIt(name, data) {
+  const out = JSON.stringify({ name: name, panes: data.panes, keys: data.keys });
+  const b = new Blob([out], { type: "text/plain" });
+  const url = URL.createObjectURL(b);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name.replace(/[^a-zA-Z0-9_\- ]/g, "_") + ".txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+const overlay = mk("div", ...
   const overlay = mk("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
   const box = mk("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
   box.appendChild(mk("div", { style: "font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Save Search"));
