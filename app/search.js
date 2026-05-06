@@ -476,8 +476,6 @@
           });
 
           removeBtn.onclick = () => {
-
-          removeBtn.onclick = () => {
             removeAdjacentAndLabel(rowEl); rowEl.remove();
             const idx = allRows.indexOf(entry); if (idx !== -1) allRows.splice(idx, 1);
             for (let i = 0; i < panes.length; i++) { const pi = panes[i].rows.indexOf(entry); if (pi !== -1) panes[i].rows.splice(pi, 1); }
