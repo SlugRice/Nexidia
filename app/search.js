@@ -865,6 +865,7 @@ headerRow.appendChild(clearAllBtn);
           for (let i = 0; i < DEFAULT_KEY_LIST.length; i++) {
             const e = buildRowEntry(DEFAULT_KEY_LIST[i], "key", false);
             e.paneIndex = -1; keyRowsContainer.appendChild(e.rowEl);
+          }  
           updateDots();
           const returnConfig = api.getShared("lastSearchConfig");
           const isReturn = api.getShared("returnToSearch");
