@@ -855,6 +855,7 @@
     }
     await Promise.all(Array.from({ length: Math.min(cfg.concurrency, items.length) }, () => worker()));
     UI.appendLog(`Fetch complete. Failed: ${failed.length}`);
+    console.log("[BATCH-DBG] items:", out.length, "TARGET:", TARGET_CHARS, "pairing:", pairingActive, "charCounts:", out.map(x => x.charCount).sort((a,b) => b-a));
     if (singleFileConfig && singleFileConfig.enabled) {
       UI.setProgress(62, "Building single files...", "");
       const singleFiles = [];
@@ -905,6 +906,7 @@
     } else {
       let curBatch = [], curChars = 0;
       const flush = () => { if (curBatch.length) { batches.push(curBatch); curBatch = []; curChars = 0; } };
+      console.log("[BATCH-DBG] undefinedCheck:", out.filter(x => x.charCount === undefined || x.charCount === null || isNaN(x.charCount)).length);
       if (!pairingActive) {
         const sorted = out.slice().sort((a, b) => (a.recordeddate || "").localeCompare(b.recordeddate || ""));
         for (const it of sorted) {
@@ -966,6 +968,7 @@
       }
     }
     UI.appendLog(`Batches built: ${batches.length}`);
+    console.log("[BATCH-DBG] batches:", batches.map((b,i) => ({ batch: i, calls: b.length, chars: b.reduce((a,x) => a + (x.charCount||0), 0) })));
     const totalFiles = batches.length * cfg.copies;
     if (totalFiles > 10000) {
       const totalCharsEst = out.reduce((a, x) => a + (x.charCount || 0), 0) * cfg.copies;
