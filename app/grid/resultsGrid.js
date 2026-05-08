@@ -1,3 +1,6 @@
+//[Last Update: 7:06 AM 5/8/2026]
+//[Please confirm this timestamp in your response any time it was formed using this document!]
+
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
@@ -21,6 +24,7 @@
         const COL1_W = 28;
         const COL2_W = 44;
         const FROZEN_W = COL0_W + COL1_W + COL2_W;
+        const PLAY_COL_W = 28;
         const DEFAULT_COL_W = 150;
         const LS_HIDE_TIP_KEY = "nexidia_hide_col_tooltip_seen";
         const el = (tag, props, ...children) => {
@@ -112,7 +116,11 @@
           selected: new Set(),
           hiddenRows: new Set(),
           colWidths: new Map(),
-          filteredRows: []
+          filteredRows: [],
+          clickMode: "play",
+          cellSel: new Set(),
+          cellAnchor: null,
+          cellDragging: false
         };
         let dragColIndex = null;
         let dragSrcIndex = null;
@@ -224,6 +232,12 @@
           hiddenCountEl.textContent = state.hiddenRows.size ? state.hiddenRows.size.toLocaleString() + " hidden" : "";
           hiddenCountEl.style.display = state.hiddenRows.size ? "" : "none";
           unhideBtn.style.display = state.hiddenRows.size ? "" : "none";
+          if (state.clickMode === "select" && state.cellSel.size) {
+            cellSelCountEl.textContent = state.cellSel.size.toLocaleString() + " cells";
+            cellSelCountEl.style.display = "";
+          } else {
+            cellSelCountEl.style.display = "none";
+          }
         }
         function confirmExportScope(onSelected, onAll) {
           if (!state.selected.size) { onAll(); return; }
@@ -390,38 +404,6 @@
           pop.appendChild(rulesWrap);
           pop.appendChild(opSelect); pop.appendChild(valInput); pop.appendChild(val2Input);
           pop.appendChild(addBtnRow); pop.appendChild(clearBtn);
-          const copyHr = el("div", { style: "height:1px;background:#e5e7eb;margin:10px 0 8px;" });
-          const cbRow = el("div", { style: "display:flex;align-items:center;gap:4px;margin-bottom:6px;" });
-          const entireCb = el("input", { type: "checkbox" });
-          entireCb.checked = true;
-          const entireLabel = el("label", { style: "font-size:11px;color:#374151;cursor:pointer;user-select:none;" }, "Copy Entire Column");
-          entireLabel.onclick = () => { entireCb.checked = !entireCb.checked; entireCb.onchange(); };
-          cbRow.appendChild(entireCb); cbRow.appendChild(entireLabel);
-          const countInput = el("input", { type: "number", min: 1, placeholder: "Row count", style: "width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:11px;display:none;box-sizing:border-box;margin-bottom:6px;" });
-          entireCb.onchange = () => { countInput.style.display = entireCb.checked ? "none" : ""; };
-          const copyBtn = el("button", { style: "width:100%;padding:6px;border-radius:6px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:12px;cursor:pointer;font-weight:600;" }, "Copy Column");
-          copyBtn.onclick = () => {
-              const rows = getFilteredSortedRows();
-              let limit = rows.length;
-              if (!entireCb.checked) {
-                  const parsed = parseInt(countInput.value, 10);
-                  if (!isNaN(parsed) && parsed > 0) limit = Math.min(parsed, rows.length);
-              }
-              const values = [];
-              for (let ci = 0; ci < limit; ci++) values.push(getCellValue(rows[ci], field));
-              navigator.clipboard.writeText(values.join("\n")).then(() => {
-                  copyBtn.textContent = "Copied!";
-                  setTimeout(() => { copyBtn.textContent = "Copy Column"; }, 1500);
-              }).catch(() => {
-                  const ta = document.createElement("textarea");
-                  ta.value = values.join("\n");
-                  ta.style.cssText = "position:fixed;left:-9999px;";
-                  document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
-                  copyBtn.textContent = "Copied!";
-                  setTimeout(() => { copyBtn.textContent = "Copy Column"; }, 1500);
-            });
-          };
-          pop.appendChild(copyHr); pop.appendChild(cbRow); pop.appendChild(countInput); pop.appendChild(copyBtn);
           document.body.appendChild(pop);
           setTimeout(() => { if (valInput.style.display !== "none") valInput.focus(); }, 30);
           function onOutside(e) { if (!pop.contains(e.target) && e.target !== anchorEl) { pop.remove(); document.removeEventListener("mousedown", onOutside); } }
@@ -442,6 +424,7 @@
           state.sorts = []; state.columnFilters = {}; state.globalFilter = "";
           state.visible = new Set([...phraseFields, ...allFields]);
           state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
+          state.cellSel.clear(); state.cellAnchor = null; state.cellDragging = false;
           globalSearchBox.value = "";
           rebuildColumnPanel(); renderSortBadges(); recomputeAndRender();
         }
@@ -453,6 +436,7 @@
         const backToSearchBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#475569;cursor:pointer;font-size:12px;flex-shrink:0;" }, "\u2190 Back to Search");
         const rowCountEl = el("div", { style: "font-size:12px;color:#6b7280;flex-shrink:0;" });
         const selCountEl = el("div", { style: "font-size:12px;color:#2563eb;font-weight:600;flex-shrink:0;display:none;" });
+        const cellSelCountEl = el("div", { style: "font-size:12px;color:#16a34a;font-weight:600;flex-shrink:0;display:none;" });
         const hiddenCountEl = el("div", { style: "font-size:12px;color:#f59e0b;font-weight:600;flex-shrink:0;display:none;" });
         const unhideBtn = el("button", { style: "padding:4px 8px;border-radius:6px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:11px;flex-shrink:0;display:none;" }, "Unhide All");
         unhideBtn.onclick = () => { state.hiddenRows.clear(); recomputeAndRender(); };
@@ -476,11 +460,24 @@
         resetBtn.onclick = () => resetGrid();
         const saveSearchGridBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;cursor:pointer;font-size:12px;flex-shrink:0;" }, "\uD83D\uDCBE Save Search");
         saveSearchGridBtn.onclick = () => { const fn = api.getShared("openGlobalSavePrompt"); if (fn) fn(); else alert("Save function not available."); };
+        const clickModeBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;flex-shrink:0;" }, "On Click: Play Audio");
+        clickModeBtn.onclick = () => {
+          state.clickMode = state.clickMode === "play" ? "select" : "play";
+          if (state.clickMode === "play") {
+            state.cellSel.clear(); state.cellAnchor = null; state.cellDragging = false;
+            clickModeBtn.textContent = "On Click: Play Audio";
+            clickModeBtn.style.borderColor = "#6366f1"; clickModeBtn.style.color = "#6366f1";
+          } else {
+            clickModeBtn.textContent = "On Click: Select Field";
+            clickModeBtn.style.borderColor = "#22c55e"; clickModeBtn.style.color = "#16a34a";
+          }
+          recomputeAndRender();
+        };
         toolbar.appendChild(titleEl); toolbar.appendChild(backToSearchBtn); toolbar.appendChild(rowCountEl);
-        toolbar.appendChild(selCountEl); toolbar.appendChild(hiddenCountEl); toolbar.appendChild(unhideBtn);
+        toolbar.appendChild(selCountEl); toolbar.appendChild(cellSelCountEl); toolbar.appendChild(hiddenCountEl); toolbar.appendChild(unhideBtn);
         toolbar.appendChild(columnsBtn); toolbar.appendChild(adHocBtn); toolbar.appendChild(hideSelectedBtn);
         toolbar.appendChild(exportExcelBtn); toolbar.appendChild(exportTranscriptsBtn);
-        toolbar.appendChild(queryEnrichBtn); toolbar.appendChild(resetBtn); toolbar.appendChild(saveSearchGridBtn);
+        toolbar.appendChild(queryEnrichBtn); toolbar.appendChild(resetBtn); toolbar.appendChild(saveSearchGridBtn); toolbar.appendChild(clickModeBtn);
         toolbar.appendChild(globalSearchBox);
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
         function renderSortBadges() {
@@ -563,10 +560,77 @@
           renderHeader(); renderVisibleRows();
         }
         function frozenStyle(colIdx, isHeader) {
-          const lefts = [0, COL0_W, COL0_W + COL1_W];
-          const widths = [COL0_W, COL1_W, COL2_W];
+          const lefts = [0, COL0_W, COL0_W + COL1_W, COL0_W + COL1_W + COL2_W];
+          const widths = [COL0_W, COL1_W, COL2_W, PLAY_COL_W];
           const z = isHeader ? 6 : 3;
           return `position:sticky;left:${lefts[colIdx]}px;z-index:${z};width:${widths[colIdx]}px;min-width:${widths[colIdx]}px;max-width:${widths[colIdx]}px;box-sizing:border-box;`;
+        }
+        function currentFrozenW() {
+          return state.clickMode === "select" ? FROZEN_W + PLAY_COL_W : FROZEN_W;
+        }
+        function cellKey(r, c) { return r + "," + c; }
+        function isCellSelected(r, c) { return state.cellSel.has(cellKey(r, c)); }
+        function selectRect(r1, c1, r2, c2, additive) {
+          if (!additive) state.cellSel.clear();
+          const rMin = Math.min(r1, r2), rMax = Math.max(r1, r2);
+          const cMin = Math.min(c1, c2), cMax = Math.max(c1, c2);
+          for (let r = rMin; r <= rMax; r++) {
+            for (let c = cMin; c <= cMax; c++) {
+              state.cellSel.add(cellKey(r, c));
+            }
+          }
+        }
+        function copyCellSelection() {
+          if (!state.cellSel.size) return;
+          const visF = state.fields.filter((f) => state.visible.has(f));
+          let rMin = Infinity, rMax = -1, cMin = Infinity, cMax = -1;
+          for (const key of state.cellSel) {
+            const parts = key.split(",");
+            const r = parseInt(parts[0]), c = parseInt(parts[1]);
+            if (r < rMin) rMin = r; if (r > rMax) rMax = r;
+            if (c < cMin) cMin = c; if (c > cMax) cMax = c;
+          }
+          const copyLines = [];
+          for (let r = rMin; r <= rMax; r++) {
+            const cells = [];
+            for (let c = cMin; c <= cMax; c++) {
+              if (state.cellSel.has(cellKey(r, c))) {
+                const item = state.filteredRows[r];
+                cells.push(item ? getCellDisplay(item, visF[c]) : "");
+              } else { cells.push(""); }
+            }
+            copyLines.push(cells.join("\t"));
+          }
+          const text = copyLines.join("\n");
+          navigator.clipboard.writeText(text).then(() => {
+            showCopyNotice(state.cellSel.size);
+          }).catch(() => {
+            const ta = document.createElement("textarea");
+            ta.value = text; ta.style.cssText = "position:fixed;left:-9999px;";
+            document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+            showCopyNotice(state.cellSel.size);
+          });
+        }
+        function showCopyNotice(count) {
+          const n = el("div", { style: "position:fixed;bottom:20px;right:20px;background:#22c55e;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;z-index:1000010;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.2);transition:opacity 0.3s;" }, count + " cell" + (count !== 1 ? "s" : "") + " copied");
+          document.body.appendChild(n);
+          setTimeout(() => { n.style.opacity = "0"; setTimeout(() => n.remove(), 300); }, 1200);
+        }
+        function updateCellHighlights() {
+          tbody.querySelectorAll("td[data-r]").forEach((td) => {
+            const r = parseInt(td.getAttribute("data-r"));
+            const c = parseInt(td.getAttribute("data-c"));
+            if (isCellSelected(r, c)) {
+              td.style.background = "#dbeafe";
+              td.style.outline = "1px solid #93c5fd";
+              td.style.outlineOffset = "-1px";
+            } else {
+              td.style.background = "";
+              td.style.outline = "";
+              td.style.outlineOffset = "";
+            }
+          });
+          updateToolbarCounts();
         }
         function renderHeader() {
           const visFields = state.fields.filter((f) => state.visible.has(f));
@@ -584,6 +648,9 @@
           trh.appendChild(thSel);
           trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(1, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px;font-size:11px;` }));
           trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(2, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px 6px;font-size:10px;color:#9ca3af;text-align:right;` }, "#"));
+          if (state.clickMode === "select") {
+            trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(3, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px;font-size:10px;color:#9ca3af;text-align:center;` }, "\u25B6"));
+          }
           for (let i = 0; i < visFields.length; i++) {
             const field = visFields[i], headerText = visHeaders[i] || field;
             const sortIdx = state.sorts.findIndex((s) => s.field === field);
@@ -604,10 +671,10 @@
             let sortLabel = headerText;
             if (sortIdx >= 0) sortLabel += state.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
             const thLabel = el("span", { style: "flex:1;overflow:hidden;text-overflow:ellipsis;" }, sortLabel);
-            const filterIcon = el("span", { style: `font-size:11px;cursor:pointer;margin-left:4px;color:${hasFilter ? "#3b82f6" : "#d1d5db"};` }, hasFilter ? "\u25BC" : "\u25BE");
+            const filterIcon = el("span", { style: `font-size:14px;cursor:pointer;margin-left:6px;padding:2px 4px;border-radius:4px;color:${hasFilter ? "#3b82f6" : "#94a3b8"};transition:color 0.15s,background 0.15s;` }, hasFilter ? "\u25BC" : "\u25BE");
             filterIcon.onclick = (e) => { e.stopPropagation(); openColumnFilterPopover(field, filterIcon); };
-            filterIcon.onmouseenter = () => { if (!hasFilter) filterIcon.style.color = "#9ca3af"; };
-            filterIcon.onmouseleave = () => { filterIcon.style.color = hasFilter ? "#3b82f6" : "#d1d5db"; };
+            filterIcon.onmouseenter = () => { filterIcon.style.color = hasFilter ? "#2563eb" : "#6b7280"; filterIcon.style.background = "#e5e7eb"; };
+            filterIcon.onmouseleave = () => { filterIcon.style.color = hasFilter ? "#3b82f6" : "#94a3b8"; filterIcon.style.background = ""; };
             labelRow.appendChild(thLabel); labelRow.appendChild(filterIcon);
             thInner.appendChild(hideChev); thInner.appendChild(labelRow);
             th.appendChild(thInner);
@@ -651,11 +718,20 @@
               state.fields.splice(nd, 0, mf); state.headers.splice(nd, 0, mh);
               dragColIndex = null; rebuildColumnPanel(); renderHeader(); renderVisibleRows();
             });
-            th.onclick = (e) => { if (dragColIndex !== null || e.target === resizeHandle || e.target === filterIcon || e.target === hideChev) return; handleHeaderClick(field); };
+            th.onclick = (e) => {
+              if (dragColIndex !== null || e.target === resizeHandle || e.target === filterIcon || e.target === hideChev) return;
+              if (state.clickMode === "select") {
+                if (!e.shiftKey && !e.ctrlKey) state.cellSel.clear();
+                for (let r = 0; r < state.filteredRows.length; r++) state.cellSel.add(cellKey(r, i));
+                updateCellHighlights();
+                return;
+              }
+              handleHeaderClick(field);
+            };
             trh.appendChild(th);
           }
           thead.appendChild(trh);
-          const totalW = FROZEN_W + visFields.reduce((s, f) => s + getColWidth(f), 0);
+          const totalW = currentFrozenW() + visFields.reduce((s, f) => s + getColWidth(f), 0);
           table.style.width = totalW + "px";
         }
         function getVisibleRange() {
@@ -684,9 +760,10 @@
             if (!state.selected.has(gi - 1)) isGroupTop.add(gi);
             if (!state.selected.has(gi + 1)) isGroupBottom.add(gi);
           }
+          const frozenCols = state.clickMode === "select" ? 4 : 3;
           tbody.innerHTML = "";
           if (range.start > 0) {
-            const spacer = el("tr", {}); spacer.appendChild(el("td", { colSpan: visFields.length + 3, style: `height:${range.start * ROW_HEIGHT}px;padding:0;border:0;` }));
+            const spacer = el("tr", {}); spacer.appendChild(el("td", { colSpan: visFields.length + frozenCols, style: `height:${range.start * ROW_HEIGHT}px;padding:0;border:0;` }));
             tbody.appendChild(spacer);
           }
           for (let ri = range.start; ri < range.end; ri++) {
@@ -722,23 +799,47 @@
             hideBtn.onclick = (e) => { e.stopPropagation(); const oi = state.rows.indexOf(item); if (oi !== -1) state.hiddenRows.add(oi); state.selected.delete(ri); recomputeAndRender(); };
             tdHide.appendChild(hideBtn);
             tr.appendChild(tdHide);
-            tr.appendChild(el("td", { style: `${frozenStyle(2, false)}background:${bgColor};padding:2px 6px;border-bottom:1px solid #f1f5f9;font-size:10px;color:#9ca3af;text-align:right;height:${ROW_HEIGHT}px;` }, String(ri + 1)));
-            for (const field of visFields) {
+            const tdRowNum = el("td", { style: `${frozenStyle(2, false)}background:${bgColor};padding:2px 6px;border-bottom:1px solid #f1f5f9;font-size:10px;color:#9ca3af;text-align:right;height:${ROW_HEIGHT}px;${state.clickMode === "select" ? "cursor:pointer;" : ""}` }, String(ri + 1));
+            if (state.clickMode === "select") {
+              tdRowNum.onclick = (e) => {
+                e.stopPropagation();
+                if (!e.ctrlKey && !e.shiftKey) state.cellSel.clear();
+                for (let c = 0; c < visFields.length; c++) state.cellSel.add(cellKey(ri, c));
+                updateCellHighlights();
+              };
+            }
+            tr.appendChild(tdRowNum);
+            if (state.clickMode === "select") {
+              const tdPlay = el("td", { style: `${frozenStyle(3, false)}background:${bgColor};padding:2px 4px;border-bottom:1px solid #f1f5f9;text-align:center;height:${ROW_HEIGHT}px;` });
+              const playIcon = el("span", { style: "font-size:13px;cursor:pointer;color:#3b82f6;", title: "Play" }, "\u25B6");
+              playIcon.onclick = (e) => { e.stopPropagation(); triggerPlay(item); };
+              playIcon.onmouseenter = () => { playIcon.style.color = "#1d4ed8"; };
+              playIcon.onmouseleave = () => { playIcon.style.color = "#3b82f6"; };
+              tdPlay.appendChild(playIcon);
+              tr.appendChild(tdPlay);
+            }
+            for (let ci = 0; ci < visFields.length; ci++) {
+              const field = visFields[ci];
               const display = getCellDisplay(item, field);
               const w = getColWidth(field);
-              tr.appendChild(el("td", {
-                style: `padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;`,
+              const cSel = state.clickMode === "select" && isCellSelected(ri, ci);
+              const td = el("td", {
+                style: `padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;${state.clickMode === "select" ? "cursor:cell;" : ""}${cSel ? "background:#dbeafe;outline:1px solid #93c5fd;outline-offset:-1px;" : ""}`,
                 title: display
-              }, display));
+              }, display);
+              td.setAttribute("data-r", String(ri));
+              td.setAttribute("data-c", String(ci));
+              tr.appendChild(td);
             }
             tr.addEventListener("click", (e) => {
-              if (e.target === rowCb || tdSel.contains(e.target) || tdHide.contains(e.target)) return;
+              if (e.target === rowCb || tdSel.contains(e.target) || tdHide.contains(e.target) || tdRowNum.contains(e.target)) return;
+              if (state.clickMode === "select") return;
               triggerPlay(item);
             });
             tbody.appendChild(tr);
           }
           if (range.end < rows.length) {
-            const spacer = el("tr", {}); spacer.appendChild(el("td", { colSpan: visFields.length + 3, style: `height:${(rows.length - range.end) * ROW_HEIGHT}px;padding:0;border:0;` }));
+            const spacer = el("tr", {}); spacer.appendChild(el("td", { colSpan: visFields.length + frozenCols, style: `height:${(rows.length - range.end) * ROW_HEIGHT}px;padding:0;border:0;` }));
             tbody.appendChild(spacer);
           }
         }
@@ -747,6 +848,66 @@
           if (rafPending) return;
           rafPending = true;
           requestAnimationFrame(() => { renderVisibleRows(); rafPending = false; });
+        });
+        tbody.addEventListener("mousedown", (e) => {
+          if (state.clickMode !== "select") return;
+          const td = e.target.closest ? e.target.closest("td[data-r]") : null;
+          if (!td) return;
+          e.preventDefault();
+          const r = parseInt(td.getAttribute("data-r")), c = parseInt(td.getAttribute("data-c"));
+          if (e.shiftKey && state.cellAnchor) {
+            selectRect(state.cellAnchor.r, state.cellAnchor.c, r, c, e.ctrlKey);
+          } else if (e.ctrlKey) {
+            const key = cellKey(r, c);
+            if (state.cellSel.has(key)) state.cellSel.delete(key); else state.cellSel.add(key);
+            state.cellAnchor = { r: r, c: c };
+          } else {
+            state.cellSel.clear();
+            state.cellSel.add(cellKey(r, c));
+            state.cellAnchor = { r: r, c: c };
+          }
+          state.cellDragging = true;
+          updateCellHighlights();
+          const onMove = (ev) => {
+            if (!state.cellDragging) return;
+            const target = document.elementFromPoint(ev.clientX, ev.clientY);
+            const cell = target && target.closest ? target.closest("td[data-r]") : null;
+            if (!cell || !state.cellAnchor) return;
+            const cr = parseInt(cell.getAttribute("data-r")), cc = parseInt(cell.getAttribute("data-c"));
+            selectRect(state.cellAnchor.r, state.cellAnchor.c, cr, cc, false);
+            updateCellHighlights();
+          };
+          const onUp = () => {
+            state.cellDragging = false;
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+          };
+          document.addEventListener("mousemove", onMove);
+          document.addEventListener("mouseup", onUp);
+        });
+        function onCellCopyKey(e) {
+          if ((e.ctrlKey || e.metaKey) && e.key === "c" && state.clickMode === "select" && state.cellSel.size) {
+            e.preventDefault();
+            copyCellSelection();
+          }
+        }
+        document.addEventListener("keydown", onCellCopyKey);
+        tableWrap.addEventListener("contextmenu", (e) => {
+          if (state.clickMode !== "select" || !state.cellSel.size) return;
+          e.preventDefault();
+          document.querySelectorAll("[data-cell-ctx]").forEach((m) => m.remove());
+          const menu = el("div", { style: `position:fixed;top:${e.clientY}px;left:${e.clientX}px;background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:1000010;font-family:Segoe UI,Arial,sans-serif;` });
+          menu.setAttribute("data-cell-ctx", "1");
+          const copyItem = el("div", { style: "padding:6px 16px;font-size:12px;cursor:pointer;color:#111827;" }, "Copy");
+          copyItem.onmouseenter = () => { copyItem.style.background = "#e8f0fe"; };
+          copyItem.onmouseleave = () => { copyItem.style.background = ""; };
+          copyItem.onclick = () => { copyCellSelection(); menu.remove(); };
+          menu.appendChild(copyItem);
+          document.body.appendChild(menu);
+          setTimeout(() => {
+            const handler = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("mousedown", handler); } };
+            document.addEventListener("mousedown", handler);
+          }, 50);
         });
         function triggerPlay(item) {
           const smid = getSourceMediaId(item);
@@ -918,6 +1079,8 @@
           try { modal.remove(); } catch (_) {}
           try { stickyClose.remove(); } catch (_) {}
           document.querySelectorAll("[data-col-filter-popover]").forEach((p) => p.remove());
+          document.removeEventListener("keydown", onCellCopyKey);
+          document.querySelectorAll("[data-cell-ctx]").forEach((p) => p.remove());
         }
         stickyClose.onclick = close;
         backToSearchBtn.onclick = () => {
