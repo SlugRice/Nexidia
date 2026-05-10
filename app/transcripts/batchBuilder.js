@@ -1,4 +1,4 @@
-//[Last Update: 10:15 PM 5/7/2026]
+//[Last Update: 11:33 AM 5/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -32,7 +32,8 @@
     copies: 1,
     fileBase: "Batch",
     fileIncrement: "001",
-    fileSubIncrement: "a"
+    fileSubIncrement: "a",
+    outputFields: [{ storageName: "UDFVarchar110", displayName: "Trans_Id" }]
   };
   const METADATA_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
   const PINNED_NAMING = [
@@ -52,6 +53,11 @@
     const dn = (displayName || "").toLowerCase();
     return PAIR_DISPLAY.some(p => dn.includes(p));
   }
+  const PINNED_OUTPUT = [
+    { storageName: "UDFVarchar110", displayName: "Trans_Id" },
+    { storageName: "UDFVarchar1", displayName: "User to User" },
+    { storageName: "recordeddate", displayName: "Recorded Date" }
+  ];
   function resolveConfig(overrides) {
     return Object.assign({}, DEFAULTS, overrides || {});
   }
@@ -312,7 +318,7 @@
       getDisplayName: () => input.value
     };
   }
-  function openSettingsModal(currentCfg, onSave) {
+  function openSettingsModal(currentCfg, metadataFields, onSave) {
     let draft = Object.assign({}, currentCfg);
     const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const box = el("div", { style: "background:#fff;width:560px;max-height:88vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -424,6 +430,42 @@
     tsLabel.appendChild(tooltip("Adds a [M:SS] timestamp before each speaker turn. Useful when you need to reference specific moments in a call, but increases file size."));
     tsRow.appendChild(tsLabel);
     box.appendChild(tsRow);
+    box.appendChild(divider());
+    box.appendChild(sectionHead("Output Fields"));
+    box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:8px;" }, "Choose which metadata fields appear in each transcript header."));
+    const chipWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;" });
+    function renderChips() {
+      chipWrap.innerHTML = "";
+      for (let ci = 0; ci < draft.outputFields.length; ci++) {
+        const cf = draft.outputFields[ci];
+        const chip = el("div", { style: "display:inline-flex;align-items:center;gap:4px;background:#e8f0fe;color:#1d4ed8;padding:4px 10px;border-radius:6px;font-size:12px;" });
+        chip.appendChild(el("span", {}, cf.displayName));
+        const removeBtn = el("span", { style: "cursor:pointer;font-size:14px;color:#6b7280;margin-left:2px;" }, "\u2715");
+        ((idx) => { removeBtn.onclick = () => { draft.outputFields.splice(idx, 1); renderChips(); }; })(ci);
+        chip.appendChild(removeBtn);
+        chipWrap.appendChild(chip);
+      }
+    }
+    renderChips();
+    box.appendChild(chipWrap);
+    const addFieldRow = el("div", { style: "display:flex;gap:6px;align-items:flex-start;" });
+    const outputPicker = makeFieldPicker(metadataFields, PINNED_OUTPUT, { storageName: "", displayName: "" });
+    outputPicker.input.value = "";
+    outputPicker.input.placeholder = "Search fields to add...";
+    addFieldRow.appendChild(el("div", { style: "flex:1;" }, outputPicker.wrapper));
+    const addFieldBtn = el("button", { style: "padding:7px 14px;border-radius:6px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;font-size:12px;cursor:pointer;white-space:nowrap;" }, "+ Add");
+    addFieldBtn.onclick = () => {
+      const sn = outputPicker.getStorageName();
+      const dn = outputPicker.getDisplayName();
+      if (!sn || !dn) return;
+      if (draft.outputFields.some(f => f.storageName === sn)) return;
+      draft.outputFields.push({ storageName: sn, displayName: dn });
+      renderChips();
+      outputPicker.input.value = "";
+      delete outputPicker.input.dataset.storageName;
+    };
+    addFieldRow.appendChild(addFieldBtn);
+    box.appendChild(addFieldRow);
     box.appendChild(divider());
     box.appendChild(sectionHead("File Naming"));
     const filenameWrap = el("div", { style: "display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;overflow:hidden;margin-bottom:10px;font-size:13px;" });
@@ -692,7 +734,7 @@
         const bottomRow = el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
         const settingsBtn = el("button", { style: "padding:8px 14px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:13px;cursor:pointer;font-weight:600;" }, "\u2699\uFE0F Batch Settings");
         settingsBtn.onclick = () => {
-          openSettingsModal(cfg, (newCfg) => { cfg = newCfg; });
+          openSettingsModal(cfg, metadataFields, (newCfg) => { cfg = newCfg; });
         };
         const submitBtn = el("button", { style: "flex:1;padding:9px 14px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Build Batches");
         const saveLabel = el("label", { style: "display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;cursor:pointer;flex-shrink:0;" });
@@ -752,6 +794,7 @@
     UI.setProgress(3, "Resolving values to calls...", "Running search");
     const filters = [{ operator: "IN", type: "KEYWORD", parameterName: inputStorageName, value: values }];
     const searchFields = ["sourceMediaId", "recordeddate", "UDFVarchar1", "UDFVarchar110"];
+    for (const outF of cfg.outputFields) { if (!searchFields.includes(outF.storageName)) searchFields.push(outF.storageName); }
     if (!searchFields.includes(inputStorageName)) searchFields.push(inputStorageName);
     if (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField && !searchFields.includes(singleFileConfig.namingField)) {
       searchFields.push(singleFileConfig.namingField);
@@ -796,7 +839,8 @@
           transId: (r.UDFVarchar110 || "").toString(),
           userToUser: (r.UDFVarchar1 || "").toString(),
           leg: isSet ? (idx + 1) : null,
-          namingValue: (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField) ? (r[singleFileConfig.namingField] || "").toString().trim() : ""
+          namingValue: (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField) ? (r[singleFileConfig.namingField] || "").toString().trim() : "",
+          fieldValues: Object.fromEntries(cfg.outputFields.map(f => [f.storageName, (r[f.storageName] || "").toString()]))
         });
       });
     }
@@ -869,12 +913,9 @@
         } else {
           usedNames.set(baseName, 1);
         }
-        let body = "SourceMediaId=" + it.sourceMediaId + "\n";
-        body += "RecordedDate=" + it.recordeddate + "\n";
-        body += "Trans_Id=" + it.transId + "\n";
-        body += "UserToUser=" + it.userToUser + "\n";
+        let body = "";
+        for (const outF of cfg.outputFields) { body += outF.displayName + "=" + (it.fieldValues[outF.storageName] || "") + "\n"; }
         body += "CharCount=" + it.charCount + "\n\n";
-        body += (it.text || "").trim() + "\n";
         singleFiles.push({ name: baseName + ".txt", text: body });
       }
       UI.setProgress(90, "Creating ZIP...", `Files: ${singleFiles.length}`);
@@ -1000,9 +1041,11 @@
         cn++;
         const callLabel = String(cn).padStart(2, "0");
         const tk = it.charCount ? Math.floor(it.charCount / cfg.charsPerToken) : 0;
-        bodyText += `===BEGIN CALL===\nCallNumber=${callLabel}\nSourceMediaId=${it.sourceMediaId}\nRecordedDate=${it.recordeddate}\nTrans_Id=${it.transId}\nUserToUser=${it.userToUser}\nCharCount=${it.charCount}\nEstimatedTokens=${tk}\n`;
+        bodyText += `===BEGIN CALL===\nCallNumber=${callLabel}\n`;
+        for (const outF of cfg.outputFields) { bodyText += `${outF.displayName}=${it.fieldValues[outF.storageName] || ""}\n`; }
+        bodyText += `CharCount=${it.charCount}\nEstimatedTokens=${tk}\n`;
         bodyText += (it.text || "").trim() + "\n";
-        bodyText += `===END CALL===\nCallNumber=${callLabel}\nSourceMediaId=${it.sourceMediaId}\n\n`;
+        bodyText += `===END CALL===\nCallNumber=${callLabel}\n\n`;
       }
       bodyText += `===BATCH END===\nTotalChars=${totalChars}\nEstimatedTokens=${estTokens}\n`;
       for (let c = 0; c < cfg.copies; c++) {
