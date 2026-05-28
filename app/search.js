@@ -1,4 +1,4 @@
-//[Last Update: 9:45 AM 5/27/2026]
+//[Last Update: 7:36 AM 5/28/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -196,8 +196,125 @@
         }
 
         var dateChanged = false;
+let timeFilters = [];
 
         const allRows = [];
+
+  const timeFilterPills = el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;" });
+
+  function renderTimeFilterPills() {
+    timeFilterPills.innerHTML = "";
+    for (var i = 0; i < timeFilters.length; i++) {
+      (function(idx) {
+        var tf = timeFilters[idx];
+        var pill = el("div", { style: "display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:16px;background:#fef2f2;border:1px solid #fca5a5;font-size:12px;color:#991b1b;" });
+        var label = el("span", {}, tf.start + " \u2013 " + tf.end);
+        var x = el("span", { style: "cursor:pointer;color:#ef4444;font-weight:700;font-size:14px;line-height:1;" }, "\u00d7");
+        x.onclick = function() {
+          timeFilters.splice(idx, 1);
+          renderTimeFilterPills();
+        };
+        pill.appendChild(label);
+        pill.appendChild(x);
+        timeFilterPills.appendChild(pill);
+      })(i);
+    }
+  }
+
+  function openTimeFilterPopup() {
+    var overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;" });
+    var card = el("div", { style: "background:#fff;border-radius:12px;padding:22px;width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);" });
+
+    card.appendChild(el("div", { style: "font-size:14px;font-weight:700;margin-bottom:4px;" }, "Time Filter"));
+    card.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:12px;" }, "Add time windows to restrict results. Times are in your local timezone."));
+
+    var inputRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
+    inputRow.appendChild(el("span", { style: "font-size:12px;" }, "From"));
+    var startInput = el("input", { type: "time", style: "padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" });
+    inputRow.appendChild(startInput);
+    inputRow.appendChild(el("span", { style: "font-size:12px;" }, "To"));
+    var endInput = el("input", { type: "time", style: "padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" });
+    inputRow.appendChild(endInput);
+    var addBtn = el("button", { style: "padding:4px 12px;border-radius:6px;border:none;background:#3b82f6;color:#fff;cursor:pointer;font-size:12px;font-weight:700;" }, "Add");
+    inputRow.appendChild(addBtn);
+    card.appendChild(inputRow);
+
+    var listWrap = el("div", { style: "margin-bottom:14px;min-height:28px;" });
+    card.appendChild(listWrap);
+
+    var localFilters = timeFilters.map(function(f) { return { start: f.start, end: f.end }; });
+
+    function renderLocal() {
+      listWrap.innerHTML = "";
+      if (localFilters.length === 0) {
+        listWrap.appendChild(el("div", { style: "font-size:11px;color:#9ca3af;padding:4px 0;" }, "No time windows added."));
+        return;
+      }
+      for (var j = 0; j < localFilters.length; j++) {
+        (function(jj) {
+          var row = el("div", { style: "display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px;font-size:12px;" });
+          row.appendChild(el("span", {}, localFilters[jj].start + " \u2013 " + localFilters[jj].end));
+          var del = el("span", { style: "cursor:pointer;color:#ef4444;font-weight:700;font-size:14px;line-height:1;" }, "\u00d7");
+          del.onclick = function() {
+            localFilters.splice(jj, 1);
+            renderLocal();
+          };
+          row.appendChild(del);
+          listWrap.appendChild(row);
+        })(j);
+      }
+    }
+    renderLocal();
+
+    addBtn.onclick = function() {
+      if (!startInput.value || !endInput.value) { alert("Please select both a start and end time."); return; }
+      if (startInput.value >= endInput.value) { alert("Start time must be before end time."); return; }
+      localFilters.push({ start: startInput.value, end: endInput.value });
+      startInput.value = "";
+      endInput.value = "";
+      renderLocal();
+    };
+
+    var btnRow = el("div", { style: "display:flex;justify-content:flex-end;gap:8px;" });
+    var applyBtn = el("button", { style: "padding:6px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;cursor:pointer;font-size:12px;font-weight:700;" }, "Apply");
+    applyBtn.onclick = function() {
+      timeFilters = localFilters;
+      renderTimeFilterPills();
+      overlay.remove();
+    };
+    var cancelBtn = el("button", { style: "padding:6px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;font-size:12px;font-weight:600;" }, "Cancel");
+    cancelBtn.onclick = function() { overlay.remove(); };
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(applyBtn);
+    card.appendChild(btnRow);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+  }
+
+  function generateDateFilters(fromVal, toVal, activeTimeFilters) {
+    if (!activeTimeFilters || !activeTimeFilters.length) {
+      return { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
+    }
+    var filters = [];
+    var dStart = new Date(fromVal + "T12:00:00Z");
+    var dEnd = new Date(toVal + "T12:00:00Z");
+    for (var d = new Date(dStart.getTime()); d <= dEnd; d.setUTCDate(d.getUTCDate() + 1)) {
+      var ds = d.toISOString().slice(0, 10);
+      for (var t = 0; t < activeTimeFilters.length; t++) {
+        var tf = activeTimeFilters[t];
+        var localStart = new Date(ds + "T" + tf.start + ":00");
+        var localEnd = new Date(ds + "T" + tf.end + ":00");
+        var startISO = localStart.toISOString().slice(0, 19) + "Z";
+        var endAdj = new Date(localEnd.getTime() + 59000);
+        var endISO = endAdj.toISOString().slice(0, 19) + "Z";
+        filters.push({ parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: startISO, secondValue: endISO } });
+      }
+    }
+    if (filters.length === 1) return filters[0];
+    return { operator: "OR", invertOperator: false, filters: filters };
+  }
+
         function getActiveStorageNames(excludeEntry) {
           const set = new Set();
           for (let i = 0; i < allRows.length; i++) {
@@ -648,6 +765,8 @@
           fromDate.input.valueAsDate = newMonthAgo;
           toDate.input.valueAsDate = newToday;
           dateChanged = false;
+      timeFilters = [];
+      renderTimeFilterPills();
           while (panes.length > 1) {
             const last = panes[panes.length - 1];
             for (let i = 0; i < last.rows.length; i++) { const idx = allRows.indexOf(last.rows[i]); if (idx !== -1) allRows.splice(idx, 1); }
@@ -687,7 +806,13 @@
         card.appendChild(hr());
 
         const dateSectionWrapper = el("div", { style: "margin-bottom:0;" });
-        dateSectionWrapper.appendChild(section("Date Range"));
+        var dateHeaderRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin:10px 0;" });
+    dateHeaderRow.appendChild(el("div", { style: "font-size:15px;font-weight:600;" }, "Date Range"));
+    var addTimeFilterBtn = el("button", { style: "padding:4px 12px;border-radius:6px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:11px;font-weight:600;" }, "Add Time Filter");
+    addTimeFilterBtn.onclick = function() { openTimeFilterPopup(); };
+    dateHeaderRow.appendChild(addTimeFilterBtn);
+    dateSectionWrapper.appendChild(dateHeaderRow);
+    dateSectionWrapper.appendChild(timeFilterPills);
         const today = new Date();
         const monthAgo = new Date(today);
         monthAgo.setMonth(today.getMonth() - 1);
@@ -913,10 +1038,10 @@
 
             resetSession();
             const myToken = api.getShared("searchSessionToken");
-            const dateFilter = {
-              parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE",
-              value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) }
-            };
+            const dateFilter = generateDateFilters(fromVal, toVal, timeFilters);
+            if (timeFilters.length > 0 && dateFilter.filters && dateFilter.filters.length > 200) {
+              if (!confirm("Time filter across this date range generates " + dateFilter.filters.length + " date windows. This may be slow. Continue?")) return;
+            }
 
             const runSets = [];
             const globalExcludes = [];
@@ -1203,6 +1328,7 @@
           return {
             dateFrom: fromDate.input.value,
             dateTo: toDate.input.value,
+        timeFilters: timeFilters.map(function(f) { return { start: f.start, end: f.end }; }),
             panes: panes.map(function(pane) {
               const filters = [];
               const phrases = [];
@@ -1223,6 +1349,8 @@
         function deserializeSearch(payload) {
           if (payload.dateFrom) { fromDate.input.value = payload.dateFrom; dateChanged = true; }
           if (payload.dateTo) { toDate.input.value = payload.dateTo; dateChanged = true; }
+      timeFilters = (payload.timeFilters || []).map(function(f) { return { start: f.start, end: f.end }; });
+      renderTimeFilterPills();
           while (panes.length > 1) {
             const last = panes[panes.length - 1];
             for (let i = 0; i < last.rows.length; i++) { const idx = allRows.indexOf(last.rows[i]); if (idx !== -1) allRows.splice(idx, 1); }
