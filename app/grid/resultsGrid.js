@@ -1,4 +1,4 @@
-//[Last Update: 9:42 AM 5/27/2026]
+//[Last Update: 7:36 AM 5/28/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -55,6 +55,20 @@
         }
         function formatDisplay(fieldKey, raw) {
           if (!raw || raw === "0") return raw || "";
+          if (/^recordedDate/i.test(fieldKey) && /\dT\d/.test(raw)) {
+            var dt = new Date(raw);
+            if (!isNaN(dt.getTime())) {
+              var mm = dt.getUTCMonth() + 1;
+              var dd = dt.getUTCDate();
+              var yyyy = dt.getUTCFullYear();
+              var hh = dt.getUTCHours();
+              var min = dt.getUTCMinutes();
+              var sec = dt.getUTCSeconds();
+              var ampm = hh >= 12 ? "PM" : "AM";
+              var h12 = hh % 12 || 12;
+              return mm + "/" + dd + "/" + yyyy + " " + h12 + ":" + (min < 10 ? "0" : "") + min + ":" + (sec < 10 ? "0" : "") + sec + " " + ampm;
+            }
+          }
           if (xls && xls.formatDisplayValue) return xls.formatDisplayValue(fieldKey, raw);
           return raw;
         }
