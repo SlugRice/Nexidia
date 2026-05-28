@@ -27,6 +27,8 @@
         const MAX_ROWS = 50000;
         const BOOST_WARN = 100;
         const BOOST_SEVERE = 150;
+        const API_CAP = 10000;
+        const MAX_SPLIT_DEPTH = 8;
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
         const FORCE_TEXT_FIELDS = new Set([
@@ -197,8 +199,131 @@
 
         var dateChanged = false;
 let timeFilters = [];
+let timeFilters = [];
 
         const allRows = [];
+
+  const timeFilterPills = el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;" });
+
+  function renderTimeFilterPills() {
+    timeFilterPills.innerHTML = "";
+    for (var i = 0; i < timeFilters.length; i++) {
+      (function(idx) {
+        var tf = timeFilters[idx];
+        var pill = el("div", { style: "display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:16px;background:#fef2f2;border:1px solid #fca5a5;font-size:12px;color:#991b1b;" });
+        var label = el("span", {}, tf.start + " \u2013 " + tf.end);
+        var x = el("span", { style: "cursor:pointer;color:#ef4444;font-weight:700;font-size:14px;line-height:1;" }, "\u00d7");
+        x.onclick = function() {
+          timeFilters.splice(idx, 1);
+          renderTimeFilterPills();
+        };
+        pill.appendChild(label);
+        pill.appendChild(x);
+        timeFilterPills.appendChild(pill);
+      })(i);
+    }
+  }
+
+  function openTimeFilterPopup() {
+    var overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;" });
+    var card = el("div", { style: "background:#fff;border-radius:12px;padding:22px;width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);" });
+
+    card.appendChild(el("div", { style: "font-size:14px;font-weight:700;margin-bottom:4px;" }, "Time Filter"));
+    card.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:12px;" }, "Add time windows to restrict results. Times are in CST to match Nexidia timestamps."));
+
+    var inputRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
+    inputRow.appendChild(el("span", { style: "font-size:12px;" }, "From"));
+    var startInput = el("input", { type: "time", style: "padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" });
+    inputRow.appendChild(startInput);
+    inputRow.appendChild(el("span", { style: "font-size:12px;" }, "To"));
+    var endInput = el("input", { type: "time", style: "padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" });
+    inputRow.appendChild(endInput);
+    var addBtn = el("button", { style: "padding:4px 12px;border-radius:6px;border:none;background:#3b82f6;color:#fff;cursor:pointer;font-size:12px;font-weight:700;" }, "Add");
+    inputRow.appendChild(addBtn);
+    card.appendChild(inputRow);
+
+    var listWrap = el("div", { style: "margin-bottom:14px;min-height:28px;" });
+    card.appendChild(listWrap);
+
+    var localFilters = timeFilters.map(function(f) { return { start: f.start, end: f.end }; });
+
+    function renderLocal() {
+      listWrap.innerHTML = "";
+      if (localFilters.length === 0) {
+        listWrap.appendChild(el("div", { style: "font-size:11px;color:#9ca3af;padding:4px 0;" }, "No time windows added."));
+        return;
+      }
+      for (var j = 0; j < localFilters.length; j++) {
+        (function(jj) {
+          var row = el("div", { style: "display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px;font-size:12px;" });
+          row.appendChild(el("span", {}, localFilters[jj].start + " \u2013 " + localFilters[jj].end));
+          var del = el("span", { style: "cursor:pointer;color:#ef4444;font-weight:700;font-size:14px;line-height:1;" }, "\u00d7");
+          del.onclick = function() {
+            localFilters.splice(jj, 1);
+            renderLocal();
+          };
+          row.appendChild(del);
+          listWrap.appendChild(row);
+        })(j);
+      }
+    }
+    renderLocal();
+
+    addBtn.onclick = function() {
+      if (!startInput.value || !endInput.value) { alert("Please select both a start and end time."); return; }
+      if (startInput.value >= endInput.value) { alert("Start time must be before end time."); return; }
+      localFilters.push({ start: startInput.value, end: endInput.value });
+      startInput.value = "";
+      endInput.value = "";
+      renderLocal();
+    };
+
+    var btnRow = el("div", { style: "display:flex;justify-content:flex-end;gap:8px;" });
+    var applyBtn = el("button", { style: "padding:6px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;cursor:pointer;font-size:12px;font-weight:700;" }, "Apply");
+    applyBtn.onclick = function() {
+      timeFilters = localFilters;
+      renderTimeFilterPills();
+      overlay.remove();
+    };
+    var cancelBtn = el("button", { style: "padding:6px 18px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;font-size:12px;font-weight:600;" }, "Cancel");
+    cancelBtn.onclick = function() { overlay.remove(); };
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(applyBtn);
+    card.appendChild(btnRow);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+  }
+
+  function generateDateFilters(fromVal, toVal, activeTimeFilters) {
+    return { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
+  }
+
+  function filterRowsByTimeWindows(rows, windows) {
+    if (!windows || !windows.length) return rows;
+    var parsed = [];
+    for (var w = 0; w < windows.length; w++) {
+      var sp = windows[w].start.split(":");
+      var ep = windows[w].end.split(":");
+      parsed.push({ startMin: parseInt(sp[0], 10) * 60 + parseInt(sp[1], 10), endMin: parseInt(ep[0], 10) * 60 + parseInt(ep[1], 10) });
+    }
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var ts = getFieldValue(rows[i].row, "recordedDateTime");
+      if (!ts) continue;
+      var dt = new Date(ts);
+      if (isNaN(dt.getTime())) continue;
+      var totalMin = dt.getUTCHours() * 60 + dt.getUTCMinutes();
+      for (var p = 0; p < parsed.length; p++) {
+        if (totalMin >= parsed[p].startMin && totalMin < parsed[p].endMin) {
+          out.push(rows[i]);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
 
   const timeFilterPills = el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;" });
 
@@ -773,6 +898,8 @@ let timeFilters = [];
           dateChanged = false;
       timeFilters = [];
       renderTimeFilterPills();
+      timeFilters = [];
+      renderTimeFilterPills();
           while (panes.length > 1) {
             const last = panes[panes.length - 1];
             for (let i = 0; i < last.rows.length; i++) { const idx = allRows.indexOf(last.rows[i]); if (idx !== -1) allRows.splice(idx, 1); }
@@ -1158,6 +1285,10 @@ let timeFilters = [];
               progressUI.set("Filtering by time windows...", 90, "Pre-filter: " + result.finalRows.length + " rows");
               result.finalRows = filterRowsByTimeWindows(result.finalRows, timeFilters);
             }
+            if (timeFilters.length > 0) {
+              progressUI.set("Filtering by time windows...", 90, "Pre-filter: " + result.finalRows.length + " rows");
+              result.finalRows = filterRowsByTimeWindows(result.finalRows, timeFilters);
+            }
             if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
             sendToDispatcher(result, colPrefs);
@@ -1204,7 +1335,70 @@ let timeFilters = [];
           return "";
         }
 
-        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken, excludeGroup) {
+        
+        function splitDateFilter(df) {
+          var startMs = new Date(df.value.firstValue).getTime();
+          var endMs = new Date(df.value.secondValue).getTime();
+          if (endMs - startMs < 2000) return null;
+          var mid = Math.floor((startMs + endMs) / 2);
+          var midISO = new Date(mid).toISOString().slice(0, 19) + "Z";
+          var mid1ISO = new Date(mid + 1000).toISOString().slice(0, 19) + "Z";
+          return [
+            { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: df.value.firstValue, secondValue: midISO } },
+            { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: mid1ISO, secondValue: df.value.secondValue } }
+          ];
+        }
+
+        async function paginateChunk(opts, df, depth) {
+          var collected = [], from = 0;
+          while (true) {
+            if (!isSessionCurrent(opts.token)) return null;
+            var filters = opts.baseFilters.slice();
+            filters.push(df);
+            var payload = {
+              languageFilter: { languages: [] }, namedSetId: null,
+              from: from, to: from + PAGE_SIZE, fields: opts.fields,
+              query: { operator: "AND", invertOperator: false, filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: filters }] }
+            };
+            api.setShared("lastSearchQuery", payload);
+            var res;
+            try {
+              res = await fetch(SEARCH_URL, {
+                method: "POST", credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal: abortController.signal
+              });
+            } catch (err) {
+              if (err.name === "AbortError") return null;
+              throw err;
+            }
+            if (!res.ok) { var sr = await safeRead(res); throw new Error("Search failed: HTTP " + res.status + "\n" + sr.text.slice(0, 300)); }
+            var sr = await safeRead(res);
+            var rows = pickRows(sr.json);
+            if (!rows.length) break;
+            for (var ri = 0; ri < rows.length; ri++) collected.push(rows[ri]);
+            if (opts.onPage) opts.onPage(rows.length);
+            if (collected.length >= MAX_ROWS || rows.length < PAGE_SIZE) break;
+            from += PAGE_SIZE;
+            await sleep(250);
+          }
+          if (collected.length >= API_CAP && depth < MAX_SPLIT_DEPTH) {
+            var halves = splitDateFilter(df);
+            if (halves) {
+              if (opts.onSplit) opts.onSplit(depth + 1);
+              collected = [];
+              for (var hi = 0; hi < halves.length; hi++) {
+                var sub = await paginateChunk(opts, halves[hi], depth + 1);
+                if (sub === null) return null;
+                for (var si = 0; si < sub.length; si++) collected.push(sub[si]);
+              }
+            }
+          }
+          return collected;
+        }
+
+async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken, excludeGroup) {
           const merged = new Map();
           const passthroughNoKey = [];
           let totalFetched = 0;
@@ -1220,52 +1414,19 @@ let timeFilters = [];
               const expansion = phraseExpansions[ei];
               if (expansion.display !== null) distinctPhraseLabels.add(expansion.display);
               progressUI.set("Searching (" + labelPrefix + " " + (si + 1) + "/" + totalRuns + ")...", 25, "");
-              let from = 0;
-              const setRows = [];
-
-              while (true) {
-                if (!isSessionCurrent(sessionToken)) return null;
-                const interactionFilters = [];
-                if (runSet.keywordGroup) interactionFilters.push(runSet.keywordGroup);
-                if (expansion.group) interactionFilters.push(expansion.group);
-                if (excludeGroup) interactionFilters.push(excludeGroup);
-                interactionFilters.push(dateFilter);
-
-                const payload = {
-                  languageFilter: { languages: [] }, namedSetId: null,
-                  from, to: from + PAGE_SIZE, fields: baseFields,
-                  query: { operator: "AND", invertOperator: false, filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: interactionFilters }] }
-                };
-                api.setShared("lastSearchQuery", payload);
-                let res;
-                try {
-                  res = await fetch(SEARCH_URL, {
-                    method: "POST", credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                    signal: abortController.signal
-                  });
-                } catch (err) {
-                  if (err.name === "AbortError") return null;
-                  throw err;
-                }
-                if (!res.ok) { const sr = await safeRead(res); throw new Error("Search failed: HTTP " + res.status + "\n" + sr.text.slice(0, 300)); }
-                const sr = await safeRead(res);
-                const rows = pickRows(sr.json);
-                if (!rows.length) break;
-                for (let ri = 0; ri < rows.length; ri++) setRows.push(rows[ri]);
-                totalFetched += rows.length;
-                progressUI.set(
-                  "Searching (" + labelPrefix + " " + (si + 1) + "/" + totalRuns + ")...",
-                  Math.min(80, 25 + Math.floor((si / Math.max(1, totalRuns)) * 55)),
-                  "Set: " + setRows.length + " \u2022 Total: " + totalFetched
-                );
-                if (setRows.length >= MAX_ROWS || rows.length < PAGE_SIZE) break;
-                from += PAGE_SIZE;
-                await sleep(250);
-              }
-
-              const rowLabel = expansion.display !== null ? expansion.display : null;
+              var _bf = [];
+              if (runSet.keywordGroup) _bf.push(runSet.keywordGroup);
+              if (expansion.group) _bf.push(expansion.group);
+              if (excludeGroup) _bf.push(excludeGroup);
+              var _pct = Math.min(80, 25 + Math.floor((si / Math.max(1, totalRuns)) * 55));
+              var _lbl = "Searching (" + labelPrefix + " " + (si + 1) + "/" + totalRuns + ")...";
+              const setRows = await paginateChunk({
+                token: sessionToken, baseFilters: _bf, fields: baseFields,
+                onPage: function(cnt) { totalFetched += cnt; progressUI.set(_lbl, _pct, "Total: " + totalFetched); },
+                onSplit: function(d) { progressUI.set("Auto-splitting (depth " + d + ")...", _pct, "Total: " + totalFetched); }
+              }, dateFilter, 0);
+              if (setRows === null) return null;
+const rowLabel = expansion.display !== null ? expansion.display : null;
               for (let ri = 0; ri < setRows.length; ri++) {
                 const r = setRows[ri];
                 const transId = getFieldValue(r, "UDFVarchar110");
@@ -1336,6 +1497,7 @@ let timeFilters = [];
             dateFrom: fromDate.input.value,
             dateTo: toDate.input.value,
         timeFilters: timeFilters.map(function(f) { return { start: f.start, end: f.end }; }),
+        timeFilters: timeFilters.map(function(f) { return { start: f.start, end: f.end }; }),
             panes: panes.map(function(pane) {
               const filters = [];
               const phrases = [];
@@ -1356,6 +1518,8 @@ let timeFilters = [];
         function deserializeSearch(payload) {
           if (payload.dateFrom) { fromDate.input.value = payload.dateFrom; dateChanged = true; }
           if (payload.dateTo) { toDate.input.value = payload.dateTo; dateChanged = true; }
+      timeFilters = (payload.timeFilters || []).map(function(f) { return { start: f.start, end: f.end }; });
+      renderTimeFilterPills();
       timeFilters = (payload.timeFilters || []).map(function(f) { return { start: f.start, end: f.end }; });
       renderTimeFilterPills();
           while (panes.length > 1) {
