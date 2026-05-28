@@ -226,7 +226,7 @@ let timeFilters = [];
     var card = el("div", { style: "background:#fff;border-radius:12px;padding:22px;width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);" });
 
     card.appendChild(el("div", { style: "font-size:14px;font-weight:700;margin-bottom:4px;" }, "Time Filter"));
-    card.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:12px;" }, "Add time windows to restrict results. Times are in your local timezone."));
+    card.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:12px;" }, "Add time windows to restrict results. Times are in CST to match Nexidia timestamps."));
 
     var inputRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
     inputRow.appendChild(el("span", { style: "font-size:12px;" }, "From"));
@@ -310,7 +310,7 @@ let timeFilters = [];
       if (!ts) continue;
       var dt = new Date(ts);
       if (isNaN(dt.getTime())) continue;
-      var totalMin = dt.getHours() * 60 + dt.getMinutes();
+      var totalMin = dt.getUTCHours() * 60 + dt.getUTCMinutes();
       for (var p = 0; p < parsed.length; p++) {
         if (totalMin >= parsed[p].startMin && totalMin < parsed[p].endMin) {
           out.push(rows[i]);
