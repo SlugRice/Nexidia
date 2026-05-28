@@ -293,26 +293,32 @@ let timeFilters = [];
   }
 
   function generateDateFilters(fromVal, toVal, activeTimeFilters) {
-    if (!activeTimeFilters || !activeTimeFilters.length) {
-      return { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
+    return { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
+  }
+
+  function filterRowsByTimeWindows(rows, windows) {
+    if (!windows || !windows.length) return rows;
+    var parsed = [];
+    for (var w = 0; w < windows.length; w++) {
+      var sp = windows[w].start.split(":");
+      var ep = windows[w].end.split(":");
+      parsed.push({ startMin: parseInt(sp[0], 10) * 60 + parseInt(sp[1], 10), endMin: parseInt(ep[0], 10) * 60 + parseInt(ep[1], 10) });
     }
-    var filters = [];
-    var dStart = new Date(fromVal + "T12:00:00Z");
-    var dEnd = new Date(toVal + "T12:00:00Z");
-    for (var d = new Date(dStart.getTime()); d <= dEnd; d.setUTCDate(d.getUTCDate() + 1)) {
-      var ds = d.toISOString().slice(0, 10);
-      for (var t = 0; t < activeTimeFilters.length; t++) {
-        var tf = activeTimeFilters[t];
-        var localStart = new Date(ds + "T" + tf.start + ":00");
-        var localEnd = new Date(ds + "T" + tf.end + ":00");
-        var startISO = localStart.toISOString().slice(0, 19) + "Z";
-        var endAdj = new Date(localEnd.getTime() + 59000);
-        var endISO = endAdj.toISOString().slice(0, 19) + "Z";
-        filters.push({ parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: startISO, secondValue: endISO } });
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var ts = getFieldValue(rows[i].row, "recordedDateTime");
+      if (!ts) continue;
+      var dt = new Date(ts);
+      if (isNaN(dt.getTime())) continue;
+      var totalMin = dt.getHours() * 60 + dt.getMinutes();
+      for (var p = 0; p < parsed.length; p++) {
+        if (totalMin >= parsed[p].startMin && totalMin < parsed[p].endMin) {
+          out.push(rows[i]);
+          break;
+        }
       }
     }
-    if (filters.length === 1) return filters[0];
-    return { operator: "OR", invertOperator: false, filters: filters };
+    return out;
   }
 
         function getActiveStorageNames(excludeEntry) {
@@ -1039,9 +1045,6 @@ let timeFilters = [];
             resetSession();
             const myToken = api.getShared("searchSessionToken");
             const dateFilter = generateDateFilters(fromVal, toVal, timeFilters);
-            if (timeFilters.length > 0 && dateFilter.filters && dateFilter.filters.length > 200) {
-              if (!confirm("Time filter across this date range generates " + dateFilter.filters.length + " date windows. This may be slow. Continue?")) return;
-            }
 
             const runSets = [];
             const globalExcludes = [];
@@ -1151,6 +1154,10 @@ let timeFilters = [];
               ? { operator: "OR", invertOperator: true, filters: globalExcludes } : null;
             const result = await executeSearch(runSets, searchFields, dateFilter, "Search", myToken, excludeGroup);
             if (result === null) { progressUI.remove(); return; }
+            if (timeFilters.length > 0) {
+              progressUI.set("Filtering by time windows...", 90, "Pre-filter: " + result.finalRows.length + " rows");
+              result.finalRows = filterRowsByTimeWindows(result.finalRows, timeFilters);
+            }
             if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
             sendToDispatcher(result, colPrefs);
