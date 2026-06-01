@@ -1,4 +1,4 @@
-//[Last Update: 4:55 PM 6/1/2026]
+//[Last Update: 6:30 PM 6/1/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -24,7 +24,7 @@
   ];
 
   //##> Report modules register themselves here at load time.
-  //##> The hub lazy-loads modules from the repo; once eval'd they call register().
+  //##> Window-level object ensures all closures share the same defs.
   if (!window.__NEXIDIA_REPORT_DEFS__) window.__NEXIDIA_REPORT_DEFS__ = {};
   const reportDefs = window.__NEXIDIA_REPORT_DEFS__;
   const reportRegistry = {
@@ -96,6 +96,23 @@
       .split(/[\n,]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+  }
+
+  function generateDayChunks(fromStr, toStr) {
+    const chunks = [];
+    const start = new Date(fromStr + "T00:00:00Z");
+    const end = new Date(toStr + "T23:59:59Z");
+    const d = new Date(start);
+    while (d <= end) {
+      const iso = d.toISOString().slice(0, 10);
+      chunks.push({
+        first: iso + "T00:00:00Z",
+        second: iso + "T23:59:59Z",
+        label: iso
+      });
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return chunks;
   }
 
   function makeFieldPicker(metadataFields, defaultSn) {
@@ -600,6 +617,44 @@
           const cappedPanes = [];
           let totalFetched = 0;
 
+          //##> Helper: run a paginated search for a single filter set.
+          async function runPaginatedSearch(filters, progressPrefix, progressBase, progressSpan) {
+            const results = [];
+            let from = 0;
+            while (true) {
+              const payload = {
+                from, to: from + PAGE_SIZE,
+                fields: searchFields,
+                query: { operator: "AND", filters: [{ filterType: "interactions", filters }] }
+              };
+              let res;
+              try {
+                res = await fetch(SEARCH_URL, {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload)
+                });
+              } catch (err) {
+                throw new Error("Search request failed: " + err.message);
+              }
+              if (!res.ok) {
+                const body = await res.text().catch(() => "");
+                throw new Error("Search failed: HTTP " + res.status + "\n" + body.slice(0, 200));
+              }
+              const json = await res.json();
+              const rows = Array.isArray(json.results) ? json.results : [];
+              for (const r of rows) results.push(r);
+              if (progressPrefix) {
+                const pct = progressBase + Math.floor((results.length / Math.max(1, RESULT_CAP)) * progressSpan);
+                progress.set(Math.min(progressBase + progressSpan, pct), progressPrefix, "Rows: " + results.length);
+              }
+              if (rows.length < PAGE_SIZE || results.length >= MAX_ROWS) break;
+              from += PAGE_SIZE;
+              await sleep(250);
+            }
+            return results;
+          }
+
           for (let pi = 0; pi < panes.length; pi++) {
             const pane = panes[pi];
             const paneLabel = "Search " + String.fromCharCode(65 + pi);
@@ -614,63 +669,76 @@
               if (!searchFields.includes(sn)) searchFields.push(sn);
             }
             if (!kwFilters.length && panes.length > 1) continue;
-            const paneFilters = [dateFilter];
-            for (const f of kwFilters) paneFilters.push(f);
-            if (activeReport.presetFilters) { for (const pf of activeReport.presetFilters) paneFilters.push(pf); }
 
-            const paneResults = [];
-            let from = 0;
-            while (true) {
-              const payload = {
-                from, to: from + PAGE_SIZE,
-                fields: searchFields,
-                query: { operator: "AND", filters: [{ filterType: "interactions", filters: paneFilters }] }
-              };
-              let res;
-              try {
-                res = await fetch(SEARCH_URL, {
-                  method: "POST", credentials: "include",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(payload)
-                });
-              } catch (err) {
-                alert("Search request failed: " + err.message);
-                progress.remove();
-                return;
-              }
-              if (!res.ok) {
-                const body = await res.text().catch(() => "");
-                alert("Search failed: HTTP " + res.status + "\n" + body.slice(0, 200));
-                progress.remove();
-                return;
-              }
-              const json = await res.json();
-              const rows = Array.isArray(json.results) ? json.results : [];
-              for (const r of rows) paneResults.push(r);
-              const panePct = Math.min(28, 8 + Math.floor(((pi + paneResults.length / Math.max(1, RESULT_CAP)) / panes.length) * 20));
-              progress.set(panePct, "Searching " + paneLabel + "...", "Pane rows: " + paneResults.length);
-              if (rows.length < PAGE_SIZE || paneResults.length >= MAX_ROWS) break;
-              from += PAGE_SIZE;
-              await sleep(250);
+            const basePaneFilters = [];
+            for (const f of kwFilters) basePaneFilters.push(f);
+            if (activeReport.presetFilters) { for (const pf of activeReport.presetFilters) basePaneFilters.push(pf); }
+
+            const paneProgressBase = 8 + Math.floor((pi / panes.length) * 20);
+            const paneProgressSpan = Math.floor(20 / panes.length);
+
+            //##> First attempt: full date range.
+            let paneResults;
+            try {
+              paneResults = await runPaginatedSearch(
+                [dateFilter, ...basePaneFilters],
+                "Searching " + paneLabel + "...",
+                paneProgressBase, paneProgressSpan
+              );
+            } catch (err) {
+              alert(err.message);
+              progress.remove();
+              return;
             }
 
+            //##> If capped, re-run in daily chunks to bypass server limit.
             if (paneResults.length >= RESULT_CAP) {
-              cappedPanes.push(paneLabel);
+              progress.set(paneProgressBase, "Chunking " + paneLabel + "...", "Hit " + RESULT_CAP.toLocaleString() + " limit, splitting by day");
+              paneResults = [];
+              let paneCapped = false;
+              const chunks = generateDayChunks(fromVal, toVal);
+              for (let ci = 0; ci < chunks.length; ci++) {
+                const chunk = chunks[ci];
+                const chunkDateFilter = {
+                  parameterName: "recordedDateTime",
+                  operator: "BETWEEN",
+                  type: "DATE",
+                  value: { firstValue: chunk.first, secondValue: chunk.second }
+                };
+                let chunkResults;
+                try {
+                  chunkResults = await runPaginatedSearch(
+                    [chunkDateFilter, ...basePaneFilters],
+                    null, 0, 0
+                  );
+                } catch (err) {
+                  alert(err.message);
+                  progress.remove();
+                  return;
+                }
+                for (const r of chunkResults) paneResults.push(r);
+                if (chunkResults.length >= RESULT_CAP) paneCapped = true;
+                const chunkPct = paneProgressBase + Math.floor(((ci + 1) / chunks.length) * paneProgressSpan);
+                progress.set(Math.min(paneProgressBase + paneProgressSpan, chunkPct), "Chunking " + paneLabel + "...", "Day " + (ci + 1) + "/" + chunks.length + " (" + chunk.label + ") | Rows: " + paneResults.length);
+                await sleep(100);
+              }
+              if (paneCapped) cappedPanes.push(paneLabel);
             }
+
             for (const r of paneResults) {
               const tid = getFieldValue(r, "UDFVarchar110").trim();
               const key = (tid && tid !== "0") ? tid : ("_smid_" + (r.sourceMediaId || ""));
               if (!merged.has(key)) merged.set(key, r);
             }
             totalFetched += paneResults.length;
-            progress.set(Math.min(28, 8 + Math.floor(((pi + 1) / panes.length) * 20)), "Searching...", "Pane " + (pi + 1) + "/" + panes.length + " | Unique: " + merged.size + " | Total: " + totalFetched);
+            progress.set(Math.min(28, paneProgressBase + paneProgressSpan), "Searching...", "Pane " + (pi + 1) + "/" + panes.length + " | Unique: " + merged.size + " | Total: " + totalFetched);
           }
 
           if (cappedPanes.length) {
             const proceed = confirm(
-              "The following searches hit the " + RESULT_CAP.toLocaleString() + " result limit and may be incomplete:\n\n" +
+              "The following searches had individual days that hit the " + RESULT_CAP.toLocaleString() + " result limit:\n\n" +
               cappedPanes.join(", ") +
-              "\n\nTry narrowing your date range or adding filters to get complete results.\n\nProceed with current results?"
+              "\n\nSome results for those days may be missing. Try narrowing your filters further.\n\nProceed with current results?"
             );
             if (!proceed) { progress.remove(); return; }
           }
