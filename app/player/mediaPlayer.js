@@ -1,4 +1,4 @@
-//[Last Update: 9:44 AM 5/27/2026]
+//[Last Update: 1:40 PM 6/1/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -67,8 +67,8 @@ const el = (tag, props, ...children) => {
 };
 
 /* ───────────────────── BUILD PLAYER PANE ───────────────────── */
-function buildPlayerPane(gridCard) {
-  const DEFAULT_H = "85vh";
+function buildPlayerPane(gridCard, initialHeight) {
+  const DEFAULT_H = initialHeight || "85vh";
   const pane = el("div", {
     style: `height:${DEFAULT_H};min-height:200px;max-height:95vh;border-top:1px solid #e5e7eb;background:#111827;display:flex;flex-direction:column;position:relative;flex-shrink:0;font-family:Segoe UI,Arial,sans-serif;`
   });
@@ -138,13 +138,15 @@ function buildPlayerPane(gridCard) {
     style: "display:flex;align-items:center;justify-content:center;gap:20px;padding:8px 16px;background:#0f172a;border-bottom:1px solid #1e293b;flex-shrink:0;"
   });
   const prevNavBtn = el("button", {
-    style: "font-size:14px;font-weight:700;padding:8px 18px;border-radius:8px;background:#1e293b;color:#e2e8f0;border:1px solid #374151;cursor:pointer;"
+    style: "font-size:14px;font-weight:700;padding:8px 18px;border-radius:8px;background:#1e293b;color:#e2e8f0;border:1px solid #374151;cursor:pointer;",
+    title: "Previous"
   }, "\u25C0 Prev");
   const navLabel = el("div", {
     style: "font-size:18px;font-weight:700;color:#94a3b8;min-width:100px;text-align:center;"
   }, "");
   const nextNavBtn = el("button", {
-    style: "font-size:14px;font-weight:700;padding:8px 18px;border-radius:8px;background:#1e293b;color:#e2e8f0;border:1px solid #374151;cursor:pointer;"
+    style: "font-size:14px;font-weight:700;padding:8px 18px;border-radius:8px;background:#1e293b;color:#e2e8f0;border:1px solid #374151;cursor:pointer;",
+    title: "Next"
   }, "Next \u25B6");
   navBar.appendChild(prevNavBtn);
   navBar.appendChild(navLabel);
@@ -170,15 +172,16 @@ function buildPlayerPane(gridCard) {
     style: "display:flex;align-items:center;gap:6px;padding:6px 10px;background:#0f172a;flex-shrink:0;border-top:1px solid #1e293b;"
   });
   const tBtnStyle = "min-width:36px;height:32px;border-radius:6px;background:#1e293b;color:#94a3b8;border:1px solid #374151;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;";
-  const outerPrevBtn = el("button", { style: tBtnStyle }, "\u23EE");
-  const innerPrevBtn = el("button", { style: tBtnStyle }, "\u23EA");
-  const stopBtn = el("button", { style: tBtnStyle }, "\u23F9");
-  const pauseBtn = el("button", { style: tBtnStyle }, "\u23F8");
+  const outerPrevBtn = el("button", { style: tBtnStyle, title: "Previous event" }, "\u23EE");
+  const innerPrevBtn = el("button", { style: tBtnStyle, title: "Skip backward" }, "\u23EA");
+  const stopBtn = el("button", { style: tBtnStyle, title: "Stop" }, "\u23F9");
+  const pauseBtn = el("button", { style: tBtnStyle, title: "Pause" }, "\u23F8");
   const playBtn = el("button", {
-    style: "min-width:36px;height:32px;border-radius:6px;background:#3b82f6;color:#fff;border:0;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
+    style: "min-width:36px;height:32px;border-radius:6px;background:#3b82f6;color:#fff;border:0;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;",
+    title: "Play"
   }, "\u25B6");
-  const innerNextBtn = el("button", { style: tBtnStyle }, "\u23E9");
-  const outerNextBtn = el("button", { style: tBtnStyle }, "\u23ED");
+  const innerNextBtn = el("button", { style: tBtnStyle, title: "Skip forward" }, "\u23E9");
+  const outerNextBtn = el("button", { style: tBtnStyle, title: "Next event" }, "\u23ED");
   const timeEl = el("div", {
     style: "font-size:11px;color:#94a3b8;flex-shrink:0;font-family:monospace;min-width:90px;margin-left:6px;"
   }, "00:00 / 00:00");
@@ -342,8 +345,10 @@ function updatePlayhead(playheadDiv, currentMs, durationMs) {
 }
 
 /* ───────────────────── OPEN PLAYER PANE ───────────────────── */
-function openPlayerPane(gridCard, onClose) {
-  const els = buildPlayerPane(gridCard);
+function openPlayerPane(gridCard, onClose, options) {
+  const opts = options || {};
+  const configuredHeight = opts.initialHeight || "85vh";
+  const els = buildPlayerPane(gridCard, opts.initialHeight);
   let audio = null;
   let audioCtx = null;
   let audioSource = null;
@@ -369,6 +374,7 @@ function openPlayerPane(gridCard, onClose) {
   let searchMatches = [];
   let searchMatchIdx = -1;
   let autoScrollBeforeSearch = true;
+  let gridNav = null;
   const eventsCache = new Map();
 
   const saved = loadSavedSpeed();
@@ -654,10 +660,18 @@ function openPlayerPane(gridCard, onClose) {
   }
 
   els.prevNavBtn.onclick = () => {
-    if (playlist && playlistIdx > 0) loadPlaylistIndex(playlistIdx - 1);
+    if (gridNav && !playlist) {
+      if (gridNav.currentIndex > 0) gridNav.onNavigate(gridNav.currentIndex - 1);
+    } else if (playlist && playlistIdx > 0) {
+      loadPlaylistIndex(playlistIdx - 1);
+    }
   };
   els.nextNavBtn.onclick = () => {
-    if (playlist && playlistIdx < playlist.length - 1) loadPlaylistIndex(playlistIdx + 1);
+    if (gridNav && !playlist) {
+      if (gridNav.currentIndex < gridNav.items.length - 1) gridNav.onNavigate(gridNav.currentIndex + 1);
+    } else if (playlist && playlistIdx < playlist.length - 1) {
+      loadPlaylistIndex(playlistIdx + 1);
+    }
   };
 
   /* ── Transport button handlers ── */
@@ -690,8 +704,48 @@ function openPlayerPane(gridCard, onClose) {
     all.sort((a, b) => a - b);
     return all;
   }
+  /* ── Grid navigation ── */
+  function setGridNav(ctx) {
+    gridNav = ctx;
+    updateOuterButtonState();
+    updateGridNavUI();
+  }
+  function updateGridNavUI() {
+    if (gridNav && !playlist) {
+      els.prevNavBtn.style.display = "";
+      els.nextNavBtn.style.display = "";
+      els.navLabel.textContent = `${gridNav.currentIndex + 1} / ${gridNav.items.length}`;
+      els.prevNavBtn.style.opacity = gridNav.currentIndex <= 0 ? "0.4" : "1";
+      els.nextNavBtn.style.opacity = gridNav.currentIndex >= gridNav.items.length - 1 ? "0.4" : "1";
+      els.prevNavBtn.title = gridNav.currentIndex <= 0 ? "No previous call" : "Previous call";
+      els.nextNavBtn.title = gridNav.currentIndex >= gridNav.items.length - 1 ? "No next call" : "Next call";
+    }
+  }
+  function updateOuterButtonState() {
+    if (gridNav && !isStandaloneMode) {
+      const canPrev = gridNav.currentIndex > 0;
+      const canNext = gridNav.currentIndex < gridNav.items.length - 1;
+      els.outerPrevBtn.disabled = !canPrev;
+      els.outerPrevBtn.style.opacity = canPrev ? "1" : "0.3";
+      els.outerPrevBtn.title = canPrev ? "Previous call" : "No previous call";
+      els.outerNextBtn.disabled = !canNext;
+      els.outerNextBtn.style.opacity = canNext ? "1" : "0.3";
+      els.outerNextBtn.title = canNext ? "Next call" : "No next call";
+    } else if (isStandaloneMode) {
+      const allEvts = getAllSortedEventMs();
+      const hasEvents = allEvts.length > 0;
+      els.outerPrevBtn.disabled = !hasEvents;
+      els.outerPrevBtn.style.opacity = hasEvents ? "1" : "0.3";
+      els.outerPrevBtn.title = hasEvents ? "Previous event" : "No events detected";
+      els.outerNextBtn.disabled = !hasEvents;
+      els.outerNextBtn.style.opacity = hasEvents ? "1" : "0.3";
+      els.outerNextBtn.title = hasEvents ? "Next event" : "No events detected";
+    }
+  }
   els.outerPrevBtn.onclick = () => {
-    if (isStandaloneMode) {
+    if (gridNav && !isStandaloneMode) {
+      if (gridNav.currentIndex > 0) gridNav.onNavigate(gridNav.currentIndex - 1);
+    } else if (isStandaloneMode) {
       /* Jump to previous event */
       const allEvts = getAllSortedEventMs();
       const curMs = audio ? audio.currentTime * 1000 : 0;
@@ -706,7 +760,9 @@ function openPlayerPane(gridCard, onClose) {
     }
   };
   els.outerNextBtn.onclick = () => {
-    if (isStandaloneMode) {
+    if (gridNav && !isStandaloneMode) {
+      if (gridNav.currentIndex < gridNav.items.length - 1) gridNav.onNavigate(gridNav.currentIndex + 1);
+    } else if (isStandaloneMode) {
       const allEvts = getAllSortedEventMs();
       const curMs = audio ? audio.currentTime * 1000 : 0;
       let target = null;
@@ -883,7 +939,7 @@ function openPlayerPane(gridCard, onClose) {
     els.playheadDiv.style.left = "0%";
     setTitle(label || `SMID ${smid}`);
     setStatus("Preparing...");
-    els.pane.style.height = "85vh";
+    els.pane.style.height = configuredHeight;
     els.pane.style.overflow = "visible";
     els.hideBtn.textContent = "Hide Player";
 
@@ -953,6 +1009,7 @@ function openPlayerPane(gridCard, onClose) {
       })).filter(ev => ev.ms > 0);
       eventsCache.set(smid, parsedEvts);
     }
+    updateOuterButtonState();
     if (transcriptResult.status === "fulfilled" && transcriptResult.value) {
       const raw = transcriptResult.value;
       transcriptRows = raw.transcriptRows || raw.TranscriptRows || raw.rows || [];
@@ -1030,7 +1087,7 @@ function openPlayerPane(gridCard, onClose) {
     }, { passive: true });
   }
 
-  return { loadCall, stopAudio, setPlaylist, loadPlaylistIndex, els };
+  return { loadCall, stopAudio, setPlaylist, loadPlaylistIndex, setGridNav, els };
 }
 
 api.registerTool({
