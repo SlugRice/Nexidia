@@ -1,4 +1,4 @@
-//[Last Update: 10:05 AM 6/1/2026]
+//[Last Update: 4:55 PM 6/1/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -11,10 +11,13 @@
   const METADATA_URL = BASE + "/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
   const PAGE_SIZE = 1000;
   const MAX_ROWS = 50000;
+  const RESULT_CAP = 10000;
   const CONCURRENCY = 50;
   const DELAY_MS = 20;
   const FETCH_RETRIES = 3;
   const RETRY_BACKOFF = 600;
+  const PEEK = 80;
+  const GAP = 14;
 
   const DEFAULT_FILTER_STORAGES = [
     "UDFVarchar10", "siteName", "DNIS", "UDFVarchar110"
@@ -219,13 +222,20 @@
 
         let activeReport = null;
         let configGetter = null;
-        const filterRows = [];
+        const panes = [];
+        let activePaneIndex = 0;
+        let ghostPaneEl = null;
+        let carouselTrack = null;
+        let dotsRow = null;
+        let carouselViewport = null;
+        let fadeMaskLeft = null;
+        let resizeHandler = null;
 
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const card = el("div", { style: "background:#f8fafc;width:720px;max-height:90vh;overflow-y:auto;border-radius:14px;padding:22px 24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
 
         const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;" }, "✕");
-        closeBtn.onclick = () => modal.remove();
+        closeBtn.onclick = () => { if (resizeHandler) window.removeEventListener("resize", resizeHandler); modal.remove(); };
         card.appendChild(closeBtn);
 
         card.appendChild(el("div", { style: "font-size:18px;font-weight:700;color:#111827;margin-bottom:14px;" }, "Reports"));
@@ -271,11 +281,7 @@
 
         card.appendChild(hr());
 
-        card.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Filters"));
-        const filtersContainer = el("div", {});
-        card.appendChild(filtersContainer);
-
-        function addFilterRow(storageName) {
+        function buildRowEntry(storageName) {
           const row = { picker: null, valueInput: null, rowEl: null };
           const removeBtn = el("button", { style: "width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#aaa;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;" }, "X");
           const picker = makeFieldPicker(metadataFields, storageName || "");
@@ -333,23 +339,192 @@
           row.picker = picker;
           row.valueInput = valueInput;
           row.rowEl = rowEl;
-          filterRows.push(row);
-          filtersContainer.appendChild(rowEl);
           removeBtn.onclick = () => {
+            removeAdjacentAndLabel(rowEl);
             rowEl.remove();
-            const idx = filterRows.indexOf(row);
-            if (idx !== -1) filterRows.splice(idx, 1);
+            for (const p of panes) {
+              const idx = p.rows.indexOf(row);
+              if (idx !== -1) { p.rows.splice(idx, 1); break; }
+            }
           };
           return row;
         }
 
-        for (const sn of DEFAULT_FILTER_STORAGES) {
-          addFilterRow(sn);
+        function makeAndLabel() {
+          const wrap = el("div", { style: "display:flex;height:16px;pointer-events:none;align-items:center;" });
+          const spacer = el("div", { style: "width:210px;flex-shrink:0;" });
+          const label = el("div", { style: "flex:1;text-align:center;font-size:10px;font-weight:700;letter-spacing:2px;color:rgba(59,130,246,0.28);" }, "AND");
+          wrap.appendChild(spacer);
+          wrap.appendChild(label);
+          wrap.dataset.andLabel = "1";
+          return wrap;
         }
 
-        const addFilterBtn = el("button", { style: "margin-top:8px;padding:6px 12px;border-radius:8px;border:1px solid #3b82f6;background:#fff;color:#3b82f6;cursor:pointer;font-size:12px;" }, "+ Add Filter");
-        addFilterBtn.onclick = () => { addFilterRow(""); };
-        card.appendChild(addFilterBtn);
+        function removeAdjacentAndLabel(rowEl) {
+          const prev = rowEl.previousElementSibling;
+          const next = rowEl.nextElementSibling;
+          if (prev && prev.dataset.andLabel) { prev.remove(); return; }
+          if (next && next.dataset.andLabel) { next.remove(); }
+        }
+
+        function buildPaneEl(paneIndex) {
+          const paneEl = el("div", { style: "background:#fff;border-radius:14px;border:1px solid rgba(59,130,246,0.18);padding:18px 20px;flex-shrink:0;position:relative;box-shadow:0 1px 4px rgba(59,130,246,0.06);" });
+          paneEl.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#1e3a5f;margin-bottom:14px;" }, "Search Fields"));
+          const rowsContainer = el("div", {});
+          paneEl.appendChild(rowsContainer);
+          const addBtn = el("button", { style: "margin-top:12px;padding:6px 12px;border-radius:8px;border:1px solid #3b82f6;background:#fff;color:#3b82f6;cursor:pointer;font-size:12px;" }, "+ Add Filter");
+          paneEl.appendChild(addBtn);
+          const orBtn = el("button", { style: "position:absolute;right:-20px;top:50%;transform:translateY(-50%);z-index:20;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;border:none;border-radius:20px;padding:6px 14px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;box-shadow:0 2px 8px rgba(59,130,246,0.35);" }, "OR");
+          paneEl.appendChild(orBtn);
+          const bottomLabel = el("div", { style: "font-size:11px;color:#3b82f6;letter-spacing:1px;opacity:0.7;text-align:center;margin-top:12px;font-weight:600;" }, "Search " + String.fromCharCode(65 + paneIndex));
+          paneEl.appendChild(bottomLabel);
+          const pane = { el: paneEl, rowsContainer, addBtn, orBtn, rows: [], index: paneIndex, bottomLabel };
+          addBtn.onclick = () => {
+            if (pane.rows.length) pane.rowsContainer.appendChild(makeAndLabel());
+            const row = buildRowEntry("");
+            pane.rows.push(row);
+            pane.rowsContainer.appendChild(row.rowEl);
+          };
+          orBtn.onclick = () => {
+            if (pane.index < panes.length - 1) slideTo(pane.index + 1);
+            else activateNextPane();
+          };
+          return pane;
+        }
+
+        function populatePaneDefaults(pane) {
+          for (const sn of DEFAULT_FILTER_STORAGES) {
+            if (pane.rows.length) pane.rowsContainer.appendChild(makeAndLabel());
+            const row = buildRowEntry(sn);
+            pane.rows.push(row);
+            pane.rowsContainer.appendChild(row.rowEl);
+          }
+        }
+
+        function buildGhostPane(paneIndex) {
+          const g = el("div", { style: "background:#fff;border-radius:14px;border:1px solid rgba(59,130,246,0.18);padding:18px 20px;flex-shrink:0;position:relative;box-shadow:0 1px 4px rgba(59,130,246,0.06);opacity:0.55;pointer-events:none;" });
+          g.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#1e3a5f;margin-bottom:14px;opacity:0.5;" }, "Search Fields"));
+          for (let i = 0; i < 3; i++) {
+            if (i > 0) {
+              const andEl = el("div", { style: "display:flex;height:16px;align-items:center;opacity:0.3;" });
+              andEl.appendChild(el("div", { style: "width:210px;flex-shrink:0;" }));
+              andEl.appendChild(el("div", { style: "flex:1;text-align:center;font-size:10px;font-weight:700;letter-spacing:2px;color:rgba(59,130,246,0.28);" }, "AND"));
+              g.appendChild(andEl);
+            }
+            const sk = el("div", { style: "display:flex;gap:8px;align-items:center;margin:6px 0;" });
+            sk.appendChild(el("div", { style: "width:22px;height:22px;border-radius:50%;background:#e5e7eb;" }));
+            sk.appendChild(el("div", { style: "width:180px;height:32px;border-radius:6px;background:#f0f0f0;" }));
+            sk.appendChild(el("div", { style: "flex:1;height:32px;border-radius:6px;background:#f0f0f0;" }));
+            g.appendChild(sk);
+          }
+          const orBtn = el("button", { style: "position:absolute;right:-20px;top:50%;transform:translateY(-50%);z-index:20;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;border:none;border-radius:20px;padding:6px 14px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;box-shadow:0 2px 8px rgba(59,130,246,0.35);opacity:0.8;pointer-events:auto;" }, "OR");
+          orBtn.onclick = () => activateNextPane();
+          g.appendChild(orBtn);
+          g.appendChild(el("div", { style: "font-size:11px;color:#3b82f6;letter-spacing:1px;opacity:0.35;text-align:center;margin-top:12px;font-weight:600;" }, "Search " + String.fromCharCode(65 + paneIndex)));
+          g.dataset.ghost = "1";
+          return g;
+        }
+
+        function getPaneWidth() {
+          return carouselViewport ? Math.max(200, carouselViewport.offsetWidth - PEEK - GAP) : 600;
+        }
+
+        function resizePanes() {
+          if (!carouselViewport) return;
+          const pw = getPaneWidth();
+          for (const p of panes) { p.el.style.width = pw + "px"; p.el.style.minWidth = pw + "px"; p.el.style.marginRight = GAP + "px"; }
+          if (ghostPaneEl) { ghostPaneEl.style.width = pw + "px"; ghostPaneEl.style.minWidth = pw + "px"; ghostPaneEl.style.marginRight = GAP + "px"; }
+          applySlideTransform(activePaneIndex, false);
+        }
+
+        function updateDots() {
+          if (!dotsRow) return;
+          dotsRow.innerHTML = "";
+          for (let i = 0; i < panes.length; i++) {
+            const dot = el("div", { style: "width:8px;height:8px;border-radius:50%;cursor:pointer;background:" + (i === activePaneIndex ? "#3b82f6" : "#d1d5db") + ";", title: "Search " + String.fromCharCode(65 + i) });
+            ((idx) => { dot.onclick = () => slideTo(idx); })(i);
+            dotsRow.appendChild(dot);
+          }
+        }
+
+        function applySlideTransform(index, animate) {
+          const pw = getPaneWidth();
+          const leftPeekOffset = index > 0 ? Math.round(PEEK * 0.75) : 0;
+          const tx = -(index * (pw + GAP)) + leftPeekOffset;
+          carouselTrack.style.transition = animate ? "transform 0.4s cubic-bezier(0.4,0,0.2,1)" : "none";
+          carouselTrack.style.transform = "translateX(" + tx + "px)";
+          if (fadeMaskLeft) fadeMaskLeft.style.opacity = index > 0 ? "1" : "0";
+        }
+
+        function slideTo(index) {
+          if (index < 0) index = 0;
+          if (index >= panes.length) index = panes.length - 1;
+          activePaneIndex = index;
+          applySlideTransform(index, true);
+          updateDots();
+          if (index < panes.length - 1) setTimeout(pruneEmptyTailPanes, 440);
+        }
+
+        function activateNextPane() {
+          const newPane = buildPaneEl(panes.length);
+          for (const row of panes[0].rows) {
+            const sn = row.picker ? row.picker.getStorageName() : "";
+            if (!sn) continue;
+            if (newPane.rows.length) newPane.rowsContainer.appendChild(makeAndLabel());
+            const newRow = buildRowEntry(sn);
+            newPane.rows.push(newRow);
+            newPane.rowsContainer.appendChild(newRow.rowEl);
+          }
+          panes.push(newPane);
+          if (ghostPaneEl) ghostPaneEl.remove();
+          carouselTrack.appendChild(newPane.el);
+          ghostPaneEl = buildGhostPane(panes.length);
+          carouselTrack.appendChild(ghostPaneEl);
+          resizePanes();
+          slideTo(panes.length - 1);
+          updateDots();
+        }
+
+        function pruneEmptyTailPanes() {
+          while (panes.length > 1) {
+            const last = panes[panes.length - 1];
+            if (last.index === activePaneIndex) break;
+            const hasValue = last.rows.some((r) => r.valueInput && r.valueInput.value.trim());
+            if (hasValue) break;
+            last.el.remove();
+            panes.pop();
+          }
+          if (ghostPaneEl) ghostPaneEl.remove();
+          ghostPaneEl = buildGhostPane(panes.length);
+          carouselTrack.appendChild(ghostPaneEl);
+          resizePanes();
+          updateDots();
+        }
+
+        const carouselOuter = el("div", { style: "position:relative;" });
+        carouselViewport = el("div", { style: "overflow:hidden;border-radius:14px;position:relative;" });
+        fadeMaskLeft = el("div", { style: "position:absolute;left:0;top:0;bottom:0;width:60px;background:linear-gradient(90deg,rgba(248,250,252,0.95),transparent);z-index:6;pointer-events:auto;cursor:pointer;opacity:0;transition:opacity 0.3s;" });
+        fadeMaskLeft.onclick = () => slideTo(activePaneIndex - 1);
+        const fadeMaskRight = el("div", { style: "position:absolute;right:0;top:0;bottom:0;width:60px;background:linear-gradient(270deg,rgba(248,250,252,0.95),transparent);z-index:6;pointer-events:auto;cursor:pointer;" });
+        fadeMaskRight.onclick = () => { if (activePaneIndex < panes.length - 1) slideTo(activePaneIndex + 1); else activateNextPane(); };
+        carouselTrack = el("div", { style: "display:flex;will-change:transform;" });
+        carouselViewport.appendChild(fadeMaskLeft);
+        carouselViewport.appendChild(fadeMaskRight);
+        carouselViewport.appendChild(carouselTrack);
+        carouselOuter.appendChild(carouselViewport);
+        dotsRow = el("div", { style: "display:flex;justify-content:center;gap:6px;margin-top:10px;" });
+        card.appendChild(carouselOuter);
+        card.appendChild(dotsRow);
+
+        const firstPane = buildPaneEl(0);
+        populatePaneDefaults(firstPane);
+        panes.push(firstPane);
+        carouselTrack.appendChild(firstPane.el);
+        ghostPaneEl = buildGhostPane(1);
+        carouselTrack.appendChild(ghostPaneEl);
+        requestAnimationFrame(() => { resizePanes(); updateDots(); });
+        resizeHandler = () => resizePanes();
+        window.addEventListener("resize", resizeHandler);
 
         card.appendChild(hr());
 
@@ -372,10 +547,8 @@
           activeReport = null;
           configGetter = null;
           if (!id) return;
-
           const entry = catalog.find((c) => c.id === id);
           if (entry) descArea.textContent = entry.description || "";
-
           if (!reportDefs[id] && entry && entry.file) {
             descArea.textContent = "Loading report module...";
             try {
@@ -390,7 +563,6 @@
             }
             descArea.textContent = entry.description || "";
           }
-
           const def = reportDefs[id];
           if (!def) {
             descArea.textContent = "Report module not found for id: " + id;
@@ -407,12 +579,10 @@
           const fromVal = fromInput.value;
           const toVal = toInput.value;
           if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
-
-          //##> Guard against double-click: disable button immediately.
           runBtn.disabled = true;
           runBtn.style.opacity = "0.5";
-
           const config = configGetter ? configGetter.getConfig() : {};
+          if (resizeHandler) window.removeEventListener("resize", resizeHandler);
           modal.remove();
           const progress = makeProgressUI(activeReport.label);
           progress.set(5, "Building search...", "");
@@ -424,64 +594,92 @@
             value: { firstValue: fromVal + "T00:00:00Z", secondValue: toVal + "T23:59:59Z" }
           };
 
-          const interactionFilters = [dateFilter];
           const searchFields = ["sourceMediaId", "recordeddate", "UDFVarchar110", "UDFVarchar1", "recordedDateTime"];
+          const merged = new Map();
+          const cappedPanes = [];
+          let totalFetched = 0;
 
-          for (const fr of filterRows) {
-            const sn = fr.picker.getStorageName();
-            const raw = fr.valueInput.value.trim();
-            if (!sn || !raw) continue;
-            const vals = [...new Set(splitValues(raw))];
-            if (!vals.length) continue;
-            interactionFilters.push({ operator: "IN", type: "KEYWORD", parameterName: sn, value: vals });
-            if (!searchFields.includes(sn)) searchFields.push(sn);
+          for (let pi = 0; pi < panes.length; pi++) {
+            const pane = panes[pi];
+            const paneLabel = "Search " + String.fromCharCode(65 + pi);
+            const kwFilters = [];
+            for (const row of pane.rows) {
+              const sn = row.picker ? row.picker.getStorageName() : "";
+              const raw = row.valueInput ? row.valueInput.value.trim() : "";
+              if (!sn || !raw) continue;
+              const vals = [...new Set(splitValues(raw))];
+              if (!vals.length) continue;
+              kwFilters.push({ operator: "IN", type: "KEYWORD", parameterName: sn, value: vals });
+              if (!searchFields.includes(sn)) searchFields.push(sn);
+            }
+            if (!kwFilters.length && panes.length > 1) continue;
+            const paneFilters = [dateFilter];
+            for (const f of kwFilters) paneFilters.push(f);
+
+            const paneResults = [];
+            let from = 0;
+            while (true) {
+              const payload = {
+                from, to: from + PAGE_SIZE,
+                fields: searchFields,
+                query: { operator: "AND", filters: [{ filterType: "interactions", filters: paneFilters }] }
+              };
+              let res;
+              try {
+                res = await fetch(SEARCH_URL, {
+                  method: "POST", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload)
+                });
+              } catch (err) {
+                alert("Search request failed: " + err.message);
+                progress.remove();
+                return;
+              }
+              if (!res.ok) {
+                const body = await res.text().catch(() => "");
+                alert("Search failed: HTTP " + res.status + "\n" + body.slice(0, 200));
+                progress.remove();
+                return;
+              }
+              const json = await res.json();
+              const rows = Array.isArray(json.results) ? json.results : [];
+              for (const r of rows) paneResults.push(r);
+              const panePct = Math.min(28, 8 + Math.floor(((pi + paneResults.length / Math.max(1, RESULT_CAP)) / panes.length) * 20));
+              progress.set(panePct, "Searching " + paneLabel + "...", "Pane rows: " + paneResults.length);
+              if (rows.length < PAGE_SIZE || paneResults.length >= MAX_ROWS) break;
+              from += PAGE_SIZE;
+              await sleep(250);
+            }
+
+            if (paneResults.length >= RESULT_CAP) {
+              cappedPanes.push(paneLabel);
+            }
+            for (const r of paneResults) {
+              const tid = getFieldValue(r, "UDFVarchar110").trim();
+              const key = (tid && tid !== "0") ? tid : ("_smid_" + (r.sourceMediaId || ""));
+              if (!merged.has(key)) merged.set(key, r);
+            }
+            totalFetched += paneResults.length;
+            progress.set(Math.min(28, 8 + Math.floor(((pi + 1) / panes.length) * 20)), "Searching...", "Pane " + (pi + 1) + "/" + panes.length + " | Unique: " + merged.size + " | Total: " + totalFetched);
           }
 
-          progress.set(8, "Searching...", "");
-          const allResults = [];
-          let from = 0;
-          while (true) {
-            const payload = {
-              from, to: from + PAGE_SIZE,
-              fields: searchFields,
-              query: { operator: "AND", filters: [{ filterType: "interactions", filters: interactionFilters }] }
-            };
-            let res;
-            try {
-              res = await fetch(SEARCH_URL, {
-                method: "POST", credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-              });
-            } catch (err) {
-              alert("Search request failed: " + err.message);
-              progress.remove();
-              return;
-            }
-            if (!res.ok) {
-              const body = await res.text().catch(() => "");
-              alert("Search failed: HTTP " + res.status + "\n" + body.slice(0, 200));
-              progress.remove();
-              return;
-            }
-            const json = await res.json();
-            const rows = Array.isArray(json.results) ? json.results : [];
-            for (const r of rows) allResults.push(r);
-            const pct = Math.min(28, 8 + Math.floor((allResults.length / Math.max(1, MAX_ROWS)) * 20));
-            progress.set(pct, "Searching...", "Rows: " + allResults.length);
-            if (rows.length < PAGE_SIZE || allResults.length >= MAX_ROWS) break;
-            from += PAGE_SIZE;
-            await sleep(250);
+          if (cappedPanes.length) {
+            const proceed = confirm(
+              "The following searches hit the " + RESULT_CAP.toLocaleString() + " result limit and may be incomplete:\n\n" +
+              cappedPanes.join(", ") +
+              "\n\nTry narrowing your date range or adding filters to get complete results.\n\nProceed with current results?"
+            );
+            if (!proceed) { progress.remove(); return; }
           }
 
+          const allResults = [...merged.values()];
           if (!allResults.length) {
             alert("No results returned from search.");
             progress.remove();
             return;
           }
 
-          //##> Endpoint probe: test first transcript to detect which URL works,
-          //##> then use only that endpoint for all remaining fetches.
           progress.set(30, "Probing transcript endpoint...", "");
           const transcripts = new Array(allResults.length);
           let endpointMode = null;
@@ -560,7 +758,6 @@
             return;
           }
 
-          //##> Collect qualifying Trans_IDs and build report data lookup.
           const reportDataMap = new Map();
           const qualifyingIds = [];
           for (const m of matches) {
@@ -578,7 +775,6 @@
             return;
           }
 
-          //##> Second search: re-fetch qualifying calls with full columnPrefs fields.
           progress.set(85, "Running detail search...", qualifyingIds.length + " Trans_IDs");
           const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
           const detailFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields.slice() : colPrefs.fields.concat(["sourceMediaId"]);
@@ -631,7 +827,6 @@
             return;
           }
 
-          //##> Merge report columns into detail results and send to dispatcher.
           progress.set(96, "Preparing results...", detailResults.length + " rows");
           const cols = activeReport.columns || [];
           for (const row of detailResults) {
