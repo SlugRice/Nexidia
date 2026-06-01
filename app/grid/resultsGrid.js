@@ -1,4 +1,4 @@
-//[Last Update: 7:36 AM 5/28/2026]
+//[Last Update: 1:40 PM 6/1/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -55,20 +55,6 @@
         }
         function formatDisplay(fieldKey, raw) {
           if (!raw || raw === "0") return raw || "";
-          if (/^recordedDate/i.test(fieldKey) && /\dT\d/.test(raw)) {
-            var dt = new Date(raw);
-            if (!isNaN(dt.getTime())) {
-              var mm = dt.getUTCMonth() + 1;
-              var dd = dt.getUTCDate();
-              var yyyy = dt.getUTCFullYear();
-              var hh = dt.getUTCHours();
-              var min = dt.getUTCMinutes();
-              var sec = dt.getUTCSeconds();
-              var ampm = hh >= 12 ? "PM" : "AM";
-              var h12 = hh % 12 || 12;
-              return mm + "/" + dd + "/" + yyyy + " " + h12 + ":" + (min < 10 ? "0" : "") + min + ":" + (sec < 10 ? "0" : "") + sec + " " + ampm;
-            }
-          }
           if (xls && xls.formatDisplayValue) return xls.formatDisplayValue(fieldKey, raw);
           return raw;
         }
@@ -930,9 +916,15 @@
           if (!playerCtrl) {
             const playerTool = api.listTools().find((t) => t.id === "mediaPlayer");
             if (!playerTool || !playerTool._openPlayerPane) { window.open(PLAYER_URL(smid), "_blank"); return; }
-            playerCtrl = playerTool._openPlayerPane(card, (registerStop) => { stopPlayer = registerStop; });
+            playerCtrl = playerTool._openPlayerPane(card, (registerStop) => { stopPlayer = registerStop; }, { initialHeight: "50vh" });
           }
           activeSmid = smid;
+          const itemIndex = state.filteredRows.indexOf(item);
+          playerCtrl.setGridNav({
+            items: state.filteredRows,
+            currentIndex: itemIndex >= 0 ? itemIndex : 0,
+            onNavigate: (idx) => { const target = state.filteredRows[idx]; if (target) triggerPlay(target); }
+          });
           playerCtrl.loadCall(smid, label, undefined, searchQuery);
           renderVisibleRows();
         }
