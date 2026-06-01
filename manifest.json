@@ -11,6 +11,7 @@
     "app/grid/resultsGrid.js",
     "app/player/mediaPlayer.js",
     "app/player/playlist.js",
+    "app/reports/reportsHub.js",
     "app/entry.js"
   ]
 }
