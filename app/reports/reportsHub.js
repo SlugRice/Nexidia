@@ -651,7 +651,7 @@
             const key = "_report_" + c.key;
             if (!fields.includes(key)) { fields.push(key); headers.push(c.label); }
           }
-          api.setShared("lastSearchResult", {
+          api.setShared("columnPrefs", { fields: fields.slice(), headers: headers.slice() });
             rows: formatted, fields, headers,
             maxPhraseCols: 1, includePhraseCol: false
           });
