@@ -165,7 +165,7 @@
     titleEl.textContent = title || "Reports";
     titleEl.style.cssText = "font-size:14px;font-weight:700;color:#7dd3fc;margin-bottom:10px;";
     const closeBtn = document.createElement("div");
-    closeBtn.textContent = "\u2715";
+    closeBtn.textContent = "✕";
     closeBtn.style.cssText = "position:absolute;top:10px;right:12px;cursor:pointer;color:#94a3b8;font-size:16px;";
     closeBtn.onclick = () => overlay.remove();
     const status = document.createElement("div");
@@ -231,7 +231,7 @@
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const card = el("div", { style: "background:#f8fafc;width:720px;max-height:90vh;overflow-y:auto;border-radius:14px;padding:22px 24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
 
-        const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;" }, "\u2715");
+        const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;" }, "✕");
         closeBtn.onclick = () => modal.remove();
         card.appendChild(closeBtn);
 
@@ -241,7 +241,7 @@
         const selectWrap = el("div", { style: "margin-bottom:10px;" });
         selectWrap.appendChild(el("div", { style: "font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Select a report"));
         const select = el("select", { style: "width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;cursor:pointer;" });
-        const defaultOpt = el("option", { value: "" }, "\u2014 Choose a report \u2014");
+        const defaultOpt = el("option", { value: "" }, "— Choose a report —");
         select.appendChild(defaultOpt);
         for (const entry of catalog) {
           select.appendChild(el("option", { value: entry.id }, entry.label));
@@ -538,11 +538,11 @@
         function showResults(report, matches, totalSearched, metaFields, searchFields) {
           const rModal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
           const rCard = el("div", { style: "background:#fff;width:900px;max-height:90vh;overflow-y:auto;border-radius:14px;padding:22px 24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-          const rClose = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;" }, "\u2715");
+          const rClose = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;" }, "✕");
           rClose.onclick = () => rModal.remove();
           rCard.appendChild(rClose);
 
-          rCard.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;" }, report.label + " \u2014 Results"));
+          rCard.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;" }, report.label + " — Results"));
           rCard.appendChild(el("div", { style: "font-size:13px;color:#6b7280;margin-bottom:14px;" },
             matches.length + " qualifying calls out of " + totalSearched + " searched"));
 
