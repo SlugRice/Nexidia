@@ -58,13 +58,6 @@
     try { return JSON.parse(t); } catch { return { raw: t }; }
   }
 
-  async function getTranscriptBySmid(smid) {
-    const apiUrl = BASE + "/NxIA/api/transcript/" + smid;
-    const svcUrl = BASE + "/NxIA/Search/ClientServices/TranscriptService.svc/Transcripts/?SourceMediaId=" + smid + "&_=" + Date.now();
-    try { return await apiFetch(apiUrl, { credentials: "include" }); }
-    catch { return await apiFetch(svcUrl, { credentials: "include" }); }
-  }
-
   function getTranscriptRows(payload) {
     return payload?.TranscriptRows || payload?.rows || payload?.transcriptRows || [];
   }
@@ -415,6 +408,10 @@
           const toVal = toInput.value;
           if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
 
+          //##> Guard against double-click: disable button immediately.
+          runBtn.disabled = true;
+          runBtn.style.opacity = "0.5";
+
           const config = configGetter ? configGetter.getConfig() : {};
           modal.remove();
           const progress = makeProgressUI(activeReport.label);
@@ -483,9 +480,41 @@
             return;
           }
 
-          progress.set(30, "Fetching transcripts...", "0 / " + allResults.length);
+          //##> Endpoint probe: test first transcript to detect which URL works,
+          //##> then use only that endpoint for all remaining fetches.
+          progress.set(30, "Probing transcript endpoint...", "");
           const transcripts = new Array(allResults.length);
-          let cursor = 0;
+          let endpointMode = null;
+          const probeSmid = allResults[0].sourceMediaId;
+          if (probeSmid) {
+            const apiUrl = BASE + "/NxIA/api/transcript/" + probeSmid;
+            const svcUrl = BASE + "/NxIA/Search/ClientServices/TranscriptService.svc/Transcripts/?SourceMediaId=" + probeSmid + "&_=" + Date.now();
+            try {
+              transcripts[0] = await apiFetch(apiUrl, { credentials: "include" });
+              endpointMode = "api";
+            } catch {
+              try {
+                transcripts[0] = await apiFetch(svcUrl, { credentials: "include" });
+                endpointMode = "svc";
+              } catch {
+                transcripts[0] = null;
+                endpointMode = "api";
+              }
+            }
+          } else {
+            transcripts[0] = null;
+            endpointMode = "api";
+          }
+
+          function fetchTranscript(smid) {
+            const url = endpointMode === "svc"
+              ? BASE + "/NxIA/Search/ClientServices/TranscriptService.svc/Transcripts/?SourceMediaId=" + smid + "&_=" + Date.now()
+              : BASE + "/NxIA/api/transcript/" + smid;
+            return apiFetch(url, { credentials: "include" });
+          }
+
+          progress.set(32, "Fetching transcripts...", "1 / " + allResults.length);
+          let cursor = 1;
           let failCount = 0;
 
           async function worker() {
@@ -497,7 +526,7 @@
               let payload = null;
               for (let attempt = 1; attempt <= FETCH_RETRIES; attempt++) {
                 try {
-                  payload = await getTranscriptBySmid(smid);
+                  payload = await fetchTranscript(smid);
                   break;
                 } catch (e) {
                   if (attempt === FETCH_RETRIES) { failCount++; }
@@ -507,13 +536,13 @@
               transcripts[i] = payload;
               const done = i + 1;
               if (done % 50 === 0 || done === allResults.length) {
-                const pct = 30 + Math.floor((done / allResults.length) * 50);
+                const pct = 32 + Math.floor((done / allResults.length) * 48);
                 progress.set(pct, "Fetching transcripts...", done + " / " + allResults.length + "\nFailed: " + failCount);
               }
             }
           }
 
-          await Promise.all(Array.from({ length: Math.min(CONCURRENCY, allResults.length) }, () => worker()));
+          await Promise.all(Array.from({ length: Math.min(CONCURRENCY, allResults.length - 1) }, () => worker()));
 
           progress.set(82, "Analyzing transcripts...", "");
           const matches = [];
@@ -525,100 +554,38 @@
             }
           }
 
-          progress.remove();
-
           if (!matches.length) {
             alert("No qualifying calls found.\n\nSearched: " + allResults.length + "\nFetch failures: " + failCount);
+            progress.remove();
             return;
           }
 
-          showResults(activeReport, matches, allResults.length, metadataFields, searchFields);
-        };
-
-        function showResults(report, matches, totalSearched, metaFields, searchFields) {
-          const rModal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
-          const rCard = el("div", { style: "background:#fff;width:900px;max-height:90vh;overflow-y:auto;border-radius:14px;padding:22px 24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-          const rClose = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;" }, "✕");
-          rClose.onclick = () => rModal.remove();
-          rCard.appendChild(rClose);
-
-          rCard.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;" }, report.label + " — Results"));
-          rCard.appendChild(el("div", { style: "font-size:13px;color:#6b7280;margin-bottom:14px;" },
-            matches.length + " qualifying calls out of " + totalSearched + " searched"));
-
-          const btnRow = el("div", { style: "display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;" });
-          const dispatchBtn = el("button", { style: "padding:8px 16px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Send to Dispatcher");
-          dispatchBtn.onclick = () => {
-            const formatted = matches.map((m) => ({ row: m.row, phrases: [] }));
-            const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
-            const fields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
-            api.setShared("lastSearchResult", {
-              rows: formatted, fields, headers: colPrefs.headers,
-              maxPhraseCols: 1, includePhraseCol: false
-            });
-            rModal.remove();
-            const dispatcher = api.listTools().find((t) => t.id === "dispatcher");
-            if (dispatcher) { dispatcher.open(); }
-            else { alert("Dispatcher not loaded."); }
-          };
-          btnRow.appendChild(dispatchBtn);
-
-          const csvBtn = el("button", { style: "padding:8px 16px;border-radius:8px;border:1px solid #22c55e;background:#fff;color:#16a34a;font-size:13px;font-weight:600;cursor:pointer;" }, "Export CSV");
-          csvBtn.onclick = () => {
-            const cols = report.columns || [];
-            let csv = "Trans_Id,Recorded Date";
-            for (const c of cols) csv += "," + c.label;
-            csv += "\n";
-            for (const m of matches) {
-              const tid = getFieldValue(m.row, "UDFVarchar110").replace(/,/g, " ");
-              const rd = getFieldValue(m.row, "recordeddate").replace(/,/g, " ");
-              csv += tid + "," + rd;
-              for (const c of cols) csv += "," + (m.data[c.key] || "").toString().replace(/,/g, " ");
-              csv += "\n";
-            }
-            const blob = new Blob([csv], { type: "text/csv" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a"); a.href = url;
-            a.download = report.id + "_results.csv";
-            document.body.appendChild(a); a.click(); a.remove();
-            URL.revokeObjectURL(url);
-          };
-          btnRow.appendChild(csvBtn);
-          rCard.appendChild(btnRow);
-
-          const tableWrap = el("div", { style: "max-height:500px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;" });
-          const table = el("table", { style: "width:100%;border-collapse:collapse;font-size:12px;" });
-          const thead = el("thead", {});
-          const headerRow = el("tr", { style: "background:#f1f5f9;position:sticky;top:0;z-index:1;" });
-          headerRow.appendChild(el("th", { style: "padding:8px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e5e7eb;" }, "#"));
-          headerRow.appendChild(el("th", { style: "padding:8px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e5e7eb;" }, "Trans_Id"));
-          headerRow.appendChild(el("th", { style: "padding:8px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e5e7eb;" }, "Recorded Date"));
-          const cols = report.columns || [];
-          for (const c of cols) {
-            headerRow.appendChild(el("th", { style: "padding:8px 10px;text-align:left;font-weight:700;border-bottom:2px solid #e5e7eb;" }, c.label));
-          }
-          thead.appendChild(headerRow);
-          table.appendChild(thead);
-          const tbody = el("tbody", {});
-          for (let i = 0; i < matches.length; i++) {
-            const m = matches[i];
-            const bg = i % 2 === 0 ? "#fff" : "#f8fafc";
-            const tr = el("tr", { style: "background:" + bg + ";" });
-            tr.appendChild(el("td", { style: "padding:6px 10px;border-bottom:1px solid #f0f0f0;" }, String(i + 1)));
-            tr.appendChild(el("td", { style: "padding:6px 10px;border-bottom:1px solid #f0f0f0;" }, getFieldValue(m.row, "UDFVarchar110")));
-            tr.appendChild(el("td", { style: "padding:6px 10px;border-bottom:1px solid #f0f0f0;" }, getFieldValue(m.row, "recordeddate")));
+          //##> Send results directly to dispatcher.
+          progress.set(90, "Preparing results...", matches.length + " qualifying calls");
+          const cols = activeReport.columns || [];
+          const formatted = matches.map((m) => {
+            const row = Object.assign({}, m.row);
             for (const c of cols) {
-              tr.appendChild(el("td", { style: "padding:6px 10px;border-bottom:1px solid #f0f0f0;font-weight:600;color:#1d4ed8;" }, (m.data[c.key] || "").toString()));
+              row["_report_" + c.key] = (m.data[c.key] || "").toString();
             }
-            tbody.appendChild(tr);
+            return { row, phrases: [] };
+          });
+          const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
+          const fields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields.slice() : colPrefs.fields.concat(["sourceMediaId"]);
+          const headers = colPrefs.headers.slice();
+          for (const c of cols) {
+            const key = "_report_" + c.key;
+            if (!fields.includes(key)) { fields.push(key); headers.push(c.label); }
           }
-          table.appendChild(tbody);
-          tableWrap.appendChild(table);
-          rCard.appendChild(tableWrap);
-
-          rModal.appendChild(rCard);
-          document.body.appendChild(rModal);
-        }
+          api.setShared("lastSearchResult", {
+            rows: formatted, fields, headers,
+            maxPhraseCols: 1, includePhraseCol: false
+          });
+          progress.remove();
+          const dispatcher = api.listTools().find((t) => t.id === "dispatcher");
+          if (dispatcher) { dispatcher.open(); }
+          else { alert("Dispatcher not loaded. Check manifest."); }
+        };
 
       } catch (e) {
         console.error(e);
