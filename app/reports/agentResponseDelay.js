@@ -14,6 +14,9 @@
     id: "agentResponseDelay",
     label: "Agent Response Delay",
     description: "Find calls where the agent does not speak within a configurable number of seconds from the start of the call.",
+    presetFilters: [
+      { operator: "IN", type: "KEYWORD", parameterName: "callDirection", value: ["Inbound"] }
+    ],
     columns: [
       { key: "agentDelay", label: "Agent First Speech (s)" },
       { key: "customerDelay", label: "Customer First Speech (s)" }
