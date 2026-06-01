@@ -25,7 +25,8 @@
 
   //##> Report modules register themselves here at load time.
   //##> The hub lazy-loads modules from the repo; once eval'd they call register().
-  const reportDefs = {};
+  if (!window.__NEXIDIA_REPORT_DEFS__) window.__NEXIDIA_REPORT_DEFS__ = {};
+  const reportDefs = window.__NEXIDIA_REPORT_DEFS__;
   const reportRegistry = {
     register(def) { reportDefs[def.id] = def; },
     get(id) { return reportDefs[id] || null; }
