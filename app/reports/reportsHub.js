@@ -616,6 +616,7 @@
             if (!kwFilters.length && panes.length > 1) continue;
             const paneFilters = [dateFilter];
             for (const f of kwFilters) paneFilters.push(f);
+            if (activeReport.presetFilters) { for (const pf of activeReport.presetFilters) paneFilters.push(pf); }
 
             const paneResults = [];
             let from = 0;
