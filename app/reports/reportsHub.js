@@ -652,6 +652,7 @@
             if (!fields.includes(key)) { fields.push(key); headers.push(c.label); }
           }
           api.setShared("columnPrefs", { fields: fields.slice(), headers: headers.slice() });
+          api.setShared("lastSearchResult", {
             rows: formatted, fields, headers,
             maxPhraseCols: 1, includePhraseCol: false
           });
