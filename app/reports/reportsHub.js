@@ -417,14 +417,14 @@
           const progress = makeProgressUI(activeReport.label);
           progress.set(5, "Building search...", "");
 
-          const interactionFilters = [];
-          interactionFilters.push({
+          const dateFilter = {
             parameterName: "recordedDateTime",
             operator: "BETWEEN",
             type: "DATE",
             value: { firstValue: fromVal + "T00:00:00Z", secondValue: toVal + "T23:59:59Z" }
-          });
+          };
 
+          const interactionFilters = [dateFilter];
           const searchFields = ["sourceMediaId", "recordeddate", "UDFVarchar110", "UDFVarchar1", "recordedDateTime"];
 
           for (const fr of filterRows) {
@@ -560,18 +560,92 @@
             return;
           }
 
-          //##> Send results directly to dispatcher.
-          progress.set(90, "Preparing results...", matches.length + " qualifying calls");
-          const cols = activeReport.columns || [];
-          const formatted = matches.map((m) => {
-            const row = Object.assign({}, m.row);
-            for (const c of cols) {
-              row["_report_" + c.key] = (m.data[c.key] || "").toString();
+          //##> Collect qualifying Trans_IDs and build report data lookup.
+          const reportDataMap = new Map();
+          const qualifyingIds = [];
+          for (const m of matches) {
+            const tid = getFieldValue(m.row, "UDFVarchar110").trim();
+            if (!tid || tid === "0") continue;
+            if (!reportDataMap.has(tid)) {
+              reportDataMap.set(tid, m.data);
+              qualifyingIds.push(tid);
             }
-            return { row, phrases: [] };
-          });
+          }
+
+          if (!qualifyingIds.length) {
+            alert("Qualifying calls found but no valid Trans_IDs to look up.\n\nMatches: " + matches.length);
+            progress.remove();
+            return;
+          }
+
+          //##> Second search: re-fetch qualifying calls with full columnPrefs fields.
+          progress.set(85, "Running detail search...", qualifyingIds.length + " Trans_IDs");
           const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
-          const fields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields.slice() : colPrefs.fields.concat(["sourceMediaId"]);
+          const detailFields = colPrefs.fields.includes("sourceMediaId") ? colPrefs.fields.slice() : colPrefs.fields.concat(["sourceMediaId"]);
+          if (!detailFields.includes("UDFVarchar110")) detailFields.push("UDFVarchar110");
+
+          const detailFilters = [
+            dateFilter,
+            { operator: "IN", type: "KEYWORD", parameterName: "UDFVarchar110", value: qualifyingIds }
+          ];
+
+          const detailResults = [];
+          let detailFrom = 0;
+          while (true) {
+            const payload = {
+              from: detailFrom, to: detailFrom + PAGE_SIZE,
+              fields: detailFields,
+              query: { operator: "AND", filters: [{ filterType: "interactions", filters: detailFilters }] }
+            };
+            let res;
+            try {
+              res = await fetch(SEARCH_URL, {
+                method: "POST", credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+            } catch (err) {
+              alert("Detail search failed: " + err.message);
+              progress.remove();
+              return;
+            }
+            if (!res.ok) {
+              const body = await res.text().catch(() => "");
+              alert("Detail search failed: HTTP " + res.status + "\n" + body.slice(0, 200));
+              progress.remove();
+              return;
+            }
+            const json = await res.json();
+            const rows = Array.isArray(json.results) ? json.results : [];
+            for (const r of rows) detailResults.push(r);
+            const pct = Math.min(95, 85 + Math.floor((detailResults.length / Math.max(1, qualifyingIds.length)) * 10));
+            progress.set(pct, "Running detail search...", "Rows: " + detailResults.length);
+            if (rows.length < PAGE_SIZE || detailResults.length >= MAX_ROWS) break;
+            detailFrom += PAGE_SIZE;
+            await sleep(250);
+          }
+
+          if (!detailResults.length) {
+            alert("Detail search returned no results.");
+            progress.remove();
+            return;
+          }
+
+          //##> Merge report columns into detail results and send to dispatcher.
+          progress.set(96, "Preparing results...", detailResults.length + " rows");
+          const cols = activeReport.columns || [];
+          for (const row of detailResults) {
+            const tid = getFieldValue(row, "UDFVarchar110").trim();
+            const data = reportDataMap.get(tid);
+            if (data) {
+              for (const c of cols) {
+                row["_report_" + c.key] = (data[c.key] || "").toString();
+              }
+            }
+          }
+
+          const formatted = detailResults.map((row) => ({ row, phrases: [] }));
+          const fields = detailFields.slice();
           const headers = colPrefs.headers.slice();
           for (const c of cols) {
             const key = "_report_" + c.key;
