@@ -916,6 +916,7 @@
         let body = "";
         for (const outF of cfg.outputFields) { body += outF.displayName + "=" + (it.fieldValues[outF.storageName] || "") + "\n"; }
         body += "CharCount=" + it.charCount + "\n\n";
+        body += (it.text || "").trim() + "\n";
         singleFiles.push({ name: baseName + ".txt", text: body });
       }
       UI.setProgress(90, "Creating ZIP...", `Files: ${singleFiles.length}`);
