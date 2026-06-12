@@ -499,11 +499,30 @@ let timeFilters = [];
             for (let si = 0; si < speakers.length; si++) {
               const spVal = speakers[si][0];
               const spLabel = speakers[si][1];
-              const radio = el("input", { type: "radio", name: "speaker_" + Math.random().toString(36).slice(2), style: "margin:0 2px 0 " + (si > 0 ? "6" : "0") + "px;" });
-              if (si === 0) radio.checked = true;
-              radio.onchange = () => { if (radio.checked) entry.speaker = spVal; };
+              const radio = el("input", {
+                type: "radio",
+                name: "speaker_" + Math.random().toString(36).slice(2),
+                style: "margin:0 2px 0 " + (si > 0 ? "6" : "0") + "px;"
+              });
+
+              radio.addEventListener("click", () => {
+                if (radio.checked && entry.speaker === spVal) {
+                  radio.checked = false;
+                  entry.speaker = null; // clears selection
+                } else {
+                  entry.speaker = spVal;
+                }
+              });
               const lbl = el("label", { style: "font-size:10px;color:#374151;cursor:pointer;user-select:none;" }, spLabel);
-              lbl.onclick = () => { radio.checked = true; entry.speaker = spVal; };
+              lbl.onclick = () => {
+                if (radio.checked && entry.speaker === spVal) {
+                  radio.checked = false;
+                  entry.speaker = null;
+                } else {
+                  radio.checked = true;
+                  entry.speaker = spVal;
+                }
+              };
               speakerWrap.appendChild(radio);
               speakerWrap.appendChild(lbl);
               radios.push({ radio, value: spVal });
