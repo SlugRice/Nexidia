@@ -1497,7 +1497,6 @@ let timeFilters = [];
                 progressUI.set(statusLabel, Math.min(85, 25 + Math.floor((ctx.segmentsCompleted / Math.max(1, ctx.estimatedSegments)) * 55)), progressMeta());
               }
             }
-          }
           if (!isSessionCurrent(sessionToken)) return null;
           const finalRows = [];
           let maxPhraseCols = 1;
