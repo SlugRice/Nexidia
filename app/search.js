@@ -419,7 +419,7 @@ let timeFilters = [];
 
         function buildRowEntry(storageName, isPhrase) {
           isPhrase = isPhrase || false;
-          const entry = { rowEl: null, picker: null, valueInput: null, fieldLabelWrap: null, paneIndex: 0, isPhrase, exclude: false, speaker: "transcript", excludeToggle: null, speakerWrap: null, speakerRadios: null };
+          const entry = { rowEl: null, picker: null, valueInput: null, fieldLabelWrap: null, paneIndex: 0, isPhrase, exclude: false, speaker: "transcript", excludeToggle: null, speakerWrap: null, speakerRadios: null, matchMode: "IN", matchToggle: null };
 
           const removeBtn = el("button", { style: "width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#aaa;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;align-self:center;", title: "Remove" }, "X");
 
@@ -494,7 +494,41 @@ let timeFilters = [];
             return { wrap, get: () => on, set: (v) => { on = v; entry.exclude = v; apply(); } };
           })();
           entry.excludeToggle = excludeToggle;
-
+          let matchToggle = null;
+          if (!isPhrase) {
+            matchToggle = (() => {
+              const wrap = el("div", { style: "display:inline-flex;align-items:center;gap:2px;border:1px solid #e5e7eb;border-radius:6px;padding:2px 2px;background:#f9fafb;flex-shrink:0;", title: "IN = exact match. CONTAINS = partial match (matches any value containing this text)." });
+              const modes = [["IN", "EXACT"], ["CONTAINS", "CONTAINS"]];
+              const buttons = [];
+              for (let mi = 0; mi < modes.length; mi++) {
+                const modeVal = modes[mi][0];
+                const modeLabel = modes[mi][1];
+                const btn = el("div", { style: "padding:3px 8px;font-size:10px;font-weight:600;cursor:pointer;border-radius:4px;transition:background 0.15s;" }, modeLabel);
+                buttons.push({ btn, value: modeVal });
+                btn.onclick = () => {
+                  entry.matchMode = modeVal;
+                  for (let bi = 0; bi < buttons.length; bi++) {
+                    if (buttons[bi].value === modeVal) {
+                      buttons[bi].btn.style.background = "#3b82f6";
+                      buttons[bi].btn.style.color = "#fff";
+                    } else {
+                      buttons[bi].btn.style.background = "transparent";
+                      buttons[bi].btn.style.color = "#6b7280";
+                    }
+                  }
+                };
+                wrap.appendChild(btn);
+              }
+              buttons[0].btn.style.background = "#3b82f6";
+              buttons[0].btn.style.color = "#fff";
+              for (let bi = 1; bi < buttons.length; bi++) {
+                buttons[bi].btn.style.background = "transparent";
+                buttons[bi].btn.style.color = "#6b7280";
+              }
+              return { wrap, set: (v) => { for (let bi = 0; bi < buttons.length; bi++) { if (buttons[bi].value === v) buttons[bi].btn.click(); } } };
+            })();
+            entry.matchToggle = matchToggle;
+          }
           let speakerWrap = null;
           if (isPhrase) {
             speakerWrap = el("div", { style: "display:inline-flex;align-items:center;gap:2px;border:1px solid #e5e7eb;border-radius:6px;padding:2px 4px;background:#f9fafb;" });
@@ -541,6 +575,7 @@ let timeFilters = [];
           rowEl.appendChild(excludeToggle.wrap);
           rowEl.appendChild(fieldLabelWrap);
           if (picker) rowEl.appendChild(picker.wrapper);
+          if (matchToggle) rowEl.appendChild(matchToggle.wrap);
           rowEl.appendChild(valueInput);
 
           if (isPhrase) {
@@ -933,9 +968,10 @@ let timeFilters = [];
           return vals;
         }
 
-        function buildKeywordFilter(pn, vals) {
+        function buildKeywordFilter(pn, vals, op) {
+          const operator = op === "CONTAINS" ? "CONTAINS" : "IN";
           return {
-            operator: "IN",
+            operator: operator,
             type: "KEYWORD",
             parameterName: normalizeParamName(pn),
             value: normalizeKeywordValues(pn, vals)
@@ -1086,9 +1122,9 @@ let timeFilters = [];
                 }
                 if (!cleanVals.length) continue;
                 if (e.exclude) {
-                  globalExcludes.push(buildKeywordFilter(sn, cleanVals));
+                  globalExcludes.push(buildKeywordFilter(sn, cleanVals, e.matchMode));
                 } else {
-                  includeKwEntries.push({ storageName: sn, filter: buildKeywordFilter(sn, cleanVals) });
+                  includeKwEntries.push({ storageName: sn, filter: buildKeywordFilter(sn, cleanVals, e.matchMode) });
                 }
               }
 
@@ -1227,20 +1263,62 @@ let timeFilters = [];
           function progressMeta() {
             return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Rows: " + ctx.totalKept;
           }
+          async function probeTotalResults(keywordGroup, phraseFilter, dfilter) {
+            if (!isSessionCurrent(sessionToken)) return { total: -1, bailed: false };
+            const interactionFilters = [];
+            if (keywordGroup) interactionFilters.push(Object.assign({ disabled: false }, keywordGroup));
+            if (phraseFilter) interactionFilters.push(Object.assign({ disabled: false }, phraseFilter));
+            if (excludeGroup) interactionFilters.push(Object.assign({ disabled: false }, excludeGroup));
+            const payload = {
+              languageFilter: { languages: [] }, namedSetId: null,
+              from: 0, to: 1, fields: ["UDFVarchar110"],
+              query: {
+                operator: "AND", invertOperator: false, disabled: false,
+                filters: [
+                  { operator: "AND", invertOperator: false, filterType: "interactions", disabled: false, filters: interactionFilters },
+                  Object.assign({ disabled: false }, dfilter)
+                ]
+              }
+            };
+            let res;
+            try {
+              res = await fetch(SEARCH_URL, {
+                method: "POST", credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal: abortController.signal
+              });
+            } catch (err) {
+              if (err.name === "AbortError") return { total: -1, bailed: false };
+              throw err;
+            }
+            if (!res.ok) return { total: 0, bailed: true };
+            const sr = await safeRead(res);
+            const total = sr.json && typeof sr.json.totalResults === "number" ? sr.json.totalResults : 0;
+            const avail = sr.json && typeof sr.json.totalAvailableResults === "number" ? sr.json.totalAvailableResults : 0;
+            const errReason = sr.json && sr.json.errorReason ? sr.json.errorReason : "";
+            const bailed = (total === 0 && avail >= CAP_LIMIT) || !!errReason;
+            return { total, bailed, errReason };
+          }
           async function fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel) {
             let from = 0;
             const setRows = [];
             while (true) {
               if (!isSessionCurrent(sessionToken)) return null;
               const interactionFilters = [];
-              if (keywordGroup) interactionFilters.push(keywordGroup);
-              if (phraseFilter) interactionFilters.push(phraseFilter);
-              if (excludeGroup) interactionFilters.push(excludeGroup);
-              interactionFilters.push(dfilter);
+              if (keywordGroup) interactionFilters.push(Object.assign({ disabled: false }, keywordGroup));
+              if (phraseFilter) interactionFilters.push(Object.assign({ disabled: false }, phraseFilter));
+              if (excludeGroup) interactionFilters.push(Object.assign({ disabled: false }, excludeGroup));
               const payload = {
                 languageFilter: { languages: [] }, namedSetId: null,
                 from, to: from + PAGE_SIZE, fields: baseFields,
-                query: { operator: "AND", invertOperator: false, filters: [{ operator: "AND", invertOperator: false, filterType: "interactions", filters: interactionFilters }] }
+                query: {
+                  operator: "AND", invertOperator: false, disabled: false,
+                  filters: [
+                    { operator: "AND", invertOperator: false, filterType: "interactions", disabled: false, filters: interactionFilters },
+                    Object.assign({ disabled: false }, dfilter)
+                  ]
+                }
               };
               api.setShared("lastSearchQuery", payload);
               let res;
@@ -1427,22 +1505,40 @@ let timeFilters = [];
             }
             const gateOk = await maybeBigSearchGate();
             if (!gateOk) return null;
-            const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
-            if (rows === null) return null;
-            ctx.segmentsCompleted++;
-            if (rows.length >= CAP_LIMIT) {
+            const probe = await probeTotalResults(keywordGroup, phraseFilter, dfilter);
+            if (probe.total === -1) return null;
+            if (probe.bailed) {
+              if (!ctx.bailedSegments) ctx.bailedSegments = [];
+              ctx.bailedSegments.push({ depth, errReason: probe.errReason || "" });
+              console.warn("[NexidiaSearch] Server bailed on probe, skipping segment:", probe.errReason);
+              ctx.segmentsCompleted++;
+              return [];
+            }
+            if (probe.total === 0) {
+              ctx.segmentsCompleted++;
+              return [];
+            }
+            if (probe.total > CAP_LIMIT) {
               if (depth >= MAX_SPLIT_DEPTH) {
+                progressUI.set("Reached split depth limit. Pulling capped 10K...", null, progressMeta());
+                const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
+                if (rows === null) return null;
+                ctx.segmentsCompleted++;
                 showAtomicCapWarning();
                 return rows;
               }
               const splits = chooseSplit(keywordGroup, dfilter);
               if (!splits) {
+                progressUI.set("No further splits possible. Pulling capped 10K...", null, progressMeta());
+                const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
+                if (rows === null) return null;
+                ctx.segmentsCompleted++;
                 showAtomicCapWarning();
                 return rows;
               }
               ctx.estimatedSegments += splits.length;
-              progressUI.set("Reached 10K server max. Splitting search...", null, progressMeta());
-              const out = rows.slice();
+              progressUI.set("Result count " + probe.total + " exceeds 10K. Splitting search...", null, progressMeta());
+              const out = [];
               for (let si2 = 0; si2 < splits.length; si2++) {
                 const sub = splits[si2];
                 const subRows = await runWithSplit(sub.kg, phraseFilter, sub.df, statusLabel, depth + 1);
@@ -1451,6 +1547,9 @@ let timeFilters = [];
               }
               return out;
             }
+            const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
+            if (rows === null) return null;
+            ctx.segmentsCompleted++;
             return rows;
           }
           for (let si = 0; si < runSets.length; si++) {
@@ -1551,7 +1650,7 @@ let timeFilters = [];
                   phrases.push({ value: row.valueInput.value, exclude: row.exclude, speaker: row.speaker });
                 } else {
                   const sn = row.picker ? row.picker.getStorageName() : "";
-                  filters.push({ storageName: sn, value: row.valueInput.value, exclude: row.exclude });
+                  filters.push({ storageName: sn, value: row.valueInput.value, exclude: row.exclude, matchMode: row.matchMode || "IN" });
                 }
               }
               return { filters, phrases };
@@ -1595,6 +1694,7 @@ let timeFilters = [];
               entry.paneIndex = pane.index;
               entry.valueInput.value = filters[fi].value || "";
               if (filters[fi].exclude) entry.excludeToggle.set(true);
+              if (filters[fi].matchMode === "CONTAINS" && entry.matchToggle) entry.matchToggle.set("CONTAINS");
               pane.rows.push(entry); pane.rowsContainer.appendChild(entry.rowEl);
             }
             const phrases = pd.phrases || [];
