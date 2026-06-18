@@ -1214,7 +1214,6 @@ let timeFilters = [];
           const totalRuns = runSets.length;
           const distinctPhraseLabels = new Set();
           const ctx = {
-            const ctx = {
             segmentsCompleted: 0,
             estimatedSegments: 0,
             totalFetched: 0,
@@ -1420,6 +1419,7 @@ let timeFilters = [];
             if (ok) { ctx.maxRowsOverride = true; return true; }
             return false;
           }
+          
           async function runWithSplit(keywordGroup, phraseFilter, dfilter, statusLabel, depth) {
             if (ctx.segmentsCompleted >= MAX_SEGMENTS) {
               showAtomicCapWarning();
