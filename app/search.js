@@ -1214,15 +1214,19 @@ let timeFilters = [];
           const totalRuns = runSets.length;
           const distinctPhraseLabels = new Set();
           const ctx = {
+            const ctx = {
             segmentsCompleted: 0,
             estimatedSegments: 0,
             totalFetched: 0,
+            totalKept: 0,
             bigSearchWarned: false,
             atomicCapWarned: false,
-            bigSearchProceed: true
+            bigSearchProceed: true,
+            maxRowsWarned: false,
+            maxRowsOverride: false
           };
           function progressMeta() {
-            return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Rows: " + ctx.totalFetched;
+            return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Rows: " + ctx.totalKept;
           }
           async function fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel) {
             let from = 0;
@@ -1259,7 +1263,11 @@ let timeFilters = [];
               for (let ri = 0; ri < rows.length; ri++) setRows.push(rows[ri]);
               ctx.totalFetched += rows.length;
               progressUI.set(statusLabel, Math.min(80, 25 + Math.floor((ctx.segmentsCompleted / Math.max(1, ctx.estimatedSegments)) * 55)), progressMeta());
-              if (setRows.length >= MAX_ROWS || rows.length < PAGE_SIZE) break;
+              if (rows.length < PAGE_SIZE) break;
+              if (setRows.length >= MAX_ROWS && !ctx.maxRowsOverride) {
+                const proceed = await maybeMaxRowsGate();
+                if (!proceed) return null;
+              }
               from += PAGE_SIZE;
               await sleep(250);
             }
@@ -1388,6 +1396,30 @@ let timeFilters = [];
             ctx.bigSearchProceed = ok;
             return ok;
           }
+          function confirmMaxRows() {
+            return new Promise(function(resolve) {
+              const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000010;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+              const box = el("div", { style: "background:#fff;width:480px;border-radius:12px;padding:24px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+              box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Segment Exceeds 50,000 Rows"));
+              box.appendChild(el("div", { style: "font-size:13px;color:#374151;line-height:1.6;margin-bottom:16px;" }, "A single search segment has returned more than 50,000 rows. Continuing may be slow or unstable. Click Continue to keep pulling rows for the rest of this search session, or Back to stop here."));
+              const btnRow = el("div", { style: "display:flex;gap:8px;" });
+              const contBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Continue");
+              const backBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;" }, "Back");
+              contBtn.onclick = function() { overlay.remove(); resolve(true); };
+              backBtn.onclick = function() { overlay.remove(); resolve(false); };
+              btnRow.appendChild(contBtn); btnRow.appendChild(backBtn);
+              box.appendChild(btnRow);
+              overlay.appendChild(box); document.body.appendChild(overlay);
+            });
+          }
+          async function maybeMaxRowsGate() {
+            if (ctx.maxRowsOverride) return true;
+            if (ctx.maxRowsWarned) return false;
+            ctx.maxRowsWarned = true;
+            const ok = await confirmMaxRows();
+            if (ok) { ctx.maxRowsOverride = true; return true; }
+            return false;
+          }
           async function runWithSplit(keywordGroup, phraseFilter, dfilter, statusLabel, depth) {
             if (ctx.segmentsCompleted >= MAX_SEGMENTS) {
               showAtomicCapWarning();
@@ -1410,7 +1442,7 @@ let timeFilters = [];
               }
               ctx.estimatedSegments += splits.length;
               progressUI.set("Reached 10K server max. Splitting search...", null, progressMeta());
-              const out = [];
+              const out = rows.slice();
               for (let si2 = 0; si2 < splits.length; si2++) {
                 const sub = splits[si2];
                 const subRows = await runWithSplit(sub.kg, phraseFilter, sub.df, statusLabel, depth + 1);
@@ -1453,13 +1485,16 @@ let timeFilters = [];
                 } else {
                   if (rowLabel !== null && !existing.phrases.includes(rowLabel)) existing.phrases.push(rowLabel);
                   for (let fi = 0; fi < baseFields.length; fi++) {
-                    const k = baseFields[fi];
-                    const cur = getFieldValue(existing.row, k);
-                    if (cur && cur !== "0") continue;
-                    const nxt = getFieldValue(r, k);
-                    if (nxt && nxt !== "0") existing.row[k] = nxt;
+                      const k = baseFields[fi];
+                      const cur = getFieldValue(existing.row, k);
+                      if (cur && cur !== "0") continue;
+                      const nxt = getFieldValue(r, k);
+                      if (nxt && nxt !== "0") existing.row[k] = nxt;
+                    }
                   }
                 }
+                ctx.totalKept = merged.size + passthroughNoKey.length;
+                progressUI.set(statusLabel, Math.min(85, 25 + Math.floor((ctx.segmentsCompleted / Math.max(1, ctx.estimatedSegments)) * 55)), progressMeta());
               }
             }
           }
