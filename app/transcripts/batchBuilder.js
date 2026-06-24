@@ -1,4 +1,4 @@
-//[Last Update: 9:45 AM 5/27/2026]
+//[Last Update: 2:23 PM 6/24/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -15,6 +15,139 @@
   }
   function hasSavedSettings() {
     return !!localStorage.getItem(LS_KEY);
+  }
+  const IDB_NAME = "nexidia_batch_builder";
+  const IDB_VERSION = 1;
+  const JOB_AGE_LIMIT_MS = 30 * 24 * 60 * 60 * 1000;
+  let _idbPromise = null;
+  function idb() {
+    if (!_idbPromise) {
+      _idbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("jobs")) {
+            db.createObjectStore("jobs", { keyPath: "id" });
+          }
+          if (!db.objectStoreNames.contains("transcripts")) {
+            const ts = db.createObjectStore("transcripts", { keyPath: ["jobId", "sourceMediaId"] });
+            ts.createIndex("byJob", "jobId", { unique: false });
+          }
+        };
+        req.onsuccess = () => {
+          _idbPromise = Promise.resolve(req.result);
+          resolve(req.result);
+        };
+        req.onerror = () => { _idbPromise = null; reject(req.error); };
+      });
+    }
+    return _idbPromise;
+  }
+  async function requestPersistence() {
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        await navigator.storage.persist();
+      }
+    } catch (_) {}
+  }
+  async function idbPut(store, value) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).put(value);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+  async function idbGet(store, key) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).get(key);
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function idbGetAll(store) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function idbGetAllByIndex(store, indexName, value) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).index(indexName).getAll(IDBKeyRange.only(value));
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function deleteJobAndTranscripts(jobId) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(["jobs", "transcripts"], "readwrite");
+      tx.objectStore("jobs").delete(jobId);
+      const idx = tx.objectStore("transcripts").index("byJob");
+      const cursorReq = idx.openCursor(IDBKeyRange.only(jobId));
+      cursorReq.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (cur) {
+          tx.objectStore("transcripts").delete(cur.primaryKey);
+          cur.continue();
+        }
+      };
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+  async function updateJob(jobId, patch) {
+    const existing = await idbGet("jobs", jobId);
+    if (!existing) return null;
+    const next = Object.assign({}, existing, patch, { updatedAt: Date.now() });
+    await idbPut("jobs", next);
+    return next;
+  }
+  function generateJobId() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    const rand = Math.random().toString(36).slice(2, 8);
+    return `job_${stamp}_${rand}`;
+  }
+  //##> Resume-candidate gate. Every check below must pass for a job to be offered
+  //##> as resumable. Any single failure silently drops the job from the prompt.
+  async function getResumeCandidates() {
+    let jobs;
+    try { jobs = await idbGetAll("jobs"); } catch (_) { return []; }
+    if (!Array.isArray(jobs)) return [];
+    const now = Date.now();
+    const valid = [];
+    for (const job of jobs) {
+      if (!job || typeof job !== "object") continue;
+      if (job.status !== "in-progress") continue;
+      if (!job.id || typeof job.id !== "string") continue;
+      if (!job.cfg || typeof job.cfg !== "object") continue;
+      if (!job.inputStorageName || typeof job.inputStorageName !== "string") continue;
+      if (!Array.isArray(job.values) || job.values.length === 0) continue;
+      if (typeof job.createdAt !== "number" || job.createdAt <= 0) continue;
+      if ((now - job.createdAt) > JOB_AGE_LIMIT_MS) continue;
+      if (typeof job.totalExpected === "number"
+          && typeof job.completedCount === "number"
+          && job.totalExpected > 0
+          && job.completedCount >= job.totalExpected) {
+        try { await updateJob(job.id, { status: "complete" }); } catch (_) {}
+        continue;
+      }
+      valid.push(job);
+    }
+    valid.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    return valid;
   }
   const DEFAULTS = {
     targetTokens: 25000,
@@ -36,6 +169,11 @@
     outputFields: [{ storageName: "UDFVarchar110", displayName: "Trans_Id" }]
   };
   const METADATA_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
+  const SEARCH_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search";
+  const SEARCH_PAGE_SIZE = 1000;
+  const SEARCH_CAP_LIMIT = 10000;
+  const SEARCH_CHUNK_SIZE = 5000;
+  const SEARCH_MAX_SPLIT_DEPTH = 10;
   const PINNED_NAMING = [
     { storageName: "UDFVarchar110", displayName: "Trans_Id" },
     { storageName: "UDFVarchar1", displayName: "User to User" },
@@ -121,7 +259,7 @@
   }
   function uniq(arr) { return [...new Set(arr)]; }
   function sanitizeFilename(name) {
-    return name.replace(/[\\/:\*?"<>|]/g, "_").trim() || "unnamed";
+    return name.replace(/[\\/:\*?"<>\|]/g, "_").trim() || "unnamed";
   }
   function parseValues(raw) {
     return [...new Set(raw.split(/[\r\n,\t]+/).map(s => s.trim()).filter(Boolean))];
@@ -498,7 +636,7 @@
       return seg;
     }
     function validateBase(v) {
-      return v.replace(/[\\/:\*?"<>|]/g, "").trim() || "Batch";
+      return v.replace(/[\\/:\*?"<>\|]/g, "").trim() || "Batch";
     }
     function validateIncrement(v) {
       const n = parseInt(v.replace(/\D/g, ""));
@@ -576,7 +714,6 @@
     fetchArea.appendChild(fetchField("Delay (ms)", "Milliseconds to wait between each worker picking up a new fetch. Lower = faster pipeline.", "delayMs", 0, 2000));
     fetchArea.appendChild(fetchField("Fetch retries", "How many times to retry a failed transcript fetch before giving up.", "fetchRetries", 0, 10));
     fetchArea.appendChild(fetchField("Retry backoff (ms)", "How long to wait before each retry attempt. Multiplied by the attempt number.", "retryBackoffMs", 0, 5000));
-    fetchArea.appendChild(fetchField("Search limit", "Maximum number of calls to retrieve from a single search query.", "searchTo", 100, 50000));
     box.appendChild(fetchArea);
     box.appendChild(divider());
     const saveBtn = el("button", {
@@ -663,153 +800,318 @@
       remove() { try { overlay.remove(); } catch (_) {} }
     };
   }
+  //##> Chunked search: splits input value list into chunks and pages within each.
+  //##> If a chunk's totalResults exceeds 10K (or the server bails on the probe),
+  //##> the chunk is recursively split in half until under cap or single value.
+  async function chunkedSearch(values, inputStorageName, searchFields, UI) {
+    const merged = new Map();
+    let segmentsDone = 0;
+    let segmentsEst = Math.ceil(values.length / SEARCH_CHUNK_SIZE);
+    function updateProgress(label) {
+      const pct = Math.min(55, 3 + Math.floor((segmentsDone / Math.max(1, segmentsEst)) * 52));
+      UI.setProgress(pct, label, `Segments: ${segmentsDone} of ~${Math.max(segmentsEst, segmentsDone)}\nCalls: ${merged.size}`);
+    }
+    async function probe(chunkValues) {
+      const payload = {
+        from: 0, to: 1, fields: ["sourceMediaId"],
+        query: { operator: "AND", filters: [{ filterType: "interactions", filters: [{
+          operator: "IN", type: "KEYWORD", parameterName: inputStorageName, value: chunkValues
+        }] }] }
+      };
+      const res = await fetchJson(SEARCH_URL, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const total = (res && typeof res.totalResults === "number") ? res.totalResults : 0;
+      const avail = (res && typeof res.totalAvailableResults === "number") ? res.totalAvailableResults : 0;
+      const errReason = res && res.errorReason ? res.errorReason : "";
+      const bailed = (total === 0 && avail >= SEARCH_CAP_LIMIT) || !!errReason;
+      return { total, avail, bailed, errReason };
+    }
+    async function fetchPaged(chunkValues, knownTotal) {
+      let from = 0;
+      const ceiling = Math.min(knownTotal || SEARCH_CAP_LIMIT, SEARCH_CAP_LIMIT);
+      while (from < ceiling) {
+        const payload = {
+          from, to: from + SEARCH_PAGE_SIZE, fields: searchFields,
+          query: { operator: "AND", filters: [{ filterType: "interactions", filters: [{
+            operator: "IN", type: "KEYWORD", parameterName: inputStorageName, value: chunkValues
+          }] }] }
+        };
+        const res = await fetchJson(SEARCH_URL, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const rows = Array.isArray(res.results) ? res.results : [];
+        if (!rows.length) break;
+        for (const r of rows) {
+          if (r && r.sourceMediaId && !merged.has(r.sourceMediaId)) {
+            merged.set(r.sourceMediaId, r);
+          }
+        }
+        if (rows.length < SEARCH_PAGE_SIZE) break;
+        from += SEARCH_PAGE_SIZE;
+      }
+    }
+    async function processChunk(chunkValues, depth) {
+      if (!chunkValues.length) return;
+      const p = await probe(chunkValues);
+      if ((p.total > SEARCH_CAP_LIMIT || p.bailed) && chunkValues.length > 1 && depth < SEARCH_MAX_SPLIT_DEPTH) {
+        segmentsEst++;
+        const mid = Math.ceil(chunkValues.length / 2);
+        await processChunk(chunkValues.slice(0, mid), depth + 1);
+        await processChunk(chunkValues.slice(mid), depth + 1);
+        return;
+      }
+      if (p.total === 0 && !p.bailed) {
+        segmentsDone++;
+        updateProgress("Searching...");
+        return;
+      }
+      if (p.bailed && chunkValues.length === 1) {
+        UI.appendLog(`Warning: server bailed on single value (depth ${depth}). Pulling capped 10K.`);
+      }
+      await fetchPaged(chunkValues, p.total);
+      segmentsDone++;
+      updateProgress("Searching...");
+    }
+    for (let i = 0; i < values.length; i += SEARCH_CHUNK_SIZE) {
+      await processChunk(values.slice(i, i + SEARCH_CHUNK_SIZE), 0);
+    }
+    return [...merged.values()];
+  }
+  function showResumeModal(candidates, onResume, onDiscard, onCancel) {
+    const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+    const box = el("div", { style: "background:#fff;width:560px;max-height:80vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
+    const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;" }, "\u2715");
+    closeBtn.onclick = () => { overlay.remove(); onCancel(); };
+    box.appendChild(closeBtn);
+    const title = candidates.length === 1
+      ? "Unfinished Job Detected"
+      : `${candidates.length} Unfinished Jobs Detected`;
+    box.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;" }, title));
+    box.appendChild(el("div", { style: "font-size:12px;color:#6b7280;margin-bottom:14px;" },
+      "Progress for the following job(s) was saved before you closed the previous session. Resume to continue fetching only what's missing, or discard to start fresh."
+    ));
+    for (const job of candidates) {
+      const total = job.totalExpected || 0;
+      const done = job.completedCount || 0;
+      const pct = total > 0 ? Math.floor((done / total) * 100) : 0;
+      const created = new Date(job.createdAt);
+      const updated = new Date(job.updatedAt || job.createdAt);
+      const inputLabel = job.inputDisplayName || job.inputStorageName;
+const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#f8fafc;" });
+      const headerRow = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" });
+      headerRow.appendChild(el("div", { style: "font-size:13px;font-weight:600;color:#111827;" },
+        `${done.toLocaleString()} / ${total.toLocaleString()} transcripts saved`));
+      headerRow.appendChild(el("div", { style: "font-size:11px;color:#6b7280;" }, `${pct}%`));
+      card.appendChild(headerRow);
+      const barOuter = el("div", { style: "height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-bottom:8px;" });
+      const barInner = el("div", { style: `height:100%;width:${pct}%;background:linear-gradient(90deg,#38bdf8,#a78bfa);` });
+      barOuter.appendChild(barInner);
+      card.appendChild(barOuter);
+      const meta = el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.5;" });
+      meta.appendChild(el("div", {}, `Input field: ${inputLabel}`));
+      meta.appendChild(el("div", {}, `Input values: ${job.values.length.toLocaleString()}`));
+      meta.appendChild(el("div", {}, `Started: ${created.toLocaleString()}`));
+      meta.appendChild(el("div", {}, `Last update: ${updated.toLocaleString()}`));
+      card.appendChild(meta);
+      const btnRow = el("div", { style: "display:flex;gap:8px;" });
+      const resumeBtn = el("button", { style: "flex:1;padding:7px;border-radius:7px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:12px;font-weight:600;cursor:pointer;" }, "Resume");
+      const discardBtn = el("button", { style: "padding:7px 14px;border-radius:7px;border:1px solid #ef4444;background:#fff;color:#ef4444;font-size:12px;font-weight:600;cursor:pointer;" }, "Discard");
+      resumeBtn.onclick = () => { overlay.remove(); onResume(job); };
+      discardBtn.onclick = async () => {
+        if (!confirm(`Discard this job and delete its ${done.toLocaleString()} saved transcript(s)?`)) return;
+        try { await deleteJobAndTranscripts(job.id); } catch (_) {}
+        card.remove();
+        if (!box.querySelector("[data-job-card]")) { overlay.remove(); onDiscard(); }
+      };
+      card.dataset.jobCard = "1";
+      btnRow.appendChild(resumeBtn);
+      btnRow.appendChild(discardBtn);
+      card.appendChild(btnRow);
+      box.appendChild(card);
+    }
+    const skipRow = el("div", { style: "display:flex;justify-content:flex-end;margin-top:6px;" });
+    const skipBtn = el("button", { style: "padding:7px 14px;border-radius:7px;border:1px solid #d1d5db;background:#fff;color:#6b7280;font-size:12px;cursor:pointer;" }, "Start new job instead");
+    skipBtn.onclick = () => { overlay.remove(); onCancel(); };
+    skipRow.appendChild(skipBtn);
+    box.appendChild(skipRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+  async function loadMetadataFields() {
+    try {
+      const mRes = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
+      if (mRes.ok) {
+        const mJson = await mRes.json();
+        return Array.isArray(mJson) ? mJson.filter(f => f.isEnabled !== false) : [];
+      }
+    } catch (_) {}
+    return [];
+  }
   function openTranscriptBatchBuilder() {
     (async () => {
       try {
-        let cfg = resolveConfig(loadSavedSettings());
-        let metadataFields = [];
-        try {
-          const mRes = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
-          if (mRes.ok) {
-            const mJson = await mRes.json();
-            metadataFields = Array.isArray(mJson) ? mJson.filter(f => f.isEnabled !== false) : [];
-          }
-        } catch (_) {}
-        const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
-        const card = el("div", { style: "background:#fff;width:540px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-        const titleRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:4px;" });
-        const backBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#475569;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;gap:5px;" });
-        backBtn.appendChild(el("span", { style: "font-size:14px;" }, "\u2190"));
-        backBtn.appendChild(document.createTextNode("Back"));
-        backBtn.onclick = () => modal.remove();
-        const titleEl = el("div", { style: "font-size:16px;font-weight:700;color:#111827;" }, "Transcript Batch Builder");
-        const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;" }, "\u2715");
-        closeBtn.onclick = () => modal.remove();
-        titleRow.appendChild(backBtn);
-        titleRow.appendChild(titleEl);
-        card.appendChild(titleRow);
-        card.appendChild(closeBtn);
-        const inputFieldRow = el("div", { style: "margin-bottom:10px;margin-top:10px;" });
-        inputFieldRow.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Input field:"));
-        const inputPicker = makeFieldPicker(metadataFields, PINNED_INPUT, PINNED_INPUT[0]);
-        inputFieldRow.appendChild(inputPicker.wrapper);
-        card.appendChild(inputFieldRow);
-        card.appendChild(el("div", { style: "font-size:12px;color:#6b7280;margin-bottom:10px;" },
-          "Select the input field above, then paste values below. Separate with commas or line breaks. You can paste directly from Excel."
-        ));
-        const textarea = el("textarea", {
-          rows: 6,
-          placeholder: "Paste values here...",
-          style: "width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;font-family:ui-monospace,Consolas,monospace;box-sizing:border-box;resize:vertical;margin-bottom:12px;"
-        });
-        card.appendChild(textarea);
-        const preload = api.getShared("batchBuilderPreload");
-        if (preload) {
-          textarea.value = preload;
-          api.setShared("batchBuilderPreload", null);
+        await requestPersistence();
+        const candidates = await getResumeCandidates();
+        if (candidates.length > 0) {
+          showResumeModal(
+            candidates,
+            (job) => { resumeJob(job); },
+            () => { openInputModal(); },
+            () => { openInputModal(); }
+          );
+          return;
         }
-        let singleFileEnabled = false;
-        const namingPicker = makeFieldPicker(metadataFields, PINNED_NAMING, PINNED_NAMING[0]);
-        const toggleRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:12px;" });
-        const pill = el("div", { style: "width:36px;height:20px;border-radius:10px;background:#d1d5db;position:relative;cursor:pointer;transition:background .2s;" });
-        const knob = el("div", { style: "width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);" });
-        pill.appendChild(knob);
-        const toggleLabel = el("span", { style: "font-size:13px;color:#374151;user-select:none;cursor:pointer;" }, "Single File Export");
-        toggleRow.appendChild(pill);
-        toggleRow.appendChild(toggleLabel);
-        const namingArea = el("div", { style: "display:none;padding:10px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;" });
-        namingArea.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name files using:"));
-        namingArea.appendChild(namingPicker.wrapper);
-        function toggleSingle() {
-          singleFileEnabled = !singleFileEnabled;
-          pill.style.background = singleFileEnabled ? "#3b82f6" : "#d1d5db";
-          knob.style.left = singleFileEnabled ? "19px" : "3px";
-          namingArea.style.display = singleFileEnabled ? "block" : "none";
-          submitBtn.textContent = singleFileEnabled ? "Export Files" : "Build Batches";
-        }
-        pill.onclick = toggleSingle;
-        toggleLabel.onclick = toggleSingle;
-        card.appendChild(toggleRow);
-        card.appendChild(namingArea);
-        const bottomRow = el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
-        const settingsBtn = el("button", { style: "padding:8px 14px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:13px;cursor:pointer;font-weight:600;" }, "\u2699\uFE0F Batch Settings");
-        settingsBtn.onclick = () => {
-          openSettingsModal(cfg, metadataFields, (newCfg) => { cfg = newCfg; });
-        };
-        const submitBtn = el("button", { style: "flex:1;padding:9px 14px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Build Batches");
-        const saveLabel = el("label", { style: "display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;cursor:pointer;flex-shrink:0;" });
-        const saveCheck = el("input", { type: "checkbox" });
-        saveCheck.checked = false;
-        saveLabel.appendChild(saveCheck);
-        saveLabel.appendChild(document.createTextNode("Save these settings"));
-        bottomRow.appendChild(settingsBtn);
-        bottomRow.appendChild(submitBtn);
-        bottomRow.appendChild(saveLabel);
-        let clearBtn = null;
-        function refreshClearBtn() {
-          if (clearBtn && bottomRow.contains(clearBtn)) bottomRow.removeChild(clearBtn);
-          clearBtn = null;
-          if (hasSavedSettings()) {
-            clearBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #f87171;background:#fff;color:#ef4444;font-size:12px;cursor:pointer;flex-shrink:0;" }, "Clear saved settings");
-            clearBtn.onclick = () => { clearSavedSettings(); cfg = resolveConfig(); refreshClearBtn(); };
-            bottomRow.appendChild(clearBtn);
-          }
-        }
-        refreshClearBtn();
-        card.appendChild(bottomRow);
-        modal.appendChild(card);
-        document.body.appendChild(modal);
-        submitBtn.onclick = async () => {
-          const raw = textarea.value.trim();
-          if (!raw) { alert("Please paste some values before building batches."); return; }
-          if (saveCheck.checked) { saveSettings(cfg); refreshClearBtn(); }
-          const values = parseValues(raw);
-          if (!values.length) {
-            alert("No valid values detected.");
-            return;
-          }
-          const inputStorageName = inputPicker.getStorageName();
-          const inputDisplayName = inputPicker.getDisplayName();
-          if (!inputStorageName) {
-            alert("Please select a valid input field from the dropdown.");
-            return;
-          }
-          modal.remove();
-          const singleFileConfig = { enabled: singleFileEnabled, namingField: namingPicker.getStorageName(), namingDisplay: namingPicker.getDisplayName() };
-          await runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig);
-        };
+        openInputModal();
       } catch (e) {
         console.error(e);
         alert("Failed to run. Make sure you're running this from an active Nexidia session.");
       }
     })();
   }
-  async function runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig) {
+  async function resumeJob(job) {
+    try {
+      const existingTranscripts = await idbGetAllByIndex("transcripts", "byJob", job.id);
+      const alreadyFetched = new Set(existingTranscripts.map(t => t.sourceMediaId));
+      await runBatchBuild(
+        job.cfg,
+        job.values,
+        job.inputStorageName,
+        job.inputDisplayName,
+        job.singleFileConfig || { enabled: false },
+        { jobId: job.id, alreadyFetched, resumed: true }
+      );
+    } catch (e) {
+      console.error(e);
+      alert("Failed to resume job. See console for details.");
+    }
+  }
+  async function openInputModal() {
+    let cfg = resolveConfig(loadSavedSettings());
+    const metadataFields = await loadMetadataFields();
+    const api = window.NEXIDIA_TOOLS;
+    const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+    const card = el("div", { style: "background:#fff;width:540px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
+    const titleRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:4px;" });
+    const backBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#475569;cursor:pointer;font-size:12px;flex-shrink:0;display:flex;align-items:center;gap:5px;" });
+    backBtn.appendChild(el("span", { style: "font-size:14px;" }, "\u2190"));
+    backBtn.appendChild(document.createTextNode("Back"));
+    backBtn.onclick = () => modal.remove();
+    const titleEl = el("div", { style: "font-size:16px;font-weight:700;color:#111827;" }, "Transcript Batch Builder");
+    const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;" }, "\u2715");
+    closeBtn.onclick = () => modal.remove();
+    titleRow.appendChild(backBtn);
+    titleRow.appendChild(titleEl);
+    card.appendChild(titleRow);
+    card.appendChild(closeBtn);
+    const inputFieldRow = el("div", { style: "margin-bottom:10px;margin-top:10px;" });
+    inputFieldRow.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Input field:"));
+    const inputPicker = makeFieldPicker(metadataFields, PINNED_INPUT, PINNED_INPUT[0]);
+    inputFieldRow.appendChild(inputPicker.wrapper);
+    card.appendChild(inputFieldRow);
+    card.appendChild(el("div", { style: "font-size:12px;color:#6b7280;margin-bottom:10px;" },
+      "Select the input field above, then paste values below. Separate with commas or line breaks. You can paste directly from Excel."
+    ));
+    const textarea = el("textarea", {
+      rows: 6,
+      placeholder: "Paste values here...",
+      style: "width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;font-family:ui-monospace,Consolas,monospace;box-sizing:border-box;resize:vertical;margin-bottom:12px;"
+    });
+    card.appendChild(textarea);
+    const preload = api.getShared("batchBuilderPreload");
+    if (preload) {
+      textarea.value = preload;
+      api.setShared("batchBuilderPreload", null);
+    }
+    let singleFileEnabled = false;
+    const namingPicker = makeFieldPicker(metadataFields, PINNED_NAMING, PINNED_NAMING[0]);
+    const toggleRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:12px;" });
+    const pill = el("div", { style: "width:36px;height:20px;border-radius:10px;background:#d1d5db;position:relative;cursor:pointer;transition:background .2s;" });
+    const knob = el("div", { style: "width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);" });
+    pill.appendChild(knob);
+    const toggleLabel = el("span", { style: "font-size:13px;color:#374151;user-select:none;cursor:pointer;" }, "Single File Export");
+    toggleRow.appendChild(pill);
+    toggleRow.appendChild(toggleLabel);
+    const namingArea = el("div", { style: "display:none;padding:10px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;" });
+    namingArea.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name files using:"));
+    namingArea.appendChild(namingPicker.wrapper);
+    function toggleSingle() {
+      singleFileEnabled = !singleFileEnabled;
+      pill.style.background = singleFileEnabled ? "#3b82f6" : "#d1d5db";
+      knob.style.left = singleFileEnabled ? "19px" : "3px";
+      namingArea.style.display = singleFileEnabled ? "block" : "none";
+      submitBtn.textContent = singleFileEnabled ? "Export Files" : "Build Batches";
+    }
+    pill.onclick = toggleSingle;
+    toggleLabel.onclick = toggleSingle;
+    card.appendChild(toggleRow);
+    card.appendChild(namingArea);
+    const bottomRow = el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
+    const settingsBtn = el("button", { style: "padding:8px 14px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:13px;cursor:pointer;font-weight:600;" }, "\u2699\uFE0F Batch Settings");
+    settingsBtn.onclick = () => {
+      openSettingsModal(cfg, metadataFields, (newCfg) => { cfg = newCfg; });
+    };
+    const submitBtn = el("button", { style: "flex:1;padding:9px 14px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Build Batches");
+    const saveLabel = el("label", { style: "display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;cursor:pointer;flex-shrink:0;" });
+    const saveCheck = el("input", { type: "checkbox" });
+    saveCheck.checked = false;
+    saveLabel.appendChild(saveCheck);
+    saveLabel.appendChild(document.createTextNode("Save these settings"));
+    bottomRow.appendChild(settingsBtn);
+    bottomRow.appendChild(submitBtn);
+    bottomRow.appendChild(saveLabel);
+    let clearBtn = null;
+    function refreshClearBtn() {
+      if (clearBtn && bottomRow.contains(clearBtn)) bottomRow.removeChild(clearBtn);
+      clearBtn = null;
+      if (hasSavedSettings()) {
+        clearBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #f87171;background:#fff;color:#ef4444;font-size:12px;cursor:pointer;flex-shrink:0;" }, "Clear saved settings");
+        clearBtn.onclick = () => { clearSavedSettings(); cfg = resolveConfig(); refreshClearBtn(); };
+        bottomRow.appendChild(clearBtn);
+      }
+    }
+    refreshClearBtn();
+    card.appendChild(bottomRow);
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+    submitBtn.onclick = async () => {
+      const raw = textarea.value.trim();
+      if (!raw) { alert("Please paste some values before building batches."); return; }
+      if (saveCheck.checked) { saveSettings(cfg); refreshClearBtn(); }
+      const values = parseValues(raw);
+      if (!values.length) { alert("No valid values detected."); return; }
+      const inputStorageName = inputPicker.getStorageName();
+      const inputDisplayName = inputPicker.getDisplayName();
+      if (!inputStorageName) { alert("Please select a valid input field from the dropdown."); return; }
+      modal.remove();
+      const singleFileConfig = { enabled: singleFileEnabled, namingField: namingPicker.getStorageName(), namingDisplay: namingPicker.getDisplayName() };
+      await runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig, null);
+    };
+  }
+  async function runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig, resumeContext) {
     const UI = makeProgressUI();
     const TARGET_CHARS = Math.floor(cfg.targetTokens * cfg.charsPerToken);
     const pairingActive = isPairField(inputStorageName, inputDisplayName);
+    const jobId = resumeContext?.jobId || generateJobId();
+    const alreadyFetched = resumeContext?.alreadyFetched || new Set();
+    const resumed = !!resumeContext?.resumed;
+    UI.appendLog(resumed ? `Resuming job ${jobId}` : `Starting job ${jobId}`);
     UI.appendLog(`Input values: ${values.length}`);
     UI.appendLog(`Field: ${inputDisplayName} (${inputStorageName})`);
     if (pairingActive) UI.appendLog("Pairing: enabled");
+    if (resumed) UI.appendLog(`Already saved: ${alreadyFetched.size}`);
     UI.setProgress(3, "Resolving values to calls...", "Running search");
-    const filters = [{ operator: "IN", type: "KEYWORD", parameterName: inputStorageName, value: values }];
     const searchFields = ["sourceMediaId", "recordeddate", "UDFVarchar1", "UDFVarchar110"];
     for (const outF of cfg.outputFields) { if (!searchFields.includes(outF.storageName)) searchFields.push(outF.storageName); }
     if (!searchFields.includes(inputStorageName)) searchFields.push(inputStorageName);
     if (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField && !searchFields.includes(singleFileConfig.namingField)) {
       searchFields.push(singleFileConfig.namingField);
     }
-    const searchPayload = {
-      from: 0, to: cfg.searchTo,
-      fields: searchFields,
-      query: { operator: "AND", filters: [{ filterType: "interactions", filters }] }
-    };
-    const searchData = await fetchJson("https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(searchPayload)
-    });
-    const results = Array.isArray(searchData.results) ? searchData.results : [];
+    const results = await chunkedSearch(values, inputStorageName, searchFields, UI);
     if (!results.length) { UI.setProgress(0, "No results returned.", "No calls matched."); return; }
     UI.appendLog(`Calls returned: ${results.length}`);
     const groups = new Map();
@@ -845,26 +1147,41 @@
       });
     }
     UI.appendLog(`Transcript pulls: ${items.length}`);
-    if (cfg.batchMode === "all") {
+    const jobRecord = {
+      id: jobId,
+      status: "in-progress",
+      cfg,
+      values,
+      inputStorageName,
+      inputDisplayName,
+      singleFileConfig,
+      totalExpected: items.length,
+      completedCount: alreadyFetched.size,
+      createdAt: resumed ? (await idbGet("jobs", jobId))?.createdAt || Date.now() : Date.now(),
+      updatedAt: Date.now()
+    };
+    try { await idbPut("jobs", jobRecord); } catch (e) { UI.appendLog(`Warning: could not save job record: ${e.message}`); }
+    if (cfg.batchMode === "all" && !resumed) {
       if (items.length > 50) {
         const ok = confirm(
           `Batch files this size are not recommended if you're using them with Copilot. ` +
           `Copilot may omit information or produce unreliable results with very large inputs.\n\nDo you want to proceed?`
         );
-        if (!ok) { UI.remove(); return; }
+        if (!ok) { UI.remove(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
       }
       if (items.length > 500) {
         const ok = confirm(
           `Combining ${items.length} transcripts will create a very large file. ` +
           `Your browser or computer may encounter issues opening or processing this file.\n\nDo you want to proceed?`
         );
-        if (!ok) { UI.remove(); return; }
+        if (!ok) { UI.remove(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
       }
     }
-    UI.setProgress(8, "Fetching transcripts...", `0 / ${items.length}`);
+    const toFetch = items.filter(it => !alreadyFetched.has(it.sourceMediaId));
+    UI.setProgress(58, "Fetching transcripts...", `0 / ${toFetch.length} (${alreadyFetched.size} already saved)`);
     let cursor = 0;
-    const out = new Array(items.length);
     const failed = [];
+    let completedDelta = 0;
     async function fetchOne(it) {
       for (let attempt = 1; attempt <= cfg.fetchRetries; attempt++) {
         try {
@@ -878,30 +1195,47 @@
       }
     }
     async function worker() {
-      while (cursor < items.length) {
+      while (cursor < toFetch.length) {
         const i = cursor++;
-        const it = items[i];
+        const it = toFetch[i];
         await sleep(cfg.delayMs);
         const res = await fetchOne(it);
-        if (res.ok) {
-          out[i] = { ...it, text: res.text, charCount: res.text.length };
-        } else {
-          out[i] = { ...it, text: `FAILED TO FETCH TRANSCRIPT\nSMID:${it.sourceMediaId}\nERROR:${res.error}`, charCount: 0, failed: true };
-          failed.push(it);
-        }
-        const done = i + 1;
-        if (done % 50 === 0 || done === items.length) {
-          const pct = 8 + Math.floor((done / items.length) * 52);
-          UI.setProgress(pct, "Fetching transcripts...", `${done} / ${items.length}\nFailed: ${failed.length}`);
-          UI.appendLog(`Fetched ${done}/${items.length}`);
+        const record = {
+          jobId, sourceMediaId: it.sourceMediaId,
+          text: res.ok ? res.text : `FAILED TO FETCH TRANSCRIPT\nSMID:${it.sourceMediaId}\nERROR:${res.error}`,
+          charCount: res.ok ? res.text.length : 0,
+          failed: !res.ok,
+          meta: {
+            groupKey: it.groupKey, isSet: it.isSet, setKey: it.setKey,
+            recordeddate: it.recordeddate, transId: it.transId, userToUser: it.userToUser,
+            leg: it.leg, namingValue: it.namingValue, fieldValues: it.fieldValues
+          }
+        };
+        try { await idbPut("transcripts", record); } catch (e) { UI.appendLog(`IDB write failed for ${it.sourceMediaId}: ${e.message}`); }
+        completedDelta++;
+        if (!res.ok) failed.push(it);
+        if (completedDelta % 25 === 0 || (i + 1) === toFetch.length) {
+          const totalDone = alreadyFetched.size + completedDelta;
+          try { await updateJob(jobId, { completedCount: totalDone }); } catch (_) {}
+          const pct = 58 + Math.floor((completedDelta / Math.max(1, toFetch.length)) * 27);
+          UI.setProgress(Math.min(85, pct), "Fetching transcripts...", `${completedDelta} / ${toFetch.length}\nTotal saved: ${totalDone}\nFailed: ${failed.length}`);
+          UI.appendLog(`Fetched ${completedDelta}/${toFetch.length}`);
         }
       }
     }
-    await Promise.all(Array.from({ length: Math.min(cfg.concurrency, items.length) }, () => worker()));
+    await Promise.all(Array.from({ length: Math.min(cfg.concurrency, toFetch.length || 1) }, () => worker()));
+    try { await updateJob(jobId, { completedCount: alreadyFetched.size + completedDelta }); } catch (_) {}
     UI.appendLog(`Fetch complete. Failed: ${failed.length}`);
-    console.log("[BATCH-DBG] items:", out.length, "TARGET:", TARGET_CHARS, "pairing:", pairingActive, "charCounts:", out.map(x => x.charCount).sort((a,b) => b-a));
+    UI.setProgress(86, "Assembling output from saved transcripts...", "");
+    const allRecords = await idbGetAllByIndex("transcripts", "byJob", jobId);
+    const recordsBySmid = new Map(allRecords.map(rec => [rec.sourceMediaId, rec]));
+    const out = items.map(it => {
+      const rec = recordsBySmid.get(it.sourceMediaId);
+      if (!rec) return { ...it, text: `NO RECORD\nSMID:${it.sourceMediaId}`, charCount: 0, failed: true };
+      return { ...it, text: rec.text, charCount: rec.charCount, failed: rec.failed };
+    });
     if (singleFileConfig && singleFileConfig.enabled) {
-      UI.setProgress(62, "Building single files...", "");
+      UI.setProgress(88, "Building single files...", "");
       const singleFiles = [];
       const usedNames = new Map();
       for (const it of out) {
@@ -919,7 +1253,7 @@
         body += (it.text || "").trim() + "\n";
         singleFiles.push({ name: baseName + ".txt", text: body });
       }
-      UI.setProgress(90, "Creating ZIP...", `Files: ${singleFiles.length}`);
+      UI.setProgress(92, "Creating ZIP...", `Files: ${singleFiles.length}`);
       const zip = makeZip(singleFiles);
       const zipName = `nexidia_singles_${nowStamp()}.zip`;
       const blobUrl = URL.createObjectURL(zip);
@@ -927,17 +1261,18 @@
       UI.appendLog(`Click "Download ZIP"`);
       UI.btnDownload.disabled = false;
       UI.btnDownload.style.opacity = "1";
-      UI.btnDownload.onclick = () => {
+      UI.btnDownload.onclick = async () => {
         const a = document.createElement("a");
         a.href = blobUrl; a.download = zipName;
         document.body.appendChild(a); a.click(); a.remove();
         UI.appendLog("Download triggered.");
+        try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
         UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
       };
       UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
       return;
     }
-    UI.setProgress(62, "Batching...", "");
+    UI.setProgress(88, "Batching...", "");
     let batches = [];
     if (cfg.batchMode === "all") {
       batches = [out.slice()];
@@ -948,7 +1283,6 @@
     } else {
       let curBatch = [], curChars = 0;
       const flush = () => { if (curBatch.length) { batches.push(curBatch); curBatch = []; curChars = 0; } };
-      console.log("[BATCH-DBG] undefinedCheck:", out.filter(x => x.charCount === undefined || x.charCount === null || isNaN(x.charCount)).length);
       if (!pairingActive) {
         const sorted = out.slice().sort((a, b) => (a.recordeddate || "").localeCompare(b.recordeddate || ""));
         for (const it of sorted) {
@@ -1010,7 +1344,6 @@
       }
     }
     UI.appendLog(`Batches built: ${batches.length}`);
-    console.log("[BATCH-DBG] batches:", batches.map((b,i) => ({ batch: i, calls: b.length, chars: b.reduce((a,x) => a + (x.charCount||0), 0) })));
     const totalFiles = batches.length * cfg.copies;
     if (totalFiles > 10000) {
       const totalCharsEst = out.reduce((a, x) => a + (x.charCount || 0), 0) * cfg.copies;
@@ -1022,7 +1355,7 @@
       );
       if (!ok) { UI.remove(); return; }
     }
-    UI.setProgress(78, "Writing batch files...", "");
+    UI.setProgress(91, "Writing batch files...", "");
     const incWidth = cfg.fileIncrement.length;
     let startNum = parseInt(cfg.fileIncrement.replace(/^0+/, "") || "0", 10);
     if (isNaN(startNum)) startNum = 1;
@@ -1054,7 +1387,7 @@
         batchFiles.push({ name: fname, text: bodyText });
       }
     }
-    UI.setProgress(90, "Creating ZIP...", `Files: ${batchFiles.length}`);
+    UI.setProgress(94, "Creating ZIP...", `Files: ${batchFiles.length}`);
     const zip = makeZip(batchFiles);
     const zipName = `nexidia_batches_${nowStamp()}.zip`;
     const blobUrl = URL.createObjectURL(zip);
@@ -1062,11 +1395,12 @@
     UI.appendLog(`Click "Download ZIP"`);
     UI.btnDownload.disabled = false;
     UI.btnDownload.style.opacity = "1";
-    UI.btnDownload.onclick = () => {
+    UI.btnDownload.onclick = async () => {
       const a = document.createElement("a");
       a.href = blobUrl; a.download = zipName;
       document.body.appendChild(a); a.click(); a.remove();
       UI.appendLog("Download triggered.");
+      try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
       UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFailed: ${failed.length}\nBatches: ${batches.length}`);
     };
     UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFailed: ${failed.length}\nBatches: ${batches.length}`);
