@@ -1,10 +1,207 @@
-//[Last Update: 1:47 PM 6/18/2026]
+//[Last Update: 2:34 PM 6/24/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
-
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
-
+  const IDB_NAME = "nexidia_search";
+  const IDB_VERSION = 1;
+  const JOB_AGE_LIMIT_MS = 30 * 24 * 60 * 60 * 1000;
+  let _idbPromise = null;
+  function idb() {
+    if (!_idbPromise) {
+      _idbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("jobs")) {
+            db.createObjectStore("jobs", { keyPath: "id" });
+          }
+          if (!db.objectStoreNames.contains("segments")) {
+            const ts = db.createObjectStore("segments", { keyPath: ["jobId", "segmentHash"] });
+            ts.createIndex("byJob", "jobId", { unique: false });
+          }
+        };
+        req.onsuccess = () => { _idbPromise = Promise.resolve(req.result); resolve(req.result); };
+        req.onerror = () => { _idbPromise = null; reject(req.error); };
+      });
+    }
+    return _idbPromise;
+  }
+  async function requestPersistence() {
+    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (_) {}
+  }
+  async function idbPut(store, value) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).put(value);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+  async function idbGet(store, key) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).get(key);
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function idbGetAll(store) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function idbGetAllByIndex(store, indexName, value) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).index(indexName).getAll(IDBKeyRange.only(value));
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function deleteJobAndSegments(jobId) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(["jobs", "segments"], "readwrite");
+      tx.objectStore("jobs").delete(jobId);
+      const idx = tx.objectStore("segments").index("byJob");
+      const cursorReq = idx.openCursor(IDBKeyRange.only(jobId));
+      cursorReq.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (cur) { tx.objectStore("segments").delete(cur.primaryKey); cur.continue(); }
+      };
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+  async function updateJob(jobId, patch) {
+    const existing = await idbGet("jobs", jobId);
+    if (!existing) return null;
+    const next = Object.assign({}, existing, patch, { updatedAt: Date.now() });
+    await idbPut("jobs", next);
+    return next;
+  }
+  function generateJobId() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    const rand = Math.random().toString(36).slice(2, 8);
+    return `srchjob_${stamp}_${rand}`;
+  }
+  function stableStringify(o) {
+    if (o === null || typeof o !== "object") return JSON.stringify(o);
+    if (Array.isArray(o)) return "[" + o.map(stableStringify).join(",") + "]";
+    const keys = Object.keys(o).sort();
+    return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(o[k])).join(",") + "}";
+  }
+  function hashStr(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+  function computeSegmentHash(keywordGroup, phraseFilter, dateFilter, excludeGroup) {
+    return hashStr(stableStringify({ k: keywordGroup || null, p: phraseFilter || null, d: dateFilter || null, e: excludeGroup || null }));
+  }
+  //##> Resume gate. Every check must pass for a job to appear in the resume modal.
+  async function getSearchResumeCandidates() {
+    let jobs;
+    try { jobs = await idbGetAll("jobs"); } catch (_) { return []; }
+    if (!Array.isArray(jobs)) return [];
+    const now = Date.now();
+    const valid = [];
+    for (const job of jobs) {
+      if (!job || typeof job !== "object") continue;
+      if (job.status !== "in-progress") continue;
+      if (!job.id || typeof job.id !== "string") continue;
+      if (!job.config || typeof job.config !== "object") continue;
+      if (!Array.isArray(job.config.panes) || job.config.panes.length === 0) continue;
+      if (typeof job.createdAt !== "number" || job.createdAt <= 0) continue;
+      if ((now - job.createdAt) > JOB_AGE_LIMIT_MS) continue;
+      valid.push(job);
+    }
+    valid.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    return valid;
+  }
+  function summarizeSearchConfig(cfg) {
+    if (!cfg) return "(unnamed search)";
+    const parts = [];
+    if (cfg.dateFrom && cfg.dateTo) parts.push(`${cfg.dateFrom} \u2192 ${cfg.dateTo}`);
+    const paneCount = (cfg.panes || []).length;
+    if (paneCount > 1) parts.push(`${paneCount} OR groups`);
+    let filterCount = 0, phraseCount = 0;
+    for (const p of (cfg.panes || [])) {
+      filterCount += (p.filters || []).filter(f => f.value && f.value.trim()).length;
+      phraseCount += (p.phrases || []).filter(ph => (typeof ph === "string" ? ph : ph.value || "").trim()).length;
+    }
+    if (filterCount) parts.push(`${filterCount} filter${filterCount === 1 ? "" : "s"}`);
+    if (phraseCount) parts.push(`${phraseCount} phrase${phraseCount === 1 ? "" : "s"}`);
+    return parts.length ? parts.join(" \u2022 ") : "(empty search)";
+  }
+  function showSearchResumeModal(candidates, onResume, onDiscard, onCancel) {
+    const mk = (tag, props, ...ch) => { const n = document.createElement(tag); Object.assign(n, props || {}); for (const c of ch) { if (c == null) continue; n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); } return n; };
+    const overlay = mk("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+    const box = mk("div", { style: "background:#fff;width:560px;max-height:80vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
+    const closeBtn = mk("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;" }, "\u2715");
+    closeBtn.onclick = () => { overlay.remove(); onCancel(); };
+    box.appendChild(closeBtn);
+    const title = candidates.length === 1 ? "Unfinished Search Detected" : `${candidates.length} Unfinished Searches Detected`;
+    box.appendChild(mk("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;" }, title));
+    box.appendChild(mk("div", { style: "font-size:12px;color:#6b7280;margin-bottom:14px;" },
+      "Progress for the following search(es) was saved before you closed the previous session. Resume to skip already-completed segments and continue, or discard to start fresh."));
+    for (const job of candidates) {
+      const totalRows = job.totalRowsCollected || 0;
+      const segDone = job.segmentsCompleted || 0;
+      const segTotal = job.segmentsExpected || 0;
+      const pct = segTotal > 0 ? Math.min(100, Math.floor((segDone / segTotal) * 100)) : 0;
+      const created = new Date(job.createdAt);
+      const updated = new Date(job.updatedAt || job.createdAt);
+      const card = mk("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#f8fafc;" });
+      const headerRow = mk("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" });
+      headerRow.appendChild(mk("div", { style: "font-size:13px;font-weight:600;color:#111827;" }, `${segDone} / ${segTotal || "?"} segments \u2022 ${totalRows.toLocaleString()} rows`));
+      headerRow.appendChild(mk("div", { style: "font-size:11px;color:#6b7280;" }, `${pct}%`));
+      card.appendChild(headerRow);
+      const barOuter = mk("div", { style: "height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-bottom:8px;" });
+      const barInner = mk("div", { style: `height:100%;width:${pct}%;background:linear-gradient(90deg,#38bdf8,#a78bfa);` });
+      barOuter.appendChild(barInner);
+      card.appendChild(barOuter);
+      const meta = mk("div", { style: "font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.5;" });
+      meta.appendChild(mk("div", {}, summarizeSearchConfig(job.config)));
+      meta.appendChild(mk("div", {}, `Started: ${created.toLocaleString()}`));
+      meta.appendChild(mk("div", {}, `Last update: ${updated.toLocaleString()}`));
+      card.appendChild(meta);
+      const btnRow = mk("div", { style: "display:flex;gap:8px;" });
+      const resumeBtn = mk("button", { style: "flex:1;padding:7px;border-radius:7px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:12px;font-weight:600;cursor:pointer;" }, "Resume");
+      const discardBtn = mk("button", { style: "padding:7px 14px;border-radius:7px;border:1px solid #ef4444;background:#fff;color:#ef4444;font-size:12px;font-weight:600;cursor:pointer;" }, "Discard");
+      resumeBtn.onclick = () => { overlay.remove(); onResume(job); };
+      discardBtn.onclick = async () => {
+        if (!confirm(`Discard this search and delete its ${totalRows.toLocaleString()} cached row(s)?`)) return;
+        try { await deleteJobAndSegments(job.id); } catch (_) {}
+        card.remove();
+        if (!box.querySelector("[data-job-card]")) { overlay.remove(); onDiscard(); }
+      };
+      card.dataset.jobCard = "1";
+      btnRow.appendChild(resumeBtn);
+      btnRow.appendChild(discardBtn);
+      card.appendChild(btnRow);
+      box.appendChild(card);
+    }
+    const skipRow = mk("div", { style: "display:flex;justify-content:flex-end;margin-top:6px;" });
+    const skipBtn = mk("button", { style: "padding:7px 14px;border-radius:7px;border:1px solid #d1d5db;background:#fff;color:#6b7280;font-size:12px;cursor:pointer;" }, "Start new search instead");
+    skipBtn.onclick = () => { overlay.remove(); onCancel(); };
+    skipRow.appendChild(skipBtn);
+    box.appendChild(skipRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
   function openSearch() {
     (async () => {
       try {
@@ -17,7 +214,23 @@
           alert("Failed to run. Make sure you're running this from an active Nexidia session.");
           return;
         }
-
+        await requestPersistence();
+        const candidates = await getSearchResumeCandidates();
+        if (candidates.length > 0) {
+          let userChoice = null;
+          await new Promise((resolve) => {
+            showSearchResumeModal(
+              candidates,
+              (job) => { userChoice = { type: "resume", job }; resolve(); },
+              () => { userChoice = { type: "fresh" }; resolve(); },
+              () => { userChoice = { type: "fresh" }; resolve(); }
+            );
+          });
+          if (userChoice && userChoice.type === "resume") {
+            api.setShared("resumeSearchJobId", userChoice.job.id);
+            api.setShared("resumeSearchConfig", userChoice.job.config);
+          }
+        }
         const BASE = "https://apug01.nxondemand.com";
         const SEARCH_URL = BASE + "/NxIA/api-gateway/explore/api/v1.0/search";
         const METADATA_URL = BASE + "/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
@@ -32,7 +245,6 @@
         const BOOST_WARN = 100;
         const BOOST_SEVERE = 150;
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
         const FORCE_TEXT_FIELDS = new Set([
           "UDFVarchar1","UDFVarchar122","UDFVarchar110","UDFVarchar41",
           "UDFVarchar115","UDFVarchar136","UDFVarchar50","UDFVarchar104","UDFVarchar105"
@@ -52,11 +264,9 @@
           "UDFVarchar115": "Orig ANI",
           "UDFVarchar136": "Provider Tax ID"
         };
-
         let currentToken = (api.getShared("searchSessionToken") || 0) + 1;
         api.setShared("searchSessionToken", currentToken);
         let abortController = new AbortController();
-
         function resetSession() {
           abortController.abort();
           abortController = new AbortController();
@@ -66,7 +276,6 @@
         function isSessionCurrent(token) {
           return token === api.getShared("searchSessionToken");
         }
-
         let metadataFields = [];
         try {
           const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store", signal: abortController.signal });
@@ -75,14 +284,12 @@
             metadataFields = Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : [];
           }
         } catch (_) {}
-
         function getDisplayName(sn) {
           if (!sn) return sn;
           const f = metadataFields.find((x) => x.storageName === sn);
           if (f) return f.displayName;
           return DISPLAY_NAME_MAP[sn] || sn;
         }
-
         const progressUI = (() => {
           const wrap = document.createElement("div");
           wrap.style.cssText = "position:fixed;top:16px;right:16px;z-index:999999;width:420px;background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:12px 12px 10px;font-family:Segoe UI,Arial,sans-serif;box-shadow:0 12px 28px rgba(0,0,0,.35);";
@@ -124,7 +331,6 @@
             }
           };
         })();
-
         function el(tag, props, ...children) {
           props = props || {};
           const node = document.createElement(tag);
@@ -143,7 +349,6 @@
             el("div", { style: "font-size:12px;color:#444;margin-bottom:4px;" }, label), input);
           return { wrap, input };
         }
-
         function runDateFocusAnimation(card, dateSectionEl, onDismiss) {
           var existing = card.querySelectorAll("[data-date-overlay]");
           for (var ei = 0; ei < existing.length; ei++) existing[ei].remove();
@@ -198,14 +403,10 @@
           }, 80);
           return dismiss;
         }
-
         var dateChanged = false;
 let timeFilters = [];
-
         const allRows = [];
-
   const timeFilterPills = el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;" });
-
   function renderTimeFilterPills() {
     timeFilterPills.innerHTML = "";
     for (var i = 0; i < timeFilters.length; i++) {
@@ -224,14 +425,11 @@ let timeFilters = [];
       })(i);
     }
   }
-
   function openTimeFilterPopup() {
     var overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;" });
     var card = el("div", { style: "background:#fff;border-radius:12px;padding:22px;width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);" });
-
     card.appendChild(el("div", { style: "font-size:14px;font-weight:700;margin-bottom:4px;" }, "Time Filter"));
     card.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:12px;" }, "Add time windows to restrict results. Times are in CST to match Nexidia timestamps."));
-
     var inputRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
     inputRow.appendChild(el("span", { style: "font-size:12px;" }, "From"));
     var startInput = el("input", { type: "time", style: "padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" });
@@ -242,12 +440,9 @@ let timeFilters = [];
     var addBtn = el("button", { style: "padding:4px 12px;border-radius:6px;border:none;background:#3b82f6;color:#fff;cursor:pointer;font-size:12px;font-weight:700;" }, "Add");
     inputRow.appendChild(addBtn);
     card.appendChild(inputRow);
-
     var listWrap = el("div", { style: "margin-bottom:14px;min-height:28px;" });
     card.appendChild(listWrap);
-
     var localFilters = timeFilters.map(function(f) { return { start: f.start, end: f.end }; });
-
     function renderLocal() {
       listWrap.innerHTML = "";
       if (localFilters.length === 0) {
@@ -269,7 +464,6 @@ let timeFilters = [];
       }
     }
     renderLocal();
-
     addBtn.onclick = function() {
       if (!startInput.value || !endInput.value) { alert("Please select both a start and end time."); return; }
       if (startInput.value >= endInput.value) { alert("Start time must be before end time."); return; }
@@ -278,7 +472,6 @@ let timeFilters = [];
       endInput.value = "";
       renderLocal();
     };
-
     var btnRow = el("div", { style: "display:flex;justify-content:flex-end;gap:8px;" });
     var applyBtn = el("button", { style: "padding:6px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;cursor:pointer;font-size:12px;font-weight:700;" }, "Apply");
     applyBtn.onclick = function() {
@@ -291,15 +484,12 @@ let timeFilters = [];
     btnRow.appendChild(cancelBtn);
     btnRow.appendChild(applyBtn);
     card.appendChild(btnRow);
-
     overlay.appendChild(card);
     document.body.appendChild(overlay);
   }
-
   function generateDateFilters(fromVal, toVal, activeTimeFilters) {
     return { parameterName: "recordedDateTime", operator: "BETWEEN", type: "DATE", value: { firstValue: isoStart(fromVal), secondValue: isoEnd(toVal) } };
   }
-
   function filterRowsByTimeWindows(rows, windows) {
     if (!windows || !windows.length) return rows;
     var parsed = [];
@@ -324,7 +514,6 @@ let timeFilters = [];
     }
     return out;
   }
-
         function getActiveStorageNames(excludeEntry) {
           const set = new Set();
           for (let i = 0; i < allRows.length; i++) {
@@ -335,7 +524,6 @@ let timeFilters = [];
           }
           return set;
         }
-
         function makeFieldPicker(onSelect) {
           const wrapper = el("div", { style: "position:relative;flex:1;min-width:160px;" });
           const input = el("input", { type: "text", placeholder: "Search fields...", style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;" });
@@ -390,7 +578,6 @@ let timeFilters = [];
             }
           };
         }
-
         function makeAndLabel() {
           const wrap = el("div", { style: "display:flex;align-items:center;margin:0;height:16px;pointer-events:none;user-select:none;" });
           wrap.dataset.andLabel = "1";
@@ -406,7 +593,6 @@ let timeFilters = [];
           if (prev?.dataset?.andLabel) prev.remove();
           else if (next?.dataset?.andLabel) next.remove();
         }
-
         const panes = [];
         let activePaneIndex = 0;
         let ghostPaneEl = null;
@@ -416,13 +602,10 @@ let timeFilters = [];
         let fadeMaskLeft = null;
         const PEEK = 80, GAP = 14;
         function getPaneWidth() { return carouselViewport ? Math.max(200, carouselViewport.offsetWidth - PEEK - GAP) : 800; }
-
         function buildRowEntry(storageName, isPhrase) {
           isPhrase = isPhrase || false;
           const entry = { rowEl: null, picker: null, valueInput: null, fieldLabelWrap: null, paneIndex: 0, isPhrase, exclude: false, speaker: "transcript", excludeToggle: null, speakerWrap: null, speakerRadios: null, matchMode: "IN", matchToggle: null };
-
           const removeBtn = el("button", { style: "width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#aaa;cursor:pointer;font-size:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;align-self:center;", title: "Remove" }, "X");
-
           const fieldLabelWrap = el("div", { style: "flex:0 0 180px;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;background:#f3f4f6;font-size:13px;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;cursor:pointer;" });
           fieldLabelWrap.onclick = () => {
             if (!entry.picker) return;
@@ -431,7 +614,6 @@ let timeFilters = [];
             entry.picker.input.focus();
           };
           entry.fieldLabelWrap = fieldLabelWrap;
-
           let valueInput;
           if (isPhrase) {
             valueInput = el("textarea", { rows: 2, placeholder: PHRASE_PLACEHOLDER, style: "flex:1;min-width:0;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;resize:vertical;font-family:Segoe UI,Arial,sans-serif;font-size:13px;" });
@@ -467,7 +649,6 @@ let timeFilters = [];
             });
           }
           entry.valueInput = valueInput;
-
           const excludeToggle = (() => {
             const PW = 32, PH = 16, KN = 12;
             const wrap = el("div", { style: "display:flex;align-items:center;gap:4px;flex-shrink:0;cursor:pointer;user-select:none;" });
@@ -549,7 +730,6 @@ let timeFilters = [];
             entry.speakerRadios = radios;
           }
           entry.speakerWrap = speakerWrap;
-
           const picker = isPhrase ? null : makeFieldPicker((f) => {
             fieldLabelWrap.textContent = f.displayName;
             fieldLabelWrap.title = f.displayName;
@@ -562,14 +742,12 @@ let timeFilters = [];
             else { fieldLabelWrap.style.display = "none"; }
           }
           entry.picker = picker;
-
           if (isPhrase) {
             fieldLabelWrap.textContent = "Phrase";
             fieldLabelWrap.title = "Phrase search - each line is a separate search";
             fieldLabelWrap.style.fontStyle = "italic";
             fieldLabelWrap.style.color = "#6b7280";
           }
-
           const rowEl = el("div", { style: "display:flex;gap:8px;align-items:center;margin:4px 0;" });
           rowEl.appendChild(removeBtn);
           rowEl.appendChild(excludeToggle.wrap);
@@ -577,17 +755,14 @@ let timeFilters = [];
           if (picker) rowEl.appendChild(picker.wrapper);
           if (matchToggle) rowEl.appendChild(matchToggle.wrap);
           rowEl.appendChild(valueInput);
-
           if (isPhrase) {
             const subRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin:4px 0 2px 30px;" });
             if (speakerWrap) subRow.appendChild(speakerWrap);
             rowEl.style.flexWrap = "wrap";
             rowEl.appendChild(subRow);
           }
-
           entry.rowEl = rowEl;
           allRows.push(entry);
-
           rowEl.draggable = true;
           rowEl.style.cursor = "grab";
           rowEl.addEventListener("dragstart", (e) => {
@@ -639,13 +814,11 @@ let timeFilters = [];
             }
             rebuildAndLabels(pane);
           });
-
           removeBtn.onclick = () => {
             removeAdjacentAndLabel(rowEl); rowEl.remove();
             const idx = allRows.indexOf(entry); if (idx !== -1) allRows.splice(idx, 1);
             for (let i = 0; i < panes.length; i++) { const pi = panes[i].rows.indexOf(entry); if (pi !== -1) panes[i].rows.splice(pi, 1); }
           };
-
           if (storageName && picker) {
             picker.preselect(storageName);
             fieldLabelWrap.textContent = getDisplayName(storageName);
@@ -653,7 +826,6 @@ let timeFilters = [];
           }
           return entry;
         }
-
         function syncFieldAcrossPanes(changedEntry, storageName, displayName) {
           if (changedEntry.isPhrase) return;
           let srcPaneObj = null;
@@ -671,8 +843,7 @@ let timeFilters = [];
             parallel.fieldLabelWrap.title = displayName;
           }
         }
-
-        function buildPaneEl(paneIndex) {
+function buildPaneEl(paneIndex) {
           const paneEl = el("div", { style: "background:#fff;border-radius:14px;border:1px solid rgba(59,130,246,0.18);padding:18px 20px 14px;box-sizing:border-box;flex-shrink:0;position:relative;box-shadow:0 2px 10px rgba(59,130,246,0.06);" });
           paneEl.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#1e3a5f;margin-bottom:14px;" }, "Search Fields"));
           const rowsContainer = el("div", {});
@@ -694,7 +865,6 @@ let timeFilters = [];
           addPhraseBtn.onclick = () => { if (paneObj.rows.length > 0) rowsContainer.appendChild(makeAndLabel()); const entry = buildRowEntry("", true); entry.paneIndex = paneObj.index; rowsContainer.appendChild(entry.rowEl); paneObj.rows.push(entry); };
           return paneObj;
         }
-
         function populatePaneDefaults(pane) {
           for (let i = 0; i < DEFAULT_FILTER_STORAGES.length; i++) {
             if (i > 0) pane.rowsContainer.appendChild(makeAndLabel());
@@ -702,7 +872,6 @@ let timeFilters = [];
             entry.paneIndex = pane.index; pane.rows.push(entry); pane.rowsContainer.appendChild(entry.rowEl);
           }
         }
-
         function buildGhostPane(paneIndex) {
           const ghost = el("div", { style: "background:#fff;border-radius:14px;border:1px solid rgba(59,130,246,0.10);padding:18px 20px 14px;box-sizing:border-box;flex-shrink:0;position:relative;box-shadow:0 2px 10px rgba(59,130,246,0.03);opacity:0.55;pointer-events:none;" });
           ghost.dataset.ghost = "1";
@@ -721,7 +890,6 @@ let timeFilters = [];
           ghost.appendChild(el("div", { style: "text-align:center;font-size:11px;font-weight:600;color:#3b82f6;letter-spacing:1px;margin-top:16px;opacity:0.35;" }, "Search " + String.fromCharCode(65 + paneIndex)));
           return ghost;
         }
-
         function activateNextPane() {
           const newIndex = panes.length;
           const newPane = buildPaneEl(newIndex);
@@ -740,7 +908,6 @@ let timeFilters = [];
           carouselTrack.appendChild(ghostPaneEl);
           resizePanes(); slideTo(newIndex); updateDots();
         }
-
         function pruneEmptyTailPanes() {
           while (panes.length > 1) {
             const last = panes[panes.length - 1];
@@ -757,7 +924,6 @@ let timeFilters = [];
           carouselTrack.appendChild(ghostPaneEl);
           resizePanes(); updateDots();
         }
-
         function resizePanes() {
           if (!carouselViewport) return;
           const pw = getPaneWidth();
@@ -788,7 +954,6 @@ let timeFilters = [];
           applySlideTransform(index, true); updateDots();
           if (index < prev) { setTimeout(() => { pruneEmptyTailPanes(); }, 440); }
         }
-
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
         function closeAll() {
@@ -800,9 +965,7 @@ let timeFilters = [];
           window.removeEventListener("resize", resizePanes);
         }
         stickyClose.onclick = closeAll;
-
         const card = el("div", { style: "background:#f8fafc;width:1080px;max-height:90vh;overflow:auto;border-radius:14px;padding:18px 18px 22px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-
         function clearAllFields() {
           const newToday = new Date();
           const newMonthAgo = new Date(newToday);
@@ -832,7 +995,6 @@ let timeFilters = [];
           carouselTrack.appendChild(ghostPaneEl);
           resizePanes(); updateDots(); slideTo(0);
         }
-
         const headerRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:4px;" });
         headerRow.appendChild(el("div", { style: "font-size:18px;font-weight:600;flex:1;" }, "Nexidia Search"));
         const loadSearchBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;cursor:pointer;font-size:12px;" }, "\uD83D\uDCC2 Load");
@@ -847,9 +1009,7 @@ let timeFilters = [];
         clearAllBtn.onclick = () => { clearAllFields(); };
         headerRow.appendChild(clearAllBtn);
         card.appendChild(headerRow);
-
         card.appendChild(hr());
-
         const dateSectionWrapper = el("div", { style: "margin-bottom:0;" });
         var dateHeaderRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin:10px 0;" });
     dateHeaderRow.appendChild(el("div", { style: "font-size:15px;font-weight:600;" }, "Date Range"));
@@ -872,7 +1032,6 @@ let timeFilters = [];
         dateSectionWrapper.appendChild(dateRow);
         card.appendChild(dateSectionWrapper);
         card.appendChild(hr());
-
         const carouselOuter = el("div", { style: "position:relative;" });
         carouselViewport = el("div", { style: "overflow:hidden;border-radius:14px;position:relative;" });
         fadeMaskLeft = el("div", { style: "position:absolute;top:0;left:0;bottom:0;width:" + PEEK + "px;background:linear-gradient(to right,rgba(248,250,252,0.97),rgba(248,250,252,0));z-index:6;pointer-events:none;cursor:pointer;opacity:0;transition:opacity 0.3s;" });
@@ -884,7 +1043,6 @@ let timeFilters = [];
         carouselOuter.appendChild(carouselViewport);
         dotsRow = el("div", { style: "display:flex;justify-content:center;gap:6px;margin-top:10px;" });
         card.appendChild(carouselOuter); card.appendChild(dotsRow); card.appendChild(hr());
-
         const searchBar = el("div", { style: "position:sticky;bottom:0;padding:16px 0 4px;background:linear-gradient(to bottom, rgba(248,250,252,0) 0%, #f8fafc 30%);display:flex;justify-content:center;z-index:10;pointer-events:none;" });
         const mainSearchBtn = el("button", { style: "padding:12px 72px;border-radius:24px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(59,130,246,0.4);letter-spacing:0.5px;transition:box-shadow 0.2s;pointer-events:auto;" }, "Search");
         mainSearchBtn.onmouseenter = () => { mainSearchBtn.style.boxShadow = "0 6px 22px rgba(59,130,246,0.55)"; };
@@ -895,21 +1053,26 @@ let timeFilters = [];
         modal.appendChild(card);
         document.body.appendChild(modal);
         document.body.appendChild(stickyClose);
-
         const firstPane = buildPaneEl(0);
         populatePaneDefaults(firstPane);
         panes.push(firstPane);
         carouselTrack.appendChild(firstPane.el);
         ghostPaneEl = buildGhostPane(1);
         carouselTrack.appendChild(ghostPaneEl);
-
         var dismissDateAnim = null;
         requestAnimationFrame(() => {
           resizePanes();
           updateDots();
+          const resumeJobId = api.getShared("resumeSearchJobId");
+          const resumeConfig = api.getShared("resumeSearchConfig");
           const returnConfig = api.getShared("lastSearchConfig");
           const isReturn = api.getShared("returnToSearch");
-          if (isReturn && returnConfig) {
+          if (resumeJobId && resumeConfig) {
+            api.setShared("activeResumeJobId", resumeJobId);
+            api.setShared("resumeSearchJobId", null);
+            api.setShared("resumeSearchConfig", null);
+            deserializeSearch(resumeConfig);
+          } else if (isReturn && returnConfig) {
             api.setShared("returnToSearch", false);
             deserializeSearch(returnConfig);
           } else {
@@ -918,16 +1081,13 @@ let timeFilters = [];
             }, 120);
           }
         });
-        window.addEventListener("resize", resizePanes);
-
-      
+        window.addEventListener("resize", resizePanes);        
         function formatDateDisplay(isoStr) {
           if (!isoStr) return isoStr;
           const parts = isoStr.split("-");
           if (parts.length !== 3) return isoStr;
           return parts[1] + "/" + parts[2] + "/" + parts[0];
         }
-
         function confirmDateRange(fromVal, toVal) {
           if (dateChanged) return true;
           const msg = "Date Range fields have not been updated.\n\nDid you want to search from " + formatDateDisplay(fromVal) + " to " + formatDateDisplay(toVal) + "?\n\nClick OK to proceed, or Cancel to go back and adjust.";
@@ -940,7 +1100,6 @@ let timeFilters = [];
           }
           return proceed;
         }
-
         function splitValues(raw) {
           return String(raw || "")
             .replace(/\r\n/g, "\n")
@@ -949,10 +1108,8 @@ let timeFilters = [];
             .map((s) => s.trim())
             .filter(Boolean);
         }
-
         function isoStart(d) { return d + "T00:00:00Z"; }
         function isoEnd(d) { return d + "T23:59:59Z"; }
-
         function normalizeParamName(p) {
           if (!p) return p;
           const s = String(p).trim();
@@ -962,12 +1119,10 @@ let timeFilters = [];
           let m = s.match(/udfvarchar(\d+)/i); if (m) return "UDFVarchar" + m[1];
           return s;
         }
-
         function normalizeKeywordValues(pn, vals) {
           if (normalizeParamName(pn) === "UDFVarchar120") return vals.map((v) => String(v).toLowerCase());
           return vals;
         }
-
         function buildKeywordFilter(pn, vals, op) {
           const operator = op === "CONTAINS" ? "CONTAINS" : "IN";
           return {
@@ -977,7 +1132,6 @@ let timeFilters = [];
             value: normalizeKeywordValues(pn, vals)
           };
         }
-
         function buildTextFilter(phrase, paramName) {
           return {
             operator: "IN",
@@ -991,21 +1145,16 @@ let timeFilters = [];
             }
           };
         }
-
         function digitToWords(numStr) {
           var map = { '0': 'zero','1':'one','2':'two','3':'three','4':'four','5':'five','6':'six','7':'seven','8':'eight','9':'nine' };
           var out = [];
           for (var i = 0; i < numStr.length; i++) out.push(map[numStr[i]] || numStr[i]);
           return out.join(' ');
         }
-
         function buildBoostVariants(numStr) {
           const base = digitToWords(numStr);
-
-          // FULL combinatorial (your desired behavior)
           const parts = base.split(" ");
           const variants = [[]];
-
           for (let i = 0; i < parts.length; i++) {
             if (parts[i] === "zero") {
               const next = [];
@@ -1018,10 +1167,8 @@ let timeFilters = [];
               for (const v of variants) v.push(parts[i]);
             }
           }
-
           return variants.map(v => v.join(" "));
         }
-
         function estimateBoostLoad(values) {
           let total = 0;
           for (const v of values) {
@@ -1029,15 +1176,13 @@ let timeFilters = [];
             total += Math.pow(2, zeros || 0);
           }
           return total;
-        }
-        
+        }          
         function buildBoostSimple(numStr) {
           const base = digitToWords(numStr);
           const result = [base];
           if (numStr.indexOf('0') !== -1) result.push(base.replace(/zero/g, 'oh'));
           return result;
         }
-
         function handleBoostDecision(totalSearches, fieldNames) {
           return new Promise((resolve) => {
             if (totalSearches < BOOST_WARN) { resolve("full"); return; }
@@ -1074,31 +1219,26 @@ let timeFilters = [];
             document.body.appendChild(overlay);
           });
         }
-
         async function runSearch() {
           try {
             const fromVal = fromDate.input.value;
             const toVal = toDate.input.value;
             if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
             if (!confirmDateRange(fromVal, toVal)) return;
-
             resetSession();
             const myToken = api.getShared("searchSessionToken");
             const dateFilter = generateDateFilters(fromVal, toVal, timeFilters);
-
             const runSets = [];
             const globalExcludes = [];
             const boostCandidates = [];
             const boostFieldNames = new Set();
             const boostValues = [];
-
             for (let pi = 0; pi < panes.length; pi++) {
               const pane = panes[pi];
               const fieldEntries = allRows.filter(r => !r.isPhrase && r.paneIndex === pane.index);
               const phraseEntries = allRows.filter(r => r.isPhrase && r.paneIndex === pane.index);
               const includeKwEntries = [];
               const paneBoosts = [];
-
               for (const e of fieldEntries) {
                 const sn = e.picker ? e.picker.getStorageName() : "";
                 const val = e.valueInput.value.trim();
@@ -1127,9 +1267,7 @@ let timeFilters = [];
                   includeKwEntries.push({ storageName: sn, filter: buildKeywordFilter(sn, cleanVals, e.matchMode) });
                 }
               }
-
               const includeKw = includeKwEntries.map(x => x.filter);
-
               for (const bc of paneBoosts) {
                 const otherFilters = includeKwEntries
                   .filter(e => e.storageName !== bc.storageName)
@@ -1141,7 +1279,6 @@ let timeFilters = [];
                     : null
                 });
               }
-
               const phraseGroups = [];
               for (const pe of phraseEntries) {
                 const lines = splitValues(pe.valueInput.value);
@@ -1154,18 +1291,15 @@ let timeFilters = [];
                   }
                 }
               }
-
               const keywordGroup = includeKw.length
                 ? { operator: "AND", invertOperator: false, filters: includeKw }
                 : null;
               if (!keywordGroup && !phraseGroups.length) continue;
               runSets.push({ keywordGroup, phraseGroups, label: "Search " + String.fromCharCode(65 + pane.index) });
             }
-
             const totalBoost = estimateBoostLoad(boostValues);
             const decision = await handleBoostDecision(totalBoost, Array.from(boostFieldNames));
             if (decision === "cancel") return;
-
             for (const bc of boostCandidates) {
               const variants = decision === "full" ? buildBoostVariants(bc.value) : buildBoostSimple(bc.value);
               for (const phrase of variants) {
@@ -1176,23 +1310,37 @@ let timeFilters = [];
                 });
               }
             }
-
             if (!runSets.length) {
               const ok = confirm("No search values entered. This will pull the entire date range. Continue?");
               if (!ok) return;
               runSets.push({ keywordGroup: null, phraseGroups: [], label: "All" });
             }
-
-            api.setShared("lastSearchConfig", serializeSearch());
+            const searchConfig = serializeSearch();
+            api.setShared("lastSearchConfig", searchConfig);
+            const resumeJobId = api.getShared("activeResumeJobId");
+            api.setShared("activeResumeJobId", null);
+            const jobId = resumeJobId || generateJobId();
+            const existingJob = resumeJobId ? await idbGet("jobs", jobId) : null;
+            const jobRecord = {
+              id: jobId,
+              status: "in-progress",
+              config: searchConfig,
+              segmentsCompleted: existingJob?.segmentsCompleted || 0,
+              segmentsExpected: existingJob?.segmentsExpected || runSets.length,
+              totalRowsCollected: existingJob?.totalRowsCollected || 0,
+              createdAt: existingJob?.createdAt || Date.now(),
+              updatedAt: Date.now()
+            };
+            try { await idbPut("jobs", jobRecord); } catch (e) { console.warn("[NexidiaSearch] could not save job:", e); }
             modal.remove(); stickyClose.remove();
             progressUI.show();
-            progressUI.set("Searching...", 10, "");
+            progressUI.set(resumeJobId ? "Resuming search..." : "Searching...", 10, resumeJobId ? "Resumed job: " + jobId : "");
             const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
             const searchFields = colPrefs.fields.includes("sourceMediaId")
               ? colPrefs.fields : colPrefs.fields.concat(["sourceMediaId"]);
             const excludeGroup = globalExcludes.length
               ? { operator: "OR", invertOperator: true, filters: globalExcludes } : null;
-            const result = await executeSearch(runSets, searchFields, dateFilter, "Search", myToken, excludeGroup);
+            const result = await executeSearch(runSets, searchFields, dateFilter, "Search", myToken, excludeGroup, jobId);
             if (result === null) { progressUI.remove(); return; }
             if (timeFilters.length > 0) {
               progressUI.set("Filtering by time windows...", 90, "Pre-filter: " + result.finalRows.length + " rows");
@@ -1200,6 +1348,7 @@ let timeFilters = [];
             }
             if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
+            try { await updateJob(jobId, { status: "complete", totalRowsCollected: result.finalRows.length }); } catch (_) {}
             sendToDispatcher(result, colPrefs);
           } catch (err) {
             if (err.name === "AbortError") { progressUI.remove(); return; }
@@ -1214,7 +1363,6 @@ let timeFilters = [];
           if (ct.includes("application/json")) { try { return { json: JSON.parse(text), text }; } catch (_) { return { json: null, text }; } }
           return { json: null, text };
         }
-
         function pickRows(json) {
           if (!json) return [];
           if (Array.isArray(json.results)) return json.results;
@@ -1224,7 +1372,6 @@ let timeFilters = [];
           if (json.result && Array.isArray(json.result.results)) return json.result.results;
           return [];
         }
-
         function getFieldValue(rowObj, key) {
           if (!rowObj) return "";
           const want = String(key || "");
@@ -1243,8 +1390,7 @@ let timeFilters = [];
           }
           return "";
         }
-
-        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken, excludeGroup) {
+        async function executeSearch(runSets, baseFields, dateFilter, labelPrefix, sessionToken, excludeGroup, jobId) {
           const merged = new Map();
           const passthroughNoKey = [];
           const totalRuns = runSets.length;
@@ -1260,8 +1406,34 @@ let timeFilters = [];
             maxRowsWarned: false,
             maxRowsOverride: false
           };
+          //##> Load any previously-cached segments for this jobId. Each cached segment
+          //##> is keyed by a hash of its keyword/phrase/date/exclude payload; matching
+          //##> segments on resume are loaded straight into merged without re-fetching.
+          const cachedSegments = new Map();
+          if (jobId) {
+            try {
+              const cachedList = await idbGetAllByIndex("segments", "byJob", jobId);
+              for (const seg of cachedList) cachedSegments.set(seg.segmentHash, seg);
+            } catch (_) {}
+          }
           function progressMeta() {
             return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Rows: " + ctx.totalKept;
+          }
+          async function persistSegment(segmentHash, rows, phraseLabel) {
+            if (!jobId) return;
+            try {
+              await idbPut("segments", { jobId, segmentHash, rows, phraseLabel: phraseLabel || null, savedAt: Date.now() });
+            } catch (e) { console.warn("[NexidiaSearch] segment write failed:", e); }
+          }
+          async function bumpJobProgress() {
+            if (!jobId) return;
+            try {
+              await updateJob(jobId, {
+                segmentsCompleted: ctx.segmentsCompleted,
+                segmentsExpected: Math.max(ctx.estimatedSegments, ctx.segmentsCompleted),
+                totalRowsCollected: ctx.totalKept
+              });
+            } catch (_) {}
           }
           async function probeTotalResults(keywordGroup, phraseFilter, dfilter) {
             if (!isSessionCurrent(sessionToken)) return { total: -1, bailed: false };
@@ -1496,12 +1668,18 @@ let timeFilters = [];
             const ok = await confirmMaxRows();
             if (ok) { ctx.maxRowsOverride = true; return true; }
             return false;
-          }
-          
+          }            
           async function runWithSplit(keywordGroup, phraseFilter, dfilter, statusLabel, depth) {
             if (ctx.segmentsCompleted >= MAX_SEGMENTS) {
               showAtomicCapWarning();
               return [];
+            }
+            const segHash = computeSegmentHash(keywordGroup, phraseFilter, dfilter, excludeGroup);
+            const cached = cachedSegments.get(segHash);
+            if (cached && Array.isArray(cached.rows)) {
+              ctx.segmentsCompleted++;
+              await bumpJobProgress();
+              return cached.rows;
             }
             const gateOk = await maybeBigSearchGate();
             if (!gateOk) return null;
@@ -1512,10 +1690,14 @@ let timeFilters = [];
               ctx.bailedSegments.push({ depth, errReason: probe.errReason || "" });
               console.warn("[NexidiaSearch] Server bailed on probe, skipping segment:", probe.errReason);
               ctx.segmentsCompleted++;
+              await persistSegment(segHash, [], null);
+              await bumpJobProgress();
               return [];
             }
             if (probe.total === 0) {
               ctx.segmentsCompleted++;
+              await persistSegment(segHash, [], null);
+              await bumpJobProgress();
               return [];
             }
             if (probe.total > CAP_LIMIT) {
@@ -1524,6 +1706,8 @@ let timeFilters = [];
                 const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
                 if (rows === null) return null;
                 ctx.segmentsCompleted++;
+                await persistSegment(segHash, rows, null);
+                await bumpJobProgress();
                 showAtomicCapWarning();
                 return rows;
               }
@@ -1533,6 +1717,8 @@ let timeFilters = [];
                 const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
                 if (rows === null) return null;
                 ctx.segmentsCompleted++;
+                await persistSegment(segHash, rows, null);
+                await bumpJobProgress();
                 showAtomicCapWarning();
                 return rows;
               }
@@ -1550,6 +1736,8 @@ let timeFilters = [];
             const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
             if (rows === null) return null;
             ctx.segmentsCompleted++;
+            await persistSegment(segHash, rows, null);
+            await bumpJobProgress();
             return rows;
           }
           for (let si = 0; si < runSets.length; si++) {
@@ -1603,7 +1791,6 @@ let timeFilters = [];
           for (let i = 0; i < passthroughNoKey.length; i++) { if (passthroughNoKey[i].phrases.length > maxPhraseCols) maxPhraseCols = passthroughNoKey[i].phrases.length; finalRows.push(passthroughNoKey[i]); }
           return { finalRows, maxPhraseCols, includePhraseCol: distinctPhraseLabels.size >= 2 };
         }
-
         function sendToDispatcher(result, colPrefs) {
           api.setShared("lastSearchResult", {
             rows: result.finalRows, fields: colPrefs.fields, headers: colPrefs.headers,
@@ -1614,7 +1801,6 @@ let timeFilters = [];
           if (dispatcher) { dispatcher.open(); }
           else { alert("Dispatcher not loaded. Check manifest."); }
         }
-
         const LS_KEY = "NEXIDIA_SAVED_SEARCHES";
         function getSavedSearches() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_) { return {}; } }
         function saveSearchToStorage(name, payload) {
@@ -1635,7 +1821,6 @@ let timeFilters = [];
           document.body.appendChild(a); a.click(); document.body.removeChild(a);
           URL.revokeObjectURL(url);
         }
-
         function serializeSearch() {
           return {
             dateFrom: fromDate.input.value,
@@ -1657,7 +1842,6 @@ let timeFilters = [];
             })
           };
         }
-
         function deserializeSearch(payload) {
           if (payload.dateFrom) { fromDate.input.value = payload.dateFrom; dateChanged = true; }
           if (payload.dateTo) { toDate.input.value = payload.dateTo; dateChanged = true; }
@@ -1720,7 +1904,6 @@ let timeFilters = [];
           carouselTrack.appendChild(ghostPaneEl);
           resizePanes(); updateDots(); slideTo(0);
         }
-
         function openSavePrompt(payload, suggestedName) {
           const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
           const box = el("div", { style: "background:#fff;width:380px;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
@@ -1740,7 +1923,6 @@ let timeFilters = [];
           overlay.appendChild(box); document.body.appendChild(overlay);
           setTimeout(() => nameInput.focus(), 50);
         }
-
         function openLoadPanel() {
           const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
           const box = el("div", { style: "background:#fff;width:460px;max-height:80vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
@@ -1789,14 +1971,12 @@ let timeFilters = [];
           box.appendChild(fileInput); box.appendChild(pasteArea); box.appendChild(importBtn); box.appendChild(cancelBtn);
           overlay.appendChild(box); document.body.appendChild(overlay);
         }
-
       } catch (err) {
         console.error(err);
         alert("Failed to run. Make sure you're running this from an active Nexidia session.");
       }
     })();
   }
-
   function openGlobalSavePrompt() {
     const payload = api.getShared("lastSearchConfig");
     if (!payload) { alert("No search config available. Run a search first."); return; }
@@ -1831,7 +2011,6 @@ let timeFilters = [];
     overlay.appendChild(box); document.body.appendChild(overlay);
     setTimeout(() => nameInput.focus(), 50);
   }
-
   api.setShared("openGlobalSavePrompt", openGlobalSavePrompt);
   api.registerTool({ id: "search", label: "Search", open: openSearch });
 })();
