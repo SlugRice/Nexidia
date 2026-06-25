@@ -1,4 +1,4 @@
-//[Last Update: 2:23 PM 6/24/2026]
+//[Last Update: 9:35 PM 6/24/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -166,7 +166,10 @@
     fileBase: "Batch",
     fileIncrement: "001",
     fileSubIncrement: "a",
-    outputFields: [{ storageName: "UDFVarchar110", displayName: "Trans_Id" }]
+    outputFields: [{ storageName: "UDFVarchar110", displayName: "Trans_Id" }],
+    zipFileName: "",
+    autoDownload: false,
+    keepAwake: true
   };
   const METADATA_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
   const SEARCH_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search";
@@ -260,6 +263,12 @@
   function uniq(arr) { return [...new Set(arr)]; }
   function sanitizeFilename(name) {
     return name.replace(/[\\/:\*?"<>\|]/g, "_").trim() || "unnamed";
+  }
+  function resolveZipName(cfgName, fallback) {
+    const raw = (cfgName || "").trim();
+    if (!raw) return fallback;
+    const cleaned = sanitizeFilename(raw);
+    return cleaned.toLowerCase().endsWith(".zip") ? cleaned : cleaned + ".zip";
   }
   function parseValues(raw) {
     return [...new Set(raw.split(/[\r\n,\t]+/).map(s => s.trim()).filter(Boolean))];
@@ -692,6 +701,33 @@
       }
     }
     refreshExamples();
+    const zipNameRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
+    zipNameRow.appendChild(el("span", { style: "font-size:12px;color:#374151;min-width:80px;" }, "ZIP filename:"));
+    const zipNameInput = el("input", { type: "text", value: draft.zipFileName || "", placeholder: `nexidia_batches_${nowStamp()}.zip`, style: "flex:1;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+    zipNameInput.oninput = () => { draft.zipFileName = zipNameInput.value; };
+    zipNameRow.appendChild(zipNameInput);
+    zipNameRow.appendChild(tooltip("Custom name for the downloaded ZIP file. Leave blank to use the default systematic name shown in the placeholder. The .zip extension will be added automatically if you omit it."));
+    box.appendChild(zipNameRow);
+    box.appendChild(divider());
+    box.appendChild(sectionHead("Behavior"));
+    const autoDlRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
+    const autoDlCheck = el("input", { type: "checkbox" });
+    autoDlCheck.checked = !!draft.autoDownload;
+    const autoDlLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;" });
+    autoDlLabel.appendChild(autoDlCheck);
+    autoDlLabel.appendChild(document.createTextNode("Auto-download ZIP when ready"));
+    autoDlLabel.appendChild(tooltip("Automatically trigger the ZIP download as soon as the job finishes. Useful for long unattended runs. Requires the tab to remain open."));
+    autoDlRow.appendChild(autoDlLabel);
+    box.appendChild(autoDlRow);
+    const keepAwakeRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
+    const keepAwakeCheck = el("input", { type: "checkbox" });
+    keepAwakeCheck.checked = !!draft.keepAwake;
+    const keepAwakeLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;" });
+    keepAwakeLabel.appendChild(keepAwakeCheck);
+    keepAwakeLabel.appendChild(document.createTextNode("Keep screen awake during job"));
+    keepAwakeLabel.appendChild(tooltip("Requests a screen wake lock and plays inaudible audio to discourage sleep. This may NOT prevent corporate idle-lock policies enforced by Windows. If your IT enforces lock at 15 min and ignores synthesized activity, a USB mouse jiggler is the only reliable workaround."));
+    keepAwakeRow.appendChild(keepAwakeLabel);
+    box.appendChild(keepAwakeRow);
     box.appendChild(divider());
     const fetchToggle = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:6px;" });
     const fetchLink = el("span", { style: "font-size:12px;color:#3b82f6;cursor:pointer;text-decoration:underline;" }, "Fetch Settings");
@@ -721,6 +757,9 @@
     }, "Apply Settings");
     saveBtn.onclick = () => {
       draft.showTimestamps = tsCheck.checked;
+      draft.autoDownload = autoDlCheck.checked;
+      draft.keepAwake = keepAwakeCheck.checked;
+      draft.zipFileName = zipNameInput.value;
       const gapVal = parseInt(gapInput.value);
       if (!isNaN(gapVal) && gapVal >= 0) draft.gapThresholdSeconds = gapVal;
       if (radioLength.checked) {
@@ -747,6 +786,66 @@
     box.appendChild(saveBtn);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
+  }
+//##> Keep-awake helpers. Best-effort only; corporate idle-lock policies may
+  //##> ignore both wake lock and silent audio. Hardware mouse jiggler is the
+  //##> only reliable workaround for strict GPO-enforced lock.
+  function createKeepAwake() {
+    let wakeLock = null;
+    let audioCtx = null;
+    let oscillator = null;
+    let gainNode = null;
+    let visibilityHandler = null;
+    let active = false;
+    async function acquireWakeLock() {
+      try {
+        if ("wakeLock" in navigator) {
+          wakeLock = await navigator.wakeLock.request("screen");
+          wakeLock.addEventListener("release", () => { wakeLock = null; });
+        }
+      } catch (_) { wakeLock = null; }
+    }
+    function startAudio() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        audioCtx = new Ctx();
+        oscillator = audioCtx.createOscillator();
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0.0001;
+        oscillator.frequency.value = 20;
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.start();
+      } catch (_) {}
+    }
+    return {
+      async start() {
+        if (active) return;
+        active = true;
+        await acquireWakeLock();
+        startAudio();
+        visibilityHandler = async () => {
+          if (document.visibilityState === "visible" && active && !wakeLock) {
+            await acquireWakeLock();
+          }
+        };
+        document.addEventListener("visibilitychange", visibilityHandler);
+      },
+      stop() {
+        active = false;
+        if (visibilityHandler) {
+          document.removeEventListener("visibilitychange", visibilityHandler);
+          visibilityHandler = null;
+        }
+        try { if (wakeLock) wakeLock.release(); } catch (_) {}
+        wakeLock = null;
+        try { if (oscillator) oscillator.stop(); } catch (_) {}
+        try { if (audioCtx) audioCtx.close(); } catch (_) {}
+        oscillator = null; gainNode = null; audioCtx = null;
+      },
+      isActive() { return active; }
+    };
   }
   function makeProgressUI() {
     const overlay = document.createElement("div");
@@ -780,7 +879,11 @@
     btnDownload.textContent = "Download ZIP";
     btnDownload.disabled = true;
     btnDownload.style.cssText = "background:#22c55e; color:#06210f; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700; opacity:0.6;";
+    const btnBackToSearch = document.createElement("button");
+    btnBackToSearch.textContent = "Back to Search";
+    btnBackToSearch.style.cssText = "background:#3b82f6; color:#fff; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700; display:none;";
     btnRow.appendChild(btnDownload);
+    btnRow.appendChild(btnBackToSearch);
     overlay.appendChild(closeBtn);
     overlay.appendChild(title);
     overlay.appendChild(status);
@@ -797,6 +900,7 @@
       },
       appendLog(line) { log.textContent += (log.textContent ? "\n" : "") + line; log.scrollTop = log.scrollHeight; },
       btnDownload,
+      btnBackToSearch,
       remove() { try { overlay.remove(); } catch (_) {} }
     };
   }
@@ -902,7 +1006,7 @@
       const created = new Date(job.createdAt);
       const updated = new Date(job.updatedAt || job.createdAt);
       const inputLabel = job.inputDisplayName || job.inputStorageName;
-const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#f8fafc;" });
+      const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#f8fafc;" });
       const headerRow = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" });
       headerRow.appendChild(el("div", { style: "font-size:13px;font-weight:600;color:#111827;" },
         `${done.toLocaleString()} / ${total.toLocaleString()} transcripts saved`));
@@ -952,6 +1056,42 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
     } catch (_) {}
     return [];
   }
+  //##> Back-to-search handler. Tries dispatcher first with the live result map,
+  //##> falls back to a synthesized result from job items if no live result exists.
+  function backToSearch(synthesizedResult) {
+    const dispatcher = api.listTools().find(t => t.id === "dispatcher");
+    const existing = api.getShared("lastSearchResult");
+    if (!existing && synthesizedResult) {
+      api.setShared("lastSearchResult", synthesizedResult);
+    }
+    if (dispatcher) {
+      dispatcher.open();
+      return true;
+    }
+    const search = api.listTools().find(t => t.id === "search");
+    if (search) {
+      api.setShared("returnToSearch", true);
+      search.open();
+      return true;
+    }
+    return false;
+  }
+  function synthesizeSearchResult(items, cfg) {
+    const rows = items.map(it => ({
+      row: {
+        sourceMediaId: it.sourceMediaId,
+        recordeddate: it.recordeddate,
+        UDFVarchar110: it.transId,
+        UDFVarchar1: it.userToUser,
+        ...it.fieldValues
+      },
+      phrases: []
+    }));
+    const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
+    const fields = colPrefs.fields.length ? colPrefs.fields : ["sourceMediaId", "recordeddate", "UDFVarchar110", "UDFVarchar1"];
+    const headers = colPrefs.headers.length ? colPrefs.headers : ["SMID", "Recorded Date", "Trans_Id", "User to User"];
+    return { rows, fields, headers, maxPhraseCols: 1, includePhraseCol: false };
+  }
   function openTranscriptBatchBuilder() {
     (async () => {
       try {
@@ -993,7 +1133,6 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
   async function openInputModal() {
     let cfg = resolveConfig(loadSavedSettings());
     const metadataFields = await loadMetadataFields();
-    const api = window.NEXIDIA_TOOLS;
     const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const card = el("div", { style: "background:#fff;width:540px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
     const titleRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:4px;" });
@@ -1094,6 +1233,11 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
   }
   async function runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig, resumeContext) {
     const UI = makeProgressUI();
+    const keepAwake = createKeepAwake();
+    if (cfg.keepAwake) {
+      await keepAwake.start();
+      UI.appendLog("Keep-awake active (best effort)");
+    }
     const TARGET_CHARS = Math.floor(cfg.targetTokens * cfg.charsPerToken);
     const pairingActive = isPairField(inputStorageName, inputDisplayName);
     const jobId = resumeContext?.jobId || generateJobId();
@@ -1112,7 +1256,7 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
       searchFields.push(singleFileConfig.namingField);
     }
     const results = await chunkedSearch(values, inputStorageName, searchFields, UI);
-    if (!results.length) { UI.setProgress(0, "No results returned.", "No calls matched."); return; }
+    if (!results.length) { UI.setProgress(0, "No results returned.", "No calls matched."); keepAwake.stop(); return; }
     UI.appendLog(`Calls returned: ${results.length}`);
     const groups = new Map();
     for (const r of results) {
@@ -1167,14 +1311,14 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
           `Batch files this size are not recommended if you're using them with Copilot. ` +
           `Copilot may omit information or produce unreliable results with very large inputs.\n\nDo you want to proceed?`
         );
-        if (!ok) { UI.remove(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
+        if (!ok) { UI.remove(); keepAwake.stop(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
       }
       if (items.length > 500) {
         const ok = confirm(
           `Combining ${items.length} transcripts will create a very large file. ` +
           `Your browser or computer may encounter issues opening or processing this file.\n\nDo you want to proceed?`
         );
-        if (!ok) { UI.remove(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
+        if (!ok) { UI.remove(); keepAwake.stop(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
       }
     }
     const toFetch = items.filter(it => !alreadyFetched.has(it.sourceMediaId));
@@ -1234,6 +1378,17 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
       if (!rec) return { ...it, text: `NO RECORD\nSMID:${it.sourceMediaId}`, charCount: 0, failed: true };
       return { ...it, text: rec.text, charCount: rec.charCount, failed: rec.failed };
     });
+    function attachBackToSearchHandler() {
+      UI.btnBackToSearch.style.display = "inline-block";
+      UI.btnBackToSearch.onclick = () => {
+        const synthesized = synthesizeSearchResult(items, cfg);
+        if (backToSearch(synthesized)) {
+          UI.remove();
+        } else {
+          UI.appendLog("Could not find dispatcher or search tool.");
+        }
+      };
+    }
     if (singleFileConfig && singleFileConfig.enabled) {
       UI.setProgress(88, "Building single files...", "");
       const singleFiles = [];
@@ -1255,21 +1410,30 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
       }
       UI.setProgress(92, "Creating ZIP...", `Files: ${singleFiles.length}`);
       const zip = makeZip(singleFiles);
-      const zipName = `nexidia_singles_${nowStamp()}.zip`;
+      const zipName = resolveZipName(cfg.zipFileName, `nexidia_singles_${nowStamp()}.zip`);
       const blobUrl = URL.createObjectURL(zip);
       UI.appendLog(`ZIP READY: ${zipName}`);
-      UI.appendLog(`Click "Download ZIP"`);
       UI.btnDownload.disabled = false;
       UI.btnDownload.style.opacity = "1";
-      UI.btnDownload.onclick = async () => {
+      const triggerDownload = async () => {
         const a = document.createElement("a");
         a.href = blobUrl; a.download = zipName;
         document.body.appendChild(a); a.click(); a.remove();
         UI.appendLog("Download triggered.");
         try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
         UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
+        keepAwake.stop();
+        attachBackToSearchHandler();
       };
-      UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
+      UI.btnDownload.onclick = triggerDownload;
+      if (cfg.autoDownload) {
+        UI.appendLog("Auto-downloading...");
+        triggerDownload();
+      } else {
+        UI.appendLog(`Click "Download ZIP"`);
+        UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
+        attachBackToSearchHandler();
+      }
       return;
     }
     UI.setProgress(88, "Batching...", "");
@@ -1353,7 +1517,7 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
         `This download would be ${totalFiles.toLocaleString()} files at approximately ${sizeStr}. ` +
         `This is much larger than usual. We recommend confirming your request and double-checking you have it correct.\n\nPress OK to proceed.`
       );
-      if (!ok) { UI.remove(); return; }
+      if (!ok) { UI.remove(); keepAwake.stop(); return; }
     }
     UI.setProgress(91, "Writing batch files...", "");
     const incWidth = cfg.fileIncrement.length;
@@ -1389,21 +1553,30 @@ const card = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;pad
     }
     UI.setProgress(94, "Creating ZIP...", `Files: ${batchFiles.length}`);
     const zip = makeZip(batchFiles);
-    const zipName = `nexidia_batches_${nowStamp()}.zip`;
+    const zipName = resolveZipName(cfg.zipFileName, `nexidia_batches_${nowStamp()}.zip`);
     const blobUrl = URL.createObjectURL(zip);
     UI.appendLog(`ZIP READY: ${zipName}`);
-    UI.appendLog(`Click "Download ZIP"`);
     UI.btnDownload.disabled = false;
     UI.btnDownload.style.opacity = "1";
-    UI.btnDownload.onclick = async () => {
+    const triggerDownload = async () => {
       const a = document.createElement("a");
       a.href = blobUrl; a.download = zipName;
       document.body.appendChild(a); a.click(); a.remove();
       UI.appendLog("Download triggered.");
       try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
       UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFailed: ${failed.length}\nBatches: ${batches.length}`);
+      keepAwake.stop();
+      attachBackToSearchHandler();
     };
-    UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFailed: ${failed.length}\nBatches: ${batches.length}`);
+    UI.btnDownload.onclick = triggerDownload;
+    if (cfg.autoDownload) {
+      UI.appendLog("Auto-downloading...");
+      triggerDownload();
+    } else {
+      UI.appendLog(`Click "Download ZIP"`);
+      UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFailed: ${failed.length}\nBatches: ${batches.length}`);
+      attachBackToSearchHandler();
+    }
   }
   api.registerTool({ id: "transcriptBatchBuilder", label: "Transcript Batch Builder", open: openTranscriptBatchBuilder });
 })();
