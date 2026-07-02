@@ -1,4 +1,4 @@
-//[Last Update: 9:35 PM 6/24/2026]
+//[Last Update: 1:30 PM 7/2/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -162,6 +162,10 @@
     useApiFirst: true,
     batchMode: "length",
     countPerBatch: 50,
+    groupField: "",
+    groupFieldDisplay: "",
+    groupNameByValue: true,
+    groupSplitThresholdTokens: 113750,
     copies: 1,
     fileBase: "Batch",
     fileIncrement: "001",
@@ -233,6 +237,11 @@
     let sub = subInc || "a";
     for (let i = 0; i < copyIdx; i++) sub = incrementString(sub);
     return base + inc + sub;
+  }
+  function subIncFor(copyIdx, subInc) {
+    let sub = subInc || "a";
+    for (let i = 0; i < copyIdx; i++) sub = incrementString(sub);
+    return sub;
   }
   function buildExamples(base, incStr, copies, subInc) {
     const width = incStr.length;
@@ -531,7 +540,7 @@
     sliderArea.appendChild(customRow);
     box.appendChild(sliderArea);
     const radioCount = el("input", { type: "radio", name: "batchMode", value: "count" });
-    radioCount.checked = draft.batchMode === "count";
+    radioCount.checked = draft.batchMode === "count" || draft.batchMode === "all";
     const radioCountRow = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;margin-bottom:8px;" });
     radioCountRow.appendChild(radioCount);
     radioCountRow.appendChild(document.createTextNode("Cap batches by count"));
@@ -553,12 +562,46 @@
     countRow.appendChild(allBtn);
     countArea.appendChild(countRow);
     box.appendChild(countArea);
+    const radioGroup = el("input", { type: "radio", name: "batchMode", value: "group" });
+    radioGroup.checked = draft.batchMode === "group";
+    const radioGroupRow = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;margin-bottom:8px;" });
+    radioGroupRow.appendChild(radioGroup);
+    radioGroupRow.appendChild(document.createTextNode("Group batches by field value"));
+    radioGroupRow.appendChild(tooltip("All calls sharing the same value in the selected field are grouped into the same batch. Calls with an empty value in that field are ignored."));
+    box.appendChild(radioGroupRow);
+    const groupArea = el("div", { style: "margin-left:22px;margin-bottom:10px;" + (draft.batchMode !== "group" ? "display:none;" : "") });
+    groupArea.appendChild(el("div", { style: "font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;" }, "Group by field:"));
+    const groupDefault = draft.groupField
+      ? { storageName: draft.groupField, displayName: draft.groupFieldDisplay || draft.groupField }
+      : PINNED_NAMING[0];
+    const groupPicker = makeFieldPicker(metadataFields, PINNED_NAMING, groupDefault);
+    groupArea.appendChild(groupPicker.wrapper);
+    const groupNameRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:8px;" });
+    const groupNameCheck = el("input", { type: "checkbox" });
+    groupNameCheck.checked = draft.groupNameByValue !== false;
+    const groupNameLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;" });
+    groupNameLabel.appendChild(groupNameCheck);
+    groupNameLabel.appendChild(document.createTextNode("Name batches by field value"));
+    groupNameLabel.appendChild(tooltip("On: each batch file is named after its group value (e.g., 5551234567.txt). Off: batches use the standard File Naming settings below (Batch001, Batch002...)."));
+    groupNameRow.appendChild(groupNameLabel);
+    groupArea.appendChild(groupNameRow);
+    const groupSplitRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;" });
+    groupSplitRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "Prompt to split groups larger than"));
+    const groupSplitInput = el("input", { type: "number", min: 1000, max: 500000, value: draft.groupSplitThresholdTokens, style: "width:90px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+    groupSplitInput.oninput = () => { const v = parseInt(groupSplitInput.value); if (!isNaN(v) && v > 0) draft.groupSplitThresholdTokens = v; };
+    groupSplitRow.appendChild(groupSplitInput);
+    groupSplitRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "tokens"));
+    groupSplitRow.appendChild(tooltip("If any group exceeds this size, you'll be asked whether to split it into sub-batches (value_1, value_2, ...). Applies only to Group by field value mode."));
+    groupArea.appendChild(groupSplitRow);
+    box.appendChild(groupArea);
     function updateModeAreas() {
       sliderArea.style.display = draft.batchMode === "length" ? "" : "none";
       countArea.style.display = (draft.batchMode === "count" || draft.batchMode === "all") ? "" : "none";
+      groupArea.style.display = draft.batchMode === "group" ? "" : "none";
     }
     radioLength.onchange = () => { if (radioLength.checked) { draft.batchMode = "length"; updateModeAreas(); } };
     radioCount.onchange = () => { if (radioCount.checked) { draft.batchMode = "count"; updateModeAreas(); } };
+    radioGroup.onchange = () => { if (radioGroup.checked) { draft.batchMode = "group"; updateModeAreas(); } };
     box.appendChild(divider());
     box.appendChild(sectionHead("Transcript Formatting"));
     const gapRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
@@ -771,6 +814,13 @@
           const si = parseInt(slider.value);
           if (si >= 0 && si < PRESETS.length) draft.targetTokens = PRESETS[si].tokens;
         }
+      } else if (radioGroup.checked) {
+        draft.batchMode = "group";
+        draft.groupField = groupPicker.getStorageName();
+        draft.groupFieldDisplay = groupPicker.getDisplayName();
+        draft.groupNameByValue = groupNameCheck.checked;
+        const gv = parseInt(groupSplitInput.value);
+        if (!isNaN(gv) && gv > 0) draft.groupSplitThresholdTokens = gv;
       } else if (draft.batchMode !== "all") {
         draft.batchMode = "count";
       }
@@ -1092,7 +1142,7 @@
     const headers = colPrefs.headers.length ? colPrefs.headers : ["SMID", "Recorded Date", "Trans_Id", "User to User"];
     return { rows, fields, headers, maxPhraseCols: 1, includePhraseCol: false };
   }
-  function openTranscriptBatchBuilder() {
+function openTranscriptBatchBuilder() {
     (async () => {
       try {
         await requestPersistence();
@@ -1255,6 +1305,9 @@
     if (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField && !searchFields.includes(singleFileConfig.namingField)) {
       searchFields.push(singleFileConfig.namingField);
     }
+    if (cfg.batchMode === "group" && cfg.groupField && !searchFields.includes(cfg.groupField)) {
+      searchFields.push(cfg.groupField);
+    }
     const results = await chunkedSearch(values, inputStorageName, searchFields, UI);
     if (!results.length) { UI.setProgress(0, "No results returned.", "No calls matched."); keepAwake.stop(); return; }
     UI.appendLog(`Calls returned: ${results.length}`);
@@ -1286,6 +1339,7 @@
           userToUser: (r.UDFVarchar1 || "").toString(),
           leg: isSet ? (idx + 1) : null,
           namingValue: (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField) ? (r[singleFileConfig.namingField] || "").toString().trim() : "",
+          groupValue: (cfg.batchMode === "group" && cfg.groupField) ? (r[cfg.groupField] || "").toString().trim() : "",
           fieldValues: Object.fromEntries(cfg.outputFields.map(f => [f.storageName, (r[f.storageName] || "").toString()]))
         });
       });
@@ -1352,7 +1406,7 @@
           meta: {
             groupKey: it.groupKey, isSet: it.isSet, setKey: it.setKey,
             recordeddate: it.recordeddate, transId: it.transId, userToUser: it.userToUser,
-            leg: it.leg, namingValue: it.namingValue, fieldValues: it.fieldValues
+            leg: it.leg, namingValue: it.namingValue, groupValue: it.groupValue, fieldValues: it.fieldValues
           }
         };
         try { await idbPut("transcripts", record); } catch (e) { UI.appendLog(`IDB write failed for ${it.sourceMediaId}: ${e.message}`); }
@@ -1438,15 +1492,72 @@
     }
     UI.setProgress(88, "Batching...", "");
     let batches = [];
+    let groupLabels = [];
     if (cfg.batchMode === "all") {
       batches = [out.slice()];
+      groupLabels = [null];
     } else if (cfg.batchMode === "count") {
       for (let i = 0; i < out.length; i += cfg.countPerBatch) {
         batches.push(out.slice(i, i + cfg.countPerBatch));
+        groupLabels.push(null);
+      }
+    } else if (cfg.batchMode === "group") {
+      const groupMap = new Map();
+      let ignoredEmpty = 0;
+      for (const it of out) {
+        const val = (it.groupValue || "").trim();
+        if (!val) { ignoredEmpty++; continue; }
+        if (!groupMap.has(val)) groupMap.set(val, []);
+        groupMap.get(val).push(it);
+      }
+      if (ignoredEmpty > 0) UI.appendLog(`Ignored ${ignoredEmpty} call(s) with empty ${cfg.groupFieldDisplay || cfg.groupField} value.`);
+      const splitThresholdChars = Math.floor(cfg.groupSplitThresholdTokens * cfg.charsPerToken);
+      const orderedKeys = [...groupMap.keys()].sort((a, b) => a.localeCompare(b));
+      const oversized = [];
+      for (const key of orderedKeys) {
+        const groupItems = groupMap.get(key);
+        const totalChars = groupItems.reduce((a, x) => a + (x.charCount || 0), 0);
+        if (totalChars > splitThresholdChars) oversized.push({ key, totalChars, count: groupItems.length });
+      }
+      const splitDecisions = new Map();
+      if (oversized.length > 0) {
+        const preview = oversized.slice(0, 5).map(o => {
+          const tokens = Math.floor(o.totalChars / cfg.charsPerToken).toLocaleString();
+          return `  ${o.key}: ${o.count} calls, ~${tokens} tokens`;
+        }).join("\n");
+        const more = oversized.length > 5 ? `\n  ...and ${oversized.length - 5} more.` : "";
+        const ok = confirm(
+          `${oversized.length} group(s) exceed ${cfg.groupSplitThresholdTokens.toLocaleString()} tokens:\n\n${preview}${more}\n\n` +
+          `Split these into sub-batches (value_1, value_2, ...) to keep each file under the threshold?\n\n` +
+          `OK = split. Cancel = keep as-is (one file per group regardless of size).`
+        );
+        for (const o of oversized) splitDecisions.set(o.key, ok);
+      }
+      for (const key of orderedKeys) {
+        const groupItems = groupMap.get(key);
+        groupItems.sort((a, b) => (a.recordeddate || "").localeCompare(b.recordeddate || ""));
+        if (splitDecisions.get(key)) {
+          const subBatches = [];
+          let cur = [], curChars = 0;
+          for (const it of groupItems) {
+            if (cur.length && curChars + (it.charCount || 0) > splitThresholdChars) {
+              subBatches.push(cur); cur = []; curChars = 0;
+            }
+            cur.push(it); curChars += (it.charCount || 0);
+          }
+          if (cur.length) subBatches.push(cur);
+          subBatches.forEach((sb, idx) => {
+            batches.push(sb);
+            groupLabels.push(`${key}_${idx + 1}`);
+          });
+        } else {
+          batches.push(groupItems);
+          groupLabels.push(key);
+        }
       }
     } else {
       let curBatch = [], curChars = 0;
-      const flush = () => { if (curBatch.length) { batches.push(curBatch); curBatch = []; curChars = 0; } };
+      const flush = () => { if (curBatch.length) { batches.push(curBatch); groupLabels.push(null); curBatch = []; curChars = 0; } };
       if (!pairingActive) {
         const sorted = out.slice().sort((a, b) => (a.recordeddate || "").localeCompare(b.recordeddate || ""));
         for (const it of sorted) {
@@ -1508,6 +1619,7 @@
       }
     }
     UI.appendLog(`Batches built: ${batches.length}`);
+    const useGroupNaming = cfg.batchMode === "group" && cfg.groupNameByValue !== false;
     const totalFiles = batches.length * cfg.copies;
     if (totalFiles > 10000) {
       const totalCharsEst = out.reduce((a, x) => a + (x.charCount || 0), 0) * cfg.copies;
@@ -1524,6 +1636,7 @@
     let startNum = parseInt(cfg.fileIncrement.replace(/^0+/, "") || "0", 10);
     if (isNaN(startNum)) startNum = 1;
     const batchFiles = [];
+    const usedGroupNames = new Map();
     //##> BATCHING CONFIG: targetTokens drives how transcripts are grouped into batch files
     //##> for downstream LLM processing. charsPerToken is a heuristic (3.5 chars = 1 token).
     //##> Batch size presets (Small/Medium/Large) are user-selectable via the settings UI.
@@ -1546,8 +1659,27 @@
         bodyText += `===END CALL===\nCallNumber=${callLabel}\n\n`;
       }
       bodyText += `===BATCH END===\nTotalChars=${totalChars}\nEstimatedTokens=${estTokens}\n`;
+      let baseName;
+      if (useGroupNaming && groupLabels[bn]) {
+        baseName = sanitizeFilename(groupLabels[bn]);
+        if (usedGroupNames.has(baseName)) {
+          const count = usedGroupNames.get(baseName) + 1;
+          usedGroupNames.set(baseName, count);
+          baseName = baseName + "_" + count;
+        } else {
+          usedGroupNames.set(baseName, 1);
+        }
+      } else {
+        baseName = null;
+      }
       for (let c = 0; c < cfg.copies; c++) {
-        const fname = buildFilename(cfg.fileBase, startNum + bn, incWidth, cfg.copies, c, cfg.fileSubIncrement) + ".txt";
+        let fname;
+        if (baseName !== null) {
+          const suffix = cfg.copies > 1 ? subIncFor(c, cfg.fileSubIncrement) : "";
+          fname = baseName + suffix + ".txt";
+        } else {
+          fname = buildFilename(cfg.fileBase, startNum + bn, incWidth, cfg.copies, c, cfg.fileSubIncrement) + ".txt";
+        }
         batchFiles.push({ name: fname, text: bodyText });
       }
     }
