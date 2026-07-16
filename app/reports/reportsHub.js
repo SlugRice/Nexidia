@@ -1,5 +1,4 @@
-//[Last Update: 6:56 PM 6/29/2026]
-//[Please confirm this timestamp in your response any time it was formed using this document!]
+//[Last Update: 12:32 AM 7/16/2026]
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
@@ -22,18 +21,13 @@
   const IDB_VERSION = 1;
   const JOB_AGE_LIMIT_MS = 30 * 24 * 60 * 60 * 1000;
   const DEFAULT_FILTER_STORAGES = ["UDFVarchar10", "siteName", "DNIS", "UDFVarchar110"];
-
-  //##> Report modules register themselves here at load time.
-  //##> The hub lazy-loads modules from the repo; once eval'd they call register().
   const reportDefs = {};
   const reportRegistry = {
     register(def) { reportDefs[def.id] = def; },
     get(id) { return reportDefs[id] || null; }
   };
   api.setShared("reportRegistry", reportRegistry);
-
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
   let _idbPromise = null;
   function idb() {
     if (!_idbPromise) {
@@ -41,9 +35,7 @@
         const req = indexedDB.open(IDB_NAME, IDB_VERSION);
         req.onupgradeneeded = () => {
           const db = req.result;
-          if (!db.objectStoreNames.contains("jobs")) {
-            db.createObjectStore("jobs", { keyPath: "id" });
-          }
+          if (!db.objectStoreNames.contains("jobs")) db.createObjectStore("jobs", { keyPath: "id" });
           if (!db.objectStoreNames.contains("segments")) {
             const s = db.createObjectStore("segments", { keyPath: ["jobId", "segmentHash"] });
             s.createIndex("byJob", "jobId", { unique: false });
@@ -59,9 +51,7 @@
     }
     return _idbPromise;
   }
-  async function requestPersistence() {
-    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (_) {}
-  }
+  async function requestPersistence() { try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (_) {} }
   async function idbPut(store, value) {
     const db = await idb();
     return new Promise((res, rej) => {
@@ -143,7 +133,6 @@
     const rand = Math.random().toString(36).slice(2, 8);
     return `rptjob_${stamp}_${rand}`;
   }
-
   function stableStringify(o) {
     if (o === null || typeof o !== "object") return JSON.stringify(o);
     if (Array.isArray(o)) return "[" + o.map(stableStringify).join(",") + "]";
@@ -158,8 +147,6 @@
   function computeSegmentHash(keywordGroup, dateFilter) {
     return hashStr(stableStringify({ k: keywordGroup || null, d: dateFilter || null }));
   }
-
-  //##> Resume gate. Every check must pass for a job to appear in the resume modal.
   async function getReportResumeCandidates() {
     let jobs;
     try { jobs = await idbGetAll("jobs"); } catch (_) { return []; }
@@ -179,7 +166,6 @@
     valid.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
     return valid;
   }
-
   function el(tag, props, ...children) {
     props = props || {};
     const node = document.createElement(tag);
@@ -190,10 +176,7 @@
     }
     return node;
   }
-  function hr() {
-    return el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" });
-  }
-
+  function hr() { return el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" }); }
   async function apiFetch(url, init) {
     const res = await fetch(url, init || { credentials: "include" });
     if (!res.ok) {
@@ -205,11 +188,9 @@
     const t = await res.text();
     try { return JSON.parse(t); } catch { return { raw: t }; }
   }
-
   function getTranscriptRows(payload) {
     return payload?.TranscriptRows || payload?.rows || payload?.transcriptRows || [];
   }
-
   function getFieldValue(rowObj, key) {
     if (!rowObj) return "";
     const want = String(key || "");
@@ -232,7 +213,7 @@
     }
     return "";
   }
-
+  api.setShared("reportGetFieldValue", getFieldValue);
   function splitValues(raw) {
     return String(raw || "")
       .replace(/\r\n/g, "\n")
@@ -241,7 +222,6 @@
       .map((s) => s.trim())
       .filter(Boolean);
   }
-
   async function safeRead(res) {
     const ct = (res.headers.get("content-type") || "").toLowerCase();
     const text = await res.text();
@@ -259,7 +239,6 @@
     if (json.result && Array.isArray(json.result.results)) return json.result.results;
     return [];
   }
-
   function countSplittableValues(kg) {
     if (!kg || !kg.filters) return 0;
     let max = 0;
@@ -349,7 +328,6 @@
       return parts2 ? parts2.map(p => ({ kg: p, df })) : null;
     }
   }
-
   async function probeTotalResults(keywordGroup, dateFilter) {
     const interactionFilters = [];
     if (keywordGroup) interactionFilters.push(Object.assign({ disabled: false }, keywordGroup));
@@ -377,7 +355,6 @@
     const bailed = (total === 0 && avail >= CAP_LIMIT) || !!errReason;
     return { total, bailed, errReason };
   }
-
   async function fetchSegmentPaged(keywordGroup, dateFilter, fields) {
     let from = 0;
     const setRows = [];
@@ -415,7 +392,6 @@
     }
     return setRows;
   }
-
   async function executeReportSearch(jobId, keywordGroup, dateFilter, fields, UI) {
     const merged = new Map();
     const ctx = { segmentsCompleted: 0, estimatedSegments: 1, atomicCapWarned: false };
@@ -424,7 +400,6 @@
       const cachedList = await idbGetAllByIndex("segments", "byJob", jobId);
       for (const seg of cachedList) cachedSegments.set(seg.segmentHash, seg);
     } catch (_) {}
-
     function progressMeta() {
       return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Calls: " + merged.size;
     }
@@ -512,16 +487,12 @@
     }
     return [...merged.values()];
   }
-
-  //##> Per-call transcript fetch with API-first, SVC-fallback. A bad first call
-  //##> no longer locks the entire run to a broken endpoint.
   async function fetchTranscriptForSmid(smid) {
     const apiUrl = BASE + "/NxIA/api/transcript/" + smid;
     const svcUrl = BASE + "/NxIA/Search/ClientServices/TranscriptService.svc/Transcripts/?SourceMediaId=" + smid + "&_=" + Date.now();
     try { return await apiFetch(apiUrl, { credentials: "include" }); }
     catch { return await apiFetch(svcUrl, { credentials: "include" }); }
   }
-
   function makeProgressUI(title) {
     const overlay = document.createElement("div");
     overlay.style.cssText = "position:fixed;top:20px;right:20px;z-index:999999;background:#0b1225;color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;padding:14px 14px 12px;border-radius:10px;min-width:380px;max-width:520px;box-shadow:0 10px 30px rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.12);";
@@ -558,10 +529,6 @@
       remove() { try { overlay.remove(); } catch (_) {} }
     };
   }
-
-  //##> Safeguard modal. Fires when ZERO_ROW_THRESHOLD transcripts in a row return
-  //##> with no rows. Resume re-queues those Trans_IDs at the front and clears
-  //##> their saved records so they get re-fetched. Closing abandons the run.
   function showZeroRowSafeguardModal(items, onResume, onAbandon) {
     const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000010;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const box = el("div", { style: "background:#fff;width:540px;max-height:82vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -599,7 +566,6 @@
     overlay.appendChild(box);
     document.body.appendChild(overlay);
   }
-
   function showReportResumeModal(candidates, catalog, onResume, onDiscardAll, onCancel) {
     const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const box = el("div", { style: "background:#fff;width:560px;max-height:80vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -666,7 +632,6 @@
     overlay.appendChild(box);
     document.body.appendChild(overlay);
   }
-
   function makeFieldPicker(metadataFields, defaultSn) {
     const wrapper = el("div", { style: "position:relative;flex:1;min-width:160px;" });
     const input = el("input", {
@@ -723,16 +688,12 @@
       getDisplayName: () => input.value
     };
   }
-
-  //##> Main transcript fetch + analyze phase. Tracks consecutive zero-row
-  //##> payloads; on threshold, pauses workers and surfaces the safeguard modal.
   async function runTranscriptPhase(jobId, activeReport, reportConfig, items, progress) {
     const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
     const existingRecords = await idbGetAllByIndex("transcripts", "byJob", jobId);
     const recordsBySmid = new Map(existingRecords.map(r => [r.sourceMediaId, r]));
     let alreadyDone = 0;
     for (const it of items) { if (recordsBySmid.has(it.sourceMediaId)) alreadyDone++; }
-
     let cursor = 0;
     let completed = alreadyDone;
     let failCount = 0;
@@ -744,14 +705,12 @@
     let workerCount = 0;
     let resolveAll = null;
     const allDone = new Promise(r => { resolveAll = r; });
-
     function updateProgress() {
       const pct = 35 + Math.floor((completed / Math.max(1, items.length)) * 50);
       progress.set(Math.min(85, pct), "Fetching transcripts...",
         `${completed} / ${items.length}\nFailed: ${failCount}\nEmpty in a row: ${zeroStreak}`);
     }
     updateProgress();
-
     async function persistRecord(it, payloadOk, rowCount, analyzeResult, errorText) {
       try {
         await idbPut("transcripts", {
@@ -767,15 +726,11 @@
         });
       } catch (_) {}
     }
-
     async function processOne(it) {
       const cached = recordsBySmid.get(it.sourceMediaId);
       if (cached) {
-        if (cached.payloadOk && cached.rowCount > 0) {
-          zeroStreak = 0; zeroStreakItems = [];
-        } else if (cached.payloadOk && cached.rowCount === 0) {
-          zeroStreak++; zeroStreakItems.push(it);
-        }
+        if (cached.payloadOk && cached.rowCount > 0) { zeroStreak = 0; zeroStreakItems = []; }
+        else if (cached.payloadOk && cached.rowCount === 0) { zeroStreak++; zeroStreakItems.push(it); }
         return;
       }
       let payload = null;
@@ -808,7 +763,6 @@
       catch (e) { analyzeResult = { match: false, data: {} }; }
       await persistRecord(it, true, rowCount, analyzeResult, null);
     }
-
     async function worker() {
       while (true) {
         if (abandoned) break;
@@ -831,8 +785,6 @@
           showZeroRowSafeguardModal(
             flagged,
             async () => {
-              //##> Resume: wipe cached records for the flagged items, rewind
-              //##> cursor to the first flagged item so they retry.
               for (const f of flagged) {
                 try { await idbDelete("transcripts", [jobId, f.sourceMediaId]); } catch (_) {}
                 recordsBySmid.delete(f.sourceMediaId);
@@ -849,17 +801,13 @@
               paused = false;
               updateProgress();
             },
-            () => {
-              abandoned = true;
-              paused = false;
-            }
+            () => { abandoned = true; paused = false; }
           );
         }
       }
       workersFinished++;
       if (workersFinished >= workerCount) resolveAll();
     }
-
     const remaining = items.length - alreadyDone;
     workerCount = Math.max(1, Math.min(CONCURRENCY, remaining || 1));
     const promises = [];
@@ -867,7 +815,6 @@
     await allDone;
     return { completed, failCount, abandoned };
   }
-
   async function buildAndDispatchResults(jobId, activeReport, items, dateFilter, progress) {
     const records = await idbGetAllByIndex("transcripts", "byJob", jobId);
     const bySmid = new Map(records.map(r => [r.sourceMediaId, r]));
@@ -923,9 +870,7 @@
       const tid = getFieldValue(row, "UDFVarchar110").trim();
       const data = reportDataMap.get(tid);
       if (data) {
-        for (const c of cols) {
-          row["_report_" + c.key] = (data[c.key] || "").toString();
-        }
+        for (const c of cols) row["_report_" + c.key] = (data[c.key] || "").toString();
       }
     }
     const formatted = detailResults.map((row) => ({ row, phrases: [] }));
@@ -943,10 +888,53 @@
     try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
     progress.remove();
     const dispatcher = api.listTools().find((t) => t.id === "dispatcher");
-    if (dispatcher) { dispatcher.open(); }
-    else { alert("Dispatcher not loaded. Check manifest."); }
+    if (dispatcher) dispatcher.open();
+    else alert("Dispatcher not loaded. Check manifest.");
   }
-
+  //##> Direct dispatch path for reports that skip the transcript phase entirely.
+  //##> Used by WGS Transcripts. Rows are already filtered; we build a search-grid
+  //##> result and publish any batchOverrides the module supplies for batchBuilder.
+  async function directDispatchFromRows(jobId, activeReport, keptRows, discardedCount, noPairCount, searchFields, progress) {
+    const colPrefs = api.getShared("columnPrefs") || { fields: [], headers: [] };
+    const fields = colPrefs.fields.slice();
+    const headers = colPrefs.headers.slice();
+    for (const f of searchFields) {
+      if (!fields.includes(f)) { fields.push(f); headers.push(f); }
+    }
+    const cols = activeReport.columns || [];
+    for (const c of cols) {
+      const key = "_report_" + c.key;
+      if (!fields.includes(key)) { fields.push(key); headers.push(c.label); }
+    }
+    api.setShared("columnPrefs", { fields, headers });
+    const formatted = keptRows.map(row => ({ row, phrases: [] }));
+    api.setShared("lastSearchResult", {
+      rows: formatted, fields, headers,
+      maxPhraseCols: 1, includePhraseCol: false
+    });
+    if (activeReport.batchOverrides) {
+      api.setShared("reportBatchOverrides", activeReport.batchOverrides);
+    } else {
+      api.setShared("reportBatchOverrides", null);
+    }
+    try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
+    progress.remove();
+    const totalFound = keptRows.length + discardedCount + (noPairCount || 0);
+    alert(
+      activeReport.label + " complete.\n\n" +
+      "Calls Found: " + totalFound.toLocaleString() + "\n" +
+      "Calls Kept: " + keptRows.length.toLocaleString() + "\n" +
+      "Discarded (on/before paired date): " + discardedCount.toLocaleString() +
+      (noPairCount ? "\nNo paired threshold for row: " + noPairCount.toLocaleString() : "") +
+      (activeReport.batchOverrides
+        ? "\n\nBatch settings preloaded: group by " + activeReport.batchOverrides.groupField +
+          ", output " + (activeReport.batchOverrides.outputHeaders || []).join(" / ") + "."
+        : "")
+    );
+    const dispatcher = api.listTools().find((t) => t.id === "dispatcher");
+    if (dispatcher) dispatcher.open();
+    else alert("Dispatcher not loaded. Check manifest.");
+  }
   async function resumeReportJob(job, catalog) {
     const entry = catalog.find(c => c.id === job.reportId);
     if (!entry) { alert("Report definition not found in catalog for: " + job.reportId); return; }
@@ -979,6 +967,22 @@
       progress.remove();
       return;
     }
+    //##> If the resumed report skips the transcript phase, run its row filter
+    //##> and dispatch directly. Otherwise fall through to the transcript flow.
+    if (activeReport.skipTranscriptPhase) {
+      progress.set(40, "Filtering results...", "");
+      const filterResult = activeReport.filterRows
+        ? activeReport.filterRows(searchRows, job.reportConfig || {})
+        : { keptRows: searchRows, discardedCount: 0, noPairCount: 0 };
+      await directDispatchFromRows(
+        job.id, activeReport,
+        filterResult.keptRows,
+        filterResult.discardedCount || 0,
+        filterResult.noPairCount || 0,
+        searchFields, progress
+      );
+      return;
+    }
     const items = searchRows.map(r => ({
       sourceMediaId: r.sourceMediaId,
       transId: getFieldValue(r, "UDFVarchar110").trim()
@@ -994,7 +998,6 @@
     progress.set(86, "Analyzing transcripts...", "Building results");
     await buildAndDispatchResults(job.id, activeReport, items, job.dateFilter, progress);
   }
-
   function openReports() {
     (async () => {
       try {
@@ -1008,7 +1011,6 @@
           return;
         }
         await requestPersistence();
-
         let metadataFields = [];
         try {
           const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" });
@@ -1017,6 +1019,7 @@
             metadataFields = Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : [];
           }
         } catch (_) {}
+        api.setShared("reportMetadataFields", metadataFields);
         let catalog = [];
         try {
           const mRes = await fetch(REPORTS_CATALOG_URL + "?v=" + Date.now(), { credentials: "omit", cache: "no-store" });
@@ -1025,7 +1028,6 @@
             catalog = Array.isArray(mJson.reports) ? mJson.reports : [];
           }
         } catch (_) {}
-
         const candidates = await getReportResumeCandidates();
         if (candidates.length > 0) {
           let userChoice = null;
@@ -1042,7 +1044,6 @@
             return;
           }
         }
-
         let activeReport = null;
         let configGetter = null;
         const filterRows = [];
@@ -1058,9 +1059,7 @@
         const select = el("select", { style: "width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;cursor:pointer;" });
         const defaultOpt = el("option", { value: "" }, "\u2014 Choose a report \u2014");
         select.appendChild(defaultOpt);
-        for (const entry of catalog) {
-          select.appendChild(el("option", { value: entry.id }, entry.label));
-        }
+        for (const entry of catalog) select.appendChild(el("option", { value: entry.id }, entry.label));
         selectWrap.appendChild(select);
         card.appendChild(selectWrap);
         const descArea = el("div", { style: "font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:10px;min-height:18px;" });
@@ -1087,7 +1086,8 @@
         dateRow.appendChild(toWrap);
         card.appendChild(dateRow);
         card.appendChild(hr());
-        card.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Filters"));
+        const filtersHeader = el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Filters");
+        card.appendChild(filtersHeader);
         const filtersContainer = el("div", {});
         card.appendChild(filtersContainer);
         function addFilterRow(storageName) {
@@ -1131,7 +1131,7 @@
           };
           picker.input.addEventListener("blur", () => {
             setTimeout(() => {
-              if (picker.getStorageName()) {
+                            if (picker.getStorageName()) {
                 const f = metadataFields.find((x) => x.storageName === picker.getStorageName());
                 fieldLabel.textContent = f ? f.displayName : picker.getDisplayName();
                 fieldLabel.title = fieldLabel.textContent;
@@ -1168,13 +1168,22 @@
         card.appendChild(runBtn);
         modal.appendChild(card);
         document.body.appendChild(modal);
-
+        //##> Reports that supply their own filters/values through the config panel
+        //##> can hide the generic filter section. WGS Transcripts uses this because
+        //##> its keyword group is derived from the pasted Orig ANI / date pairs.
+        function applyReportUIToggles(def) {
+          const hideFilters = def && def.hideStandardFilters;
+          filtersHeader.style.display = hideFilters ? "none" : "";
+          filtersContainer.style.display = hideFilters ? "none" : "";
+          addFilterBtn.style.display = hideFilters ? "none" : "";
+        }
         select.onchange = async () => {
           const id = select.value;
           configArea.innerHTML = "";
           descArea.textContent = "";
           activeReport = null;
           configGetter = null;
+          applyReportUIToggles(null);
           if (!id) return;
           const entry = catalog.find((c) => c.id === id);
           if (entry) descArea.textContent = entry.description || "";
@@ -1195,9 +1204,9 @@
           const def = reportDefs[id];
           if (!def) { descArea.textContent = "Report module not found for id: " + id; return; }
           activeReport = def;
-          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el });
+          applyReportUIToggles(def);
+          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el, metadataFields, makeFieldPicker });
         };
-
         runBtn.onclick = async () => {
           if (!activeReport) { alert("Please select a report before running."); return; }
           const fromVal = fromInput.value;
@@ -1205,11 +1214,19 @@
           if (!fromVal || !toVal) { alert("Please select both From and To dates."); return; }
           runBtn.disabled = true;
           runBtn.style.opacity = "0.5";
-          const reportConfig = configGetter ? configGetter.getConfig() : {};
+          let reportConfig = configGetter ? configGetter.getConfig() : {};
+          //##> Report modules can veto the run by returning null/false from validateConfig.
+          if (activeReport.validateConfig) {
+            const ok = activeReport.validateConfig(reportConfig);
+            if (!ok) {
+              runBtn.disabled = false;
+              runBtn.style.opacity = "1";
+              return;
+            }
+          }
           modal.remove();
           const progress = makeProgressUI(activeReport.label);
           progress.set(5, "Preparing search...", "");
-
           const dateFilter = {
             parameterName: "recordedDateTime",
             operator: "BETWEEN",
@@ -1227,10 +1244,20 @@
             keywordFilters.push({ operator: "IN", type: "KEYWORD", parameterName: sn, value: vals });
             if (!searchFields.includes(sn)) searchFields.push(sn);
           }
+          //##> Report modules can inject their own keyword filter (WGS pairs) and
+          //##> additional required search fields (recordedDateTime, UDFVarchar115).
+          if (activeReport.getSearchAugment) {
+            const aug = activeReport.getSearchAugment(reportConfig) || {};
+            if (Array.isArray(aug.keywordFilters)) {
+              for (const kf of aug.keywordFilters) keywordFilters.push(kf);
+            }
+            if (Array.isArray(aug.searchFields)) {
+              for (const sf of aug.searchFields) if (!searchFields.includes(sf)) searchFields.push(sf);
+            }
+          }
           const keywordGroup = keywordFilters.length
             ? { operator: "AND", invertOperator: false, filters: keywordFilters }
             : null;
-
           const jobId = generateJobId();
           const jobRecord = {
             id: jobId,
@@ -1248,7 +1275,6 @@
             updatedAt: Date.now()
           };
           try { await idbPut("jobs", jobRecord); } catch (_) {}
-
           progress.set(8, "Searching...", "");
           const searchRows = await executeReportSearch(jobId, keywordGroup, dateFilter, searchFields, {
             set: (pct, msg, det) => {
@@ -1260,6 +1286,22 @@
             alert("No results returned from search.");
             try { await deleteJobCascade(jobId); } catch (_) {}
             progress.remove();
+            return;
+          }
+          //##> Reports that operate directly on search rows (no transcript phase)
+          //##> run their row filter here and jump straight to dispatch.
+          if (activeReport.skipTranscriptPhase) {
+            progress.set(40, "Filtering results...", "");
+            const filterResult = activeReport.filterRows
+              ? activeReport.filterRows(searchRows, reportConfig)
+              : { keptRows: searchRows, discardedCount: 0, noPairCount: 0 };
+            await directDispatchFromRows(
+              jobId, activeReport,
+              filterResult.keptRows,
+              filterResult.discardedCount || 0,
+              filterResult.noPairCount || 0,
+              searchFields, progress
+            );
             return;
           }
           const items = searchRows.map(r => ({
@@ -1283,6 +1325,5 @@
       }
     })();
   }
-
   api.registerTool({ id: "reports", label: "Reports", open: openReports });
 })();
