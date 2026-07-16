@@ -1,4 +1,4 @@
-//[Last Update: 2:15 AM 7/16/2026]
+//[Last Update: 8:20 PM 7/16/2026]
 //##> WGS Transcripts.
 //##> Accepts pasted pairs of a key value (default Orig ANI / UDFVarchar115) and a
 //##> minimum date threshold. Runs one wide search across the full date window,
@@ -21,30 +21,33 @@
   const DEFAULT_KEY_FIELD = "UDFVarchar115";
   const DEFAULT_DATE_FIELD = "recordedDateTime";
   const OUTPUT_TRANS_ID_FIELD = "UDFVarchar110";
+  const ISO_LIKE_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?/;
+  const US_LIKE_RE = /^(\d{1,2})\d{1,2}\d{2,4}(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?/;
+  const DATE_HINT_RE = /[\/\-T:]/;
   //##> Flexible date parser. Handles ISO Z, MM/DD/YYYY, M/D/YYYY, MM-DD-YYYY,
   //##> YYYY-MM-DD, and any of those with an optional trailing time.
   function parseFlexibleDate(raw) {
     if (raw === null || raw === undefined) return NaN;
     const s = String(raw).trim();
     if (!s) return NaN;
-    let ms = Date.parse(s);
-    if (!isNaN(ms)) return ms;
-    const isoLike = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?/);
-    if (isoLike) {
-      const y = +isoLike[1], mo = +isoLike[2] - 1, d = +isoLike[3];
-      const hh = isoLike[4] ? +isoLike[4] : 0;
-      const mm = isoLike[5] ? +isoLike[5] : 0;
-      const ss = isoLike[6] ? +isoLike[6] : 0;
+    const nativeMs = Date.parse(s);
+    if (!isNaN(nativeMs)) return nativeMs;
+    const iso = s.match(ISO_LIKE_RE);
+    if (iso) {
+      const y = +iso[1], mo = +iso[2] - 1, d = +iso[3];
+      const hh = iso[4] ? +iso[4] : 0;
+      const mm = iso[5] ? +iso[5] : 0;
+      const ss = iso[6] ? +iso[6] : 0;
       return Date.UTC(y, mo, d, hh, mm, ss);
     }
-    const usLike = s.match(/^(\d{1,2})[\/\,2}\d{2,4}(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?/);
-    if (usLike) {
-      const mo = +usLike[1] - 1, d = +usLike[2];
-      let y = +usLike[3];
+    const us = s.match(US_LIKE_RE);
+    if (us) {
+      const mo = +us[1] - 1, d = +us[2];
+      let y = +us[3];
       if (y < 100) y += 2000;
-      const hh = usLike[4] ? +usLike[4] : 0;
-      const mm = usLike[5] ? +usLike[5] : 0;
-      const ss = usLike[6] ? +usLike[6] : 0;
+      const hh = us[4] ? +us[4] : 0;
+      const mm = us[5] ? +us[5] : 0;
+      const ss = us[6] ? +us[6] : 0;
       return Date.UTC(y, mo, d, hh, mm, ss);
     }
     return NaN;
@@ -72,11 +75,11 @@
     const out = [];
     let pendingDate = null;
     let pendingDateMs = NaN;
-    let pendingLineNo = 0;
     for (const line of lines) {
       let parts;
-      if (line.raw.indexOf("\t") !== -1) parts = line.raw.split("\t");
-      else if (line.raw.indexOf(",") !== -1 && /[\/\-T:]/.test(line.raw)) {
+      if (line.raw.indexOf("\t") !== -1) {
+        parts = line.raw.split("\t");
+      } else if (line.raw.indexOf(",") !== -1 && DATE_HINT_RE.test(line.raw)) {
         //##> Only treat a comma as a pair separator when the line also looks
         //##> date-ish; otherwise a comma inside the key column stays intact.
         parts = line.raw.split(/,(.+)/, 2).filter(x => x !== undefined);
@@ -113,7 +116,6 @@
       if (!isNaN(onlyMs)) {
         pendingDate = only;
         pendingDateMs = onlyMs;
-        pendingLineNo = line.lineNo;
         continue;
       }
       const keys = splitKeys(only);
@@ -258,7 +260,6 @@
       const dateField = config.dateField || DEFAULT_DATE_FIELD;
       const paired = config.paired || {};
       const pairedMs = config.pairedMs || {};
-      //##> Rebuild pairedMs if it wasn't carried through (e.g. after resume).
       const missingMs = Object.keys(paired).some(k => !(k in pairedMs));
       if (missingMs) {
         for (const k of Object.keys(paired)) {
