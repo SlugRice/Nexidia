@@ -7,14 +7,11 @@
       "file": "app/reports/agentResponseDelay.js"
     }
     {
-  "reports": [
     {
       "id": "wgsTranscripts",
       "label": "WGS Transcripts",
       "description": "Callback validation. Paste Orig ANI + minimum recordedDateTime pairs; keeps only calls strictly after each paired date.",
       "file": "wgsTranscripts.txt"
     }
-  ]
-}
   ]
 }
