@@ -1,4 +1,4 @@
-//[Last Update: 1:30 PM 7/2/2026]
+//[Last Update: 12:15 PM 7/24/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -173,7 +173,12 @@
     outputFields: [{ storageName: "UDFVarchar110", displayName: "Trans_Id" }],
     zipFileName: "",
     autoDownload: false,
-    keepAwake: true
+    keepAwake: true,
+    includeAudio: false,
+    audioNamingField: "UDFVarchar110",
+    audioNamingDisplay: "Trans_Id",
+    audioZipCapMB: 500,
+    audioConcurrency: 6
   };
   const METADATA_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
   const SEARCH_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search";
@@ -181,6 +186,9 @@
   const SEARCH_CAP_LIMIT = 10000;
   const SEARCH_CHUNK_SIZE = 5000;
   const SEARCH_MAX_SPLIT_DEPTH = 10;
+  const AUDIO_BASE = "https://apug01.nxondemand.com/NxIA";
+  const AUDIO_PREP_POLL_MS = 1500;
+  const AUDIO_PREP_MAX_POLLS = 15;
   const PINNED_NAMING = [
     { storageName: "UDFVarchar110", displayName: "Trans_Id" },
     { storageName: "UDFVarchar1", displayName: "User to User" },
@@ -302,6 +310,27 @@
       try { return await fetchJson(svcUrl, { credentials: "include" }); } catch { return await fetchJson(apiUrl, { credentials: "include" }); }
     }
   }
+  async function prepareAndFetchAudio(smid) {
+    const prepUrl = `${AUDIO_BASE}/api/media-preparation/prepare?sourceMediaId=${smid}&startOffsetMilliseconds=0&clipDurationMilliseconds=0&requestVideoIfAvailable=true`;
+    let prepared = null;
+    for (let i = 0; i < AUDIO_PREP_MAX_POLLS; i++) {
+      const data = await fetchJson(prepUrl, { credentials: "include" });
+      if (data && data.isMediaPrepared && data.mediaUri) { prepared = data; break; }
+      await sleep(AUDIO_PREP_POLL_MS);
+    }
+    if (!prepared) throw new Error("Media preparation timed out");
+    const res = await fetch(prepared.mediaUri, { credentials: "include" });
+    if (!res.ok) throw new Error(`Media fetch ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    let ext = "mp4";
+    if (ct.includes("wav")) ext = "wav";
+    else if (ct.includes("mpeg") || ct.includes("mp3")) ext = "mp3";
+    else if (ct.includes("ogg")) ext = "ogg";
+    else if (ct.includes("webm")) ext = "webm";
+    else if (ct.includes("m4a") || ct.includes("mp4") || ct.includes("aac")) ext = "mp4";
+    return { bytes, ext };
+  }
   function gapFmt(sec) {
     sec = Math.max(0, Math.floor(sec));
     const m = Math.floor(sec / 60), s = sec % 60;
@@ -357,7 +386,8 @@
     let offset = 0;
     for (const f of files) {
       const nameBytes = strBytes(f.name);
-      const dataBytes = strBytes(f.text);
+      //##> ZIP entries accept raw bytes (f.bytes) for binary audio, or text (f.text) for transcripts. STORE method (no compression) so binary passes through intact.
+      const dataBytes = (f.bytes instanceof Uint8Array) ? f.bytes : strBytes(f.text || "");
       const crc = crc32(dataBytes);
       const localHeader = [u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(dataBytes.length),u32(dataBytes.length),u16(nameBytes.length),u16(0)];
       const localBlobParts = [...localHeader, nameBytes, dataBytes];
@@ -772,6 +802,31 @@
     keepAwakeRow.appendChild(keepAwakeLabel);
     box.appendChild(keepAwakeRow);
     box.appendChild(divider());
+    box.appendChild(sectionHead("Audio Files"));
+    const audioRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
+    const audioCheck = el("input", { type: "checkbox" });
+    audioCheck.checked = !!draft.includeAudio;
+    const audioLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;" });
+    audioLabel.appendChild(audioCheck);
+    audioLabel.appendChild(document.createTextNode("Include Audio Files"));
+    audioLabel.appendChild(tooltip("Downloads the call recording for each call alongside the transcripts. Audio is packaged into separate ZIP files, split by total size."));
+    audioRow.appendChild(audioLabel);
+    box.appendChild(audioRow);
+    const audioArea = el("div", { style: "margin-left:22px;margin-bottom:10px;" + (draft.includeAudio ? "" : "display:none;") });
+    audioArea.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name audio files using:"));
+    const audioDefault = draft.audioNamingField ? { storageName: draft.audioNamingField, displayName: draft.audioNamingDisplay || draft.audioNamingField } : PINNED_NAMING[0];
+    const audioNamingPicker = makeFieldPicker(metadataFields, PINNED_NAMING, audioDefault);
+    audioArea.appendChild(audioNamingPicker.wrapper);
+    const audioCapRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;" });
+    audioCapRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "Start a new ZIP after each reaches"));
+    const audioCapInput = el("input", { type: "number", min: 50, max: 2000, value: draft.audioZipCapMB, style: "width:80px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+    audioCapRow.appendChild(audioCapInput);
+    audioCapRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "MB"));
+    audioCapRow.appendChild(tooltip("Audio files are much larger than transcripts. To keep downloads manageable, audio is split across multiple ZIP files. Each ZIP fills up to this size, then a new one starts. 500 MB is a safe default; going much higher may strain your browser's memory."));
+    audioArea.appendChild(audioCapRow);
+    box.appendChild(audioArea);
+    audioCheck.onchange = () => { audioArea.style.display = audioCheck.checked ? "" : "none"; };
+    box.appendChild(divider());
     const fetchToggle = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:6px;" });
     const fetchLink = el("span", { style: "font-size:12px;color:#3b82f6;cursor:pointer;text-decoration:underline;" }, "Fetch Settings");
     fetchToggle.appendChild(fetchLink);
@@ -803,6 +858,11 @@
       draft.autoDownload = autoDlCheck.checked;
       draft.keepAwake = keepAwakeCheck.checked;
       draft.zipFileName = zipNameInput.value;
+      draft.includeAudio = audioCheck.checked;
+      draft.audioNamingField = audioNamingPicker.getStorageName() || draft.audioNamingField;
+      draft.audioNamingDisplay = audioNamingPicker.getDisplayName() || draft.audioNamingDisplay;
+      const acap = parseInt(audioCapInput.value);
+      if (!isNaN(acap) && acap > 0) draft.audioZipCapMB = acap;
       const gapVal = parseInt(gapInput.value);
       if (!isNaN(gapVal) && gapVal >= 0) draft.gapThresholdSeconds = gapVal;
       if (radioLength.checked) {
@@ -951,6 +1011,7 @@
       appendLog(line) { log.textContent += (log.textContent ? "\n" : "") + line; log.scrollTop = log.scrollHeight; },
       btnDownload,
       btnBackToSearch,
+      btnRow,
       remove() { try { overlay.remove(); } catch (_) {} }
     };
   }
@@ -1308,6 +1369,9 @@ function openTranscriptBatchBuilder() {
     if (cfg.batchMode === "group" && cfg.groupField && !searchFields.includes(cfg.groupField)) {
       searchFields.push(cfg.groupField);
     }
+    if (cfg.includeAudio && cfg.audioNamingField && !searchFields.includes(cfg.audioNamingField)) {
+      searchFields.push(cfg.audioNamingField);
+    }
     const results = await chunkedSearch(values, inputStorageName, searchFields, UI);
     if (!results.length) { UI.setProgress(0, "No results returned.", "No calls matched."); keepAwake.stop(); return; }
     UI.appendLog(`Calls returned: ${results.length}`);
@@ -1339,6 +1403,7 @@ function openTranscriptBatchBuilder() {
           userToUser: (r.UDFVarchar1 || "").toString(),
           leg: isSet ? (idx + 1) : null,
           namingValue: (singleFileConfig && singleFileConfig.enabled && singleFileConfig.namingField) ? (r[singleFileConfig.namingField] || "").toString().trim() : "",
+          audioName: (cfg.includeAudio && cfg.audioNamingField) ? (r[cfg.audioNamingField] || "").toString().trim() : "",
           groupValue: (cfg.batchMode === "group" && cfg.groupField) ? (r[cfg.groupField] || "").toString().trim() : "",
           fieldValues: Object.fromEntries(cfg.outputFields.map(f => [f.storageName, (r[f.storageName] || "").toString()]))
         });
@@ -1443,6 +1508,89 @@ function openTranscriptBatchBuilder() {
         }
       };
     }
+    const pendingDownloads = [];
+    async function finalizeDownloads(summaryDetail) {
+      try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
+      keepAwake.stop();
+      if (!pendingDownloads.length) {
+        UI.setProgress(100, "Done.", summaryDetail || "No files produced.");
+        attachBackToSearchHandler();
+        return;
+      }
+      UI.btnDownload.style.display = "none";
+      for (const d of pendingDownloads) {
+        const btn = document.createElement("button");
+        btn.textContent = `Download ${d.name}`;
+        btn.style.cssText = "background:#22c55e; color:#06210f; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700;";
+        btn.onclick = () => {
+          const a = document.createElement("a");
+          a.href = d.blobUrl; a.download = d.name;
+          document.body.appendChild(a); a.click(); a.remove();
+          btn.style.background = "#4b5563"; btn.style.color = "#cbd5e1";
+          btn.textContent = `Downloaded ${d.name}`;
+        };
+        UI.btnRow.insertBefore(btn, UI.btnBackToSearch);
+        d.button = btn;
+      }
+      UI.setProgress(100, cfg.autoDownload ? "Done. Downloading..." : "Ready to download.", summaryDetail || `ZIPs ready: ${pendingDownloads.length}`);
+      attachBackToSearchHandler();
+      if (cfg.autoDownload) {
+        for (let i = 0; i < pendingDownloads.length; i++) {
+          pendingDownloads[i].button.click();
+          await sleep(800);
+        }
+      }
+    }
+    //##> Audio pass: fetches recordings directly (prepare -> poll -> fetch mediaUri), fills each ZIP up to audioZipCapMB then rolls to a new one. Concurrency capped low (6) because audio blobs are large vs transcripts.
+    async function runAudioPass() {
+      const capBytes = Math.max(50, cfg.audioZipCapMB || 500) * 1024 * 1024;
+      const audioConc = Math.max(1, Math.min(cfg.audioConcurrency || 6, 20));
+      UI.setProgress(86, "Fetching audio files...", `0 / ${out.length}`);
+      UI.appendLog(`Audio: fetching ${out.length} file(s), cap ${cfg.audioZipCapMB} MB per ZIP`);
+      const zipBase = resolveZipName(cfg.zipFileName, `nexidia_${nowStamp()}.zip`).replace(/\.zip$/i, "");
+      let bucket = [], bucketBytes = 0, zipIndex = 1;
+      const usedNames = new Map();
+      let done = 0, audioFailed = 0;
+      const flush = () => {
+        if (!bucket.length) return;
+        const zip = makeZip(bucket);
+        const zipName = `${zipBase}_audio_${String(zipIndex).padStart(3, "0")}.zip`;
+        pendingDownloads.push({ name: zipName, blobUrl: URL.createObjectURL(zip) });
+        UI.appendLog(`Audio ZIP ready: ${zipName} (${bucket.length} files, ${(bucketBytes / 1048576).toFixed(1)} MB)`);
+        zipIndex++; bucket = []; bucketBytes = 0;
+      };
+      const addFile = (name, bytes) => {
+        bucket.push({ name, bytes });
+        bucketBytes += bytes.length;
+        if (bucketBytes >= capBytes) flush();
+      };
+      let cursor = 0;
+      async function worker() {
+        while (cursor < out.length) {
+          const it = out[cursor++];
+          let baseName = sanitizeFilename(it.audioName || it.sourceMediaId);
+          if (usedNames.has(baseName)) {
+            const c = usedNames.get(baseName) + 1; usedNames.set(baseName, c); baseName = baseName + "_" + c;
+          } else { usedNames.set(baseName, 1); }
+          try {
+            const media = await prepareAndFetchAudio(it.sourceMediaId);
+            addFile(baseName + "." + media.ext, media.bytes);
+          } catch (e) {
+            audioFailed++;
+            UI.appendLog(`Audio failed ${it.sourceMediaId}: ${String(e).slice(0, 80)}`);
+          }
+          done++;
+          if (done % 5 === 0 || done === out.length) {
+            const pct = 86 + Math.floor((done / Math.max(1, out.length)) * 8);
+            UI.setProgress(Math.min(94, pct), "Fetching audio files...", `${done} / ${out.length}\nAudio failed: ${audioFailed}\nAudio ZIPs so far: ${zipIndex - 1}`);
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(audioConc, out.length || 1) }, () => worker()));
+      flush();
+      UI.appendLog(`Audio complete. Failed: ${audioFailed}. ZIPs: ${zipIndex - 1}`);
+    }
+    if (cfg.includeAudio) { await runAudioPass(); }
     if (singleFileConfig && singleFileConfig.enabled) {
       UI.setProgress(88, "Building single files...", "");
       const singleFiles = [];
@@ -1466,28 +1614,9 @@ function openTranscriptBatchBuilder() {
       const zip = makeZip(singleFiles);
       const zipName = resolveZipName(cfg.zipFileName, `nexidia_singles_${nowStamp()}.zip`);
       const blobUrl = URL.createObjectURL(zip);
+      pendingDownloads.push({ name: zipName, blobUrl });
       UI.appendLog(`ZIP READY: ${zipName}`);
-      UI.btnDownload.disabled = false;
-      UI.btnDownload.style.opacity = "1";
-      const triggerDownload = async () => {
-        const a = document.createElement("a");
-        a.href = blobUrl; a.download = zipName;
-        document.body.appendChild(a); a.click(); a.remove();
-        UI.appendLog("Download triggered.");
-        try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
-        UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
-        keepAwake.stop();
-        attachBackToSearchHandler();
-      };
-      UI.btnDownload.onclick = triggerDownload;
-      if (cfg.autoDownload) {
-        UI.appendLog("Auto-downloading...");
-        triggerDownload();
-      } else {
-        UI.appendLog(`Click "Download ZIP"`);
-        UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFiles: ${singleFiles.length}\nFailed: ${failed.length}`);
-        attachBackToSearchHandler();
-      }
+      await finalizeDownloads(`Transcript files: ${singleFiles.length}\nFailed: ${failed.length}`);
       return;
     }
     UI.setProgress(88, "Batching...", "");
@@ -1687,28 +1816,9 @@ function openTranscriptBatchBuilder() {
     const zip = makeZip(batchFiles);
     const zipName = resolveZipName(cfg.zipFileName, `nexidia_batches_${nowStamp()}.zip`);
     const blobUrl = URL.createObjectURL(zip);
+    pendingDownloads.push({ name: zipName, blobUrl });
     UI.appendLog(`ZIP READY: ${zipName}`);
-    UI.btnDownload.disabled = false;
-    UI.btnDownload.style.opacity = "1";
-    const triggerDownload = async () => {
-      const a = document.createElement("a");
-      a.href = blobUrl; a.download = zipName;
-      document.body.appendChild(a); a.click(); a.remove();
-      UI.appendLog("Download triggered.");
-      try { await updateJob(jobId, { status: "complete" }); } catch (_) {}
-      UI.setProgress(100, "Done.", `ZIP: ${zipName}\nFailed: ${failed.length}\nBatches: ${batches.length}`);
-      keepAwake.stop();
-      attachBackToSearchHandler();
-    };
-    UI.btnDownload.onclick = triggerDownload;
-    if (cfg.autoDownload) {
-      UI.appendLog("Auto-downloading...");
-      triggerDownload();
-    } else {
-      UI.appendLog(`Click "Download ZIP"`);
-      UI.setProgress(96, "ZIP ready.", `Click Download ZIP.\nFailed: ${failed.length}\nBatches: ${batches.length}`);
-      attachBackToSearchHandler();
-    }
+    await finalizeDownloads(`Batches: ${batches.length}\nFailed: ${failed.length}`);
   }
   api.registerTool({ id: "transcriptBatchBuilder", label: "Transcript Batch Builder", open: openTranscriptBatchBuilder });
 })();
