@@ -1,4 +1,4 @@
-//[Last Update: 12:15 PM 7/24/2026]
+//[Last Update: 12:20 PM 7/24/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -133,6 +133,7 @@
       if (job.status !== "in-progress") continue;
       if (!job.id || typeof job.id !== "string") continue;
       if (!job.cfg || typeof job.cfg !== "object") continue;
+      if (job.cfg.exportTranscripts === false) continue;
       if (!job.inputStorageName || typeof job.inputStorageName !== "string") continue;
       if (!Array.isArray(job.values) || job.values.length === 0) continue;
       if (typeof job.createdAt !== "number" || job.createdAt <= 0) continue;
@@ -173,7 +174,10 @@
     outputFields: [{ storageName: "UDFVarchar110", displayName: "Trans_Id" }],
     zipFileName: "",
     autoDownload: false,
-    keepAwake: true,
+    exportTranscripts: true,
+    transcriptMode: "batch",
+    individualNamingField: "UDFVarchar110",
+    individualNamingDisplay: "Trans_Id",
     includeAudio: false,
     audioNamingField: "UDFVarchar110",
     audioNamingDisplay: "Trans_Id",
@@ -508,19 +512,78 @@
     let draft = Object.assign({}, currentCfg);
     const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const box = el("div", { style: "background:#fff;width:560px;max-height:88vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
-    box.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Batch Settings"));
+    box.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Export Settings"));
     const closeBtn = el("button", { style: "position:absolute;top:14px;right:16px;border:0;background:#f3f4f6;color:#6b7280;width:26px;height:26px;border-radius:50%;font-size:13px;cursor:pointer;" }, "\u2715");
     closeBtn.onclick = () => overlay.remove();
     box.appendChild(closeBtn);
     box.appendChild(divider());
-    box.appendChild(sectionHead("Batch Size"));
+    //##> Export Settings top section drives visibility. exportTranscripts + transcriptMode (batch|individual) + includeAudio decide which sections below are shown. Sections hide when not relevant.
+    let transcriptMode = draft.transcriptMode === "individual" ? "individual" : "batch";
+    function makePill(initial, onToggle) {
+      const wrap = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px;" });
+      const pill = el("div", { style: `width:36px;height:20px;border-radius:10px;background:${initial ? "#3b82f6" : "#d1d5db"};position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;` });
+      const knob = el("div", { style: `width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${initial ? "19px" : "3px"};transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);` });
+      pill.appendChild(knob);
+      let state = initial;
+      const set = (v) => { state = v; pill.style.background = state ? "#3b82f6" : "#d1d5db"; knob.style.left = state ? "19px" : "3px"; onToggle(state); };
+      pill.onclick = () => set(!state);
+      return { wrap, pill, set, get: () => state };
+    }
+    box.appendChild(sectionHead("What to Export"));
+    const txPill = makePill(draft.exportTranscripts !== false, () => updateSectionVisibility());
+    const txLabel = el("span", { style: "font-size:13px;color:#111827;font-weight:600;cursor:pointer;user-select:none;" }, "Transcripts");
+    txLabel.onclick = () => txPill.pill.click();
+    txPill.wrap.appendChild(txLabel);
+    box.appendChild(txPill.wrap);
+    const modeRow = el("div", { style: "display:flex;align-items:center;gap:0;margin:0 0 12px 22px;" });
+    const modeBatchBtn = el("button", { style: "padding:5px 14px;border-radius:7px 0 0 7px;border:1px solid #3b82f6;font-size:12px;cursor:pointer;font-weight:600;" }, "Batches");
+    const modeIndivBtn = el("button", { style: "padding:5px 14px;border-radius:0 7px 7px 0;border:1px solid #3b82f6;border-left:0;font-size:12px;cursor:pointer;font-weight:600;" }, "Individual files");
+    function paintMode() {
+      const batchOn = transcriptMode === "batch";
+      modeBatchBtn.style.background = batchOn ? "#3b82f6" : "#fff";
+      modeBatchBtn.style.color = batchOn ? "#fff" : "#3b82f6";
+      modeIndivBtn.style.background = !batchOn ? "#3b82f6" : "#fff";
+      modeIndivBtn.style.color = !batchOn ? "#fff" : "#3b82f6";
+    }
+    modeBatchBtn.onclick = () => { transcriptMode = "batch"; paintMode(); updateSectionVisibility(); };
+    modeIndivBtn.onclick = () => { transcriptMode = "individual"; paintMode(); updateSectionVisibility(); };
+    paintMode();
+    modeRow.appendChild(modeBatchBtn);
+    modeRow.appendChild(modeIndivBtn);
+    box.appendChild(modeRow);
+    const audioPill = makePill(!!draft.includeAudio, () => updateSectionVisibility());
+    const audioTopLabel = el("span", { style: "font-size:13px;color:#111827;font-weight:600;cursor:pointer;user-select:none;" }, "Audio Files");
+    audioTopLabel.onclick = () => audioPill.pill.click();
+    audioPill.wrap.appendChild(audioTopLabel);
+    audioPill.wrap.appendChild(el("span", { style: "font-size:11px;color:#6b7280;" }, "(always individual)"));
+    box.appendChild(audioPill.wrap);
+    box.appendChild(divider());
+
+    /* ===== containers (order of appearance) ===== */
+    const secBatchSize = el("div", {});
+    const secFormatting = el("div", {});
+    const secOutputFields = el("div", {});
+    const secIndivNaming = el("div", {});
+    const secBatchNaming = el("div", {});
+    const secAudio = el("div", {});
+    const secZip = el("div", {});
+    box.appendChild(secBatchSize);
+    box.appendChild(secFormatting);
+    box.appendChild(secOutputFields);
+    box.appendChild(secIndivNaming);
+    box.appendChild(secBatchNaming);
+    box.appendChild(secAudio);
+    box.appendChild(secZip);
+
+    /* ===== Batch Size ===== */
+    secBatchSize.appendChild(sectionHead("Batch Size"));
     const radioLength = el("input", { type: "radio", name: "batchMode", value: "length" });
     radioLength.checked = draft.batchMode === "length";
     const radioLengthRow = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;margin-bottom:8px;" });
     radioLengthRow.appendChild(radioLength);
     radioLengthRow.appendChild(document.createTextNode("Cap batches based on length of text"));
     radioLengthRow.appendChild(tooltip("Use this to optimize batches for Copilot prompts. Batches are split based on how much text they contain, so each batch fits within a predictable token range."));
-    box.appendChild(radioLengthRow);
+    secBatchSize.appendChild(radioLengthRow);
     const sliderArea = el("div", { style: "margin-left:22px;margin-bottom:10px;" + (draft.batchMode !== "length" ? "display:none;" : "") });
     const PRESETS = [
       { label: "Small", tokens: 18500, tip: "Best for heavy or multi-pass prompts where Copilot needs to analyze each call carefully." },
@@ -568,14 +631,14 @@
     customRow.appendChild(customTokenInput);
     customRow.appendChild(customTip);
     sliderArea.appendChild(customRow);
-    box.appendChild(sliderArea);
+    secBatchSize.appendChild(sliderArea);
     const radioCount = el("input", { type: "radio", name: "batchMode", value: "count" });
     radioCount.checked = draft.batchMode === "count" || draft.batchMode === "all";
     const radioCountRow = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;margin-bottom:8px;" });
     radioCountRow.appendChild(radioCount);
     radioCountRow.appendChild(document.createTextNode("Cap batches by count"));
     radioCountRow.appendChild(tooltip("Split batches by a fixed number of transcripts regardless of how long they are."));
-    box.appendChild(radioCountRow);
+    secBatchSize.appendChild(radioCountRow);
     const countArea = el("div", { style: "margin-left:22px;margin-bottom:10px;" + (draft.batchMode !== "count" && draft.batchMode !== "all" ? "display:none;" : "") });
     const countRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:6px;" });
     const countInput = el("input", { type: "number", min: 1, max: 10000, value: draft.countPerBatch, style: "width:80px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
@@ -591,14 +654,14 @@
     };
     countRow.appendChild(allBtn);
     countArea.appendChild(countRow);
-    box.appendChild(countArea);
+    secBatchSize.appendChild(countArea);
     const radioGroup = el("input", { type: "radio", name: "batchMode", value: "group" });
     radioGroup.checked = draft.batchMode === "group";
     const radioGroupRow = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;margin-bottom:8px;" });
     radioGroupRow.appendChild(radioGroup);
     radioGroupRow.appendChild(document.createTextNode("Group batches by field value"));
     radioGroupRow.appendChild(tooltip("All calls sharing the same value in the selected field are grouped into the same batch. Calls with an empty value in that field are ignored."));
-    box.appendChild(radioGroupRow);
+    secBatchSize.appendChild(radioGroupRow);
     const groupArea = el("div", { style: "margin-left:22px;margin-bottom:10px;" + (draft.batchMode !== "group" ? "display:none;" : "") });
     groupArea.appendChild(el("div", { style: "font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;" }, "Group by field:"));
     const groupDefault = draft.groupField
@@ -623,7 +686,7 @@
     groupSplitRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "tokens"));
     groupSplitRow.appendChild(tooltip("If any group exceeds this size, you'll be asked whether to split it into sub-batches (value_1, value_2, ...). Applies only to Group by field value mode."));
     groupArea.appendChild(groupSplitRow);
-    box.appendChild(groupArea);
+    secBatchSize.appendChild(groupArea);
     function updateModeAreas() {
       sliderArea.style.display = draft.batchMode === "length" ? "" : "none";
       countArea.style.display = (draft.batchMode === "count" || draft.batchMode === "all") ? "" : "none";
@@ -632,15 +695,17 @@
     radioLength.onchange = () => { if (radioLength.checked) { draft.batchMode = "length"; updateModeAreas(); } };
     radioCount.onchange = () => { if (radioCount.checked) { draft.batchMode = "count"; updateModeAreas(); } };
     radioGroup.onchange = () => { if (radioGroup.checked) { draft.batchMode = "group"; updateModeAreas(); } };
-    box.appendChild(divider());
-    box.appendChild(sectionHead("Transcript Formatting"));
+    secBatchSize.appendChild(divider());
+
+    /* ===== Transcript Formatting (both modes) ===== */
+    secFormatting.appendChild(sectionHead("Transcript Formatting"));
     const gapRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
     const gapInput = el("input", { type: "number", min: 0, max: 600, value: draft.gapThresholdSeconds, style: "width:70px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
     gapRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "Insert gap markers when silence exceeds"));
     gapRow.appendChild(gapInput);
     gapRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "seconds"));
     gapRow.appendChild(tooltip("Adds a [GAP X:XX] marker in the transcript when there is a long pause. Set to 0 to disable gap markers entirely."));
-    box.appendChild(gapRow);
+    secFormatting.appendChild(gapRow);
     const tsRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:6px;" });
     const tsCheck = el("input", { type: "checkbox" });
     tsCheck.checked = draft.showTimestamps;
@@ -649,10 +714,12 @@
     tsLabel.appendChild(document.createTextNode("Include timestamps in transcripts"));
     tsLabel.appendChild(tooltip("Adds a [M:SS] timestamp before each speaker turn. Useful when you need to reference specific moments in a call, but increases file size."));
     tsRow.appendChild(tsLabel);
-    box.appendChild(tsRow);
-    box.appendChild(divider());
-    box.appendChild(sectionHead("Output Fields"));
-    box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:8px;" }, "Choose which metadata fields appear in each transcript header."));
+    secFormatting.appendChild(tsRow);
+    secFormatting.appendChild(divider());
+
+    /* ===== Output Fields (both modes) ===== */
+    secOutputFields.appendChild(sectionHead("Output Fields"));
+    secOutputFields.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:8px;" }, "Choose which metadata fields appear in each transcript header."));
     const chipWrap = el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;" });
     function renderChips() {
       chipWrap.innerHTML = "";
@@ -667,7 +734,7 @@
       }
     }
     renderChips();
-    box.appendChild(chipWrap);
+    secOutputFields.appendChild(chipWrap);
     const addFieldRow = el("div", { style: "display:flex;gap:6px;align-items:flex-start;" });
     const outputPicker = makeFieldPicker(metadataFields, PINNED_OUTPUT, { storageName: "", displayName: "" });
     outputPicker.input.value = "";
@@ -685,9 +752,20 @@
       delete outputPicker.input.dataset.storageName;
     };
     addFieldRow.appendChild(addFieldBtn);
-    box.appendChild(addFieldRow);
-    box.appendChild(divider());
-    box.appendChild(sectionHead("File Naming"));
+    secOutputFields.appendChild(addFieldRow);
+    secOutputFields.appendChild(divider());
+
+    /* ===== Individual transcript naming (individual mode only) ===== */
+    secIndivNaming.appendChild(sectionHead("Transcript File Naming"));
+    secIndivNaming.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name files using:"));
+    const indivDefault = draft.individualNamingField ? { storageName: draft.individualNamingField, displayName: draft.individualNamingDisplay || draft.individualNamingField } : PINNED_NAMING[0];
+    const indivNamingPicker = makeFieldPicker(metadataFields, PINNED_NAMING, indivDefault);
+    secIndivNaming.appendChild(indivNamingPicker.wrapper);
+    secIndivNaming.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-top:6px;" }, "Each transcript is saved as its own file, named by this field's value (falls back to media ID if empty)."));
+    secIndivNaming.appendChild(divider());
+
+    /* ===== Batch File Naming (batch mode only) ===== */
+    secBatchNaming.appendChild(sectionHead("Batch File Naming"));
     const filenameWrap = el("div", { style: "display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;overflow:hidden;margin-bottom:10px;font-size:13px;" });
     function makeSegment(value, validator, onUpdate, tipText) {
       const seg = el("div", { style: "padding:6px 10px;background:#f9fafb;cursor:pointer;border-right:1px solid #d1d5db;min-width:40px;text-align:center;position:relative;", title: tipText });
@@ -743,7 +821,7 @@
       }
     }
     rebuildSubSeg();
-    box.appendChild(filenameWrap);
+    secBatchNaming.appendChild(filenameWrap);
     const copiesRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
     copiesRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "Copies per batch:"));
     const copiesDec = el("button", { style: "width:24px;height:24px;border-radius:6px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;" }, "\u2212");
@@ -759,13 +837,13 @@
     copiesRow.appendChild(copiesVal);
     copiesRow.appendChild(copiesInc);
     copiesRow.appendChild(tooltip("Generate multiple copies of each batch file. Useful if you want to process the same calls with different prompts. Maximum 5 copies."));
-    box.appendChild(copiesRow);
+    secBatchNaming.appendChild(copiesRow);
     const examplesWrap = el("div", { style: "background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;margin-bottom:10px;" });
     const examplesTitle = el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Example filenames:");
     const examplesList = el("div", { style: "font-size:12px;color:#111827;font-family:monospace;" });
     examplesWrap.appendChild(examplesTitle);
     examplesWrap.appendChild(examplesList);
-    box.appendChild(examplesWrap);
+    secBatchNaming.appendChild(examplesWrap);
     function refreshExamples() {
       const examples = buildExamples(draft.fileBase, draft.fileIncrement, draft.copies, draft.fileSubIncrement);
       examplesList.innerHTML = "";
@@ -774,63 +852,39 @@
       }
     }
     refreshExamples();
-    const zipNameRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
-    zipNameRow.appendChild(el("span", { style: "font-size:12px;color:#374151;min-width:80px;" }, "ZIP filename:"));
-    const zipNameInput = el("input", { type: "text", value: draft.zipFileName || "", placeholder: `nexidia_batches_${nowStamp()}.zip`, style: "flex:1;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
-    zipNameInput.oninput = () => { draft.zipFileName = zipNameInput.value; };
-    zipNameRow.appendChild(zipNameInput);
-    zipNameRow.appendChild(tooltip("Custom name for the downloaded ZIP file. Leave blank to use the default systematic name shown in the placeholder. The .zip extension will be added automatically if you omit it."));
-    box.appendChild(zipNameRow);
-    box.appendChild(divider());
-    box.appendChild(sectionHead("Behavior"));
-    const autoDlRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
-    const autoDlCheck = el("input", { type: "checkbox" });
-    autoDlCheck.checked = !!draft.autoDownload;
-    const autoDlLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;" });
-    autoDlLabel.appendChild(autoDlCheck);
-    autoDlLabel.appendChild(document.createTextNode("Auto-download ZIP when ready"));
-    autoDlLabel.appendChild(tooltip("Automatically trigger the ZIP download as soon as the job finishes. Useful for long unattended runs. Requires the tab to remain open."));
-    autoDlRow.appendChild(autoDlLabel);
-    box.appendChild(autoDlRow);
-    const keepAwakeRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
-    const keepAwakeCheck = el("input", { type: "checkbox" });
-    keepAwakeCheck.checked = !!draft.keepAwake;
-    const keepAwakeLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;" });
-    keepAwakeLabel.appendChild(keepAwakeCheck);
-    keepAwakeLabel.appendChild(document.createTextNode("Keep screen awake during job"));
-    keepAwakeLabel.appendChild(tooltip("Requests a screen wake lock and plays inaudible audio to discourage sleep. This may NOT prevent corporate idle-lock policies enforced by Windows. If your IT enforces lock at 15 min and ignores synthesized activity, a USB mouse jiggler is the only reliable workaround."));
-    keepAwakeRow.appendChild(keepAwakeLabel);
-    box.appendChild(keepAwakeRow);
-    box.appendChild(divider());
-    box.appendChild(sectionHead("Audio Files"));
-    const audioRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
-    const audioCheck = el("input", { type: "checkbox" });
-    audioCheck.checked = !!draft.includeAudio;
-    const audioLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;" });
-    audioLabel.appendChild(audioCheck);
-    audioLabel.appendChild(document.createTextNode("Include Audio Files"));
-    audioLabel.appendChild(tooltip("Downloads the call recording for each call alongside the transcripts. Audio is packaged into separate ZIP files, split by total size."));
-    audioRow.appendChild(audioLabel);
-    box.appendChild(audioRow);
-    const audioArea = el("div", { style: "margin-left:22px;margin-bottom:10px;" + (draft.includeAudio ? "" : "display:none;") });
-    audioArea.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name audio files using:"));
+    secBatchNaming.appendChild(divider());
+
+    /* ===== Audio Files (audio on only) ===== */
+    secAudio.appendChild(sectionHead("Audio Files"));
+    secAudio.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name audio files using:"));
     const audioDefault = draft.audioNamingField ? { storageName: draft.audioNamingField, displayName: draft.audioNamingDisplay || draft.audioNamingField } : PINNED_NAMING[0];
     const audioNamingPicker = makeFieldPicker(metadataFields, PINNED_NAMING, audioDefault);
-    audioArea.appendChild(audioNamingPicker.wrapper);
+    secAudio.appendChild(audioNamingPicker.wrapper);
     const audioCapRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;" });
     audioCapRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "Start a new ZIP after each reaches"));
     const audioCapInput = el("input", { type: "number", min: 50, max: 2000, value: draft.audioZipCapMB, style: "width:80px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
     audioCapRow.appendChild(audioCapInput);
     audioCapRow.appendChild(el("span", { style: "font-size:12px;color:#374151;" }, "MB"));
     audioCapRow.appendChild(tooltip("Audio files are much larger than transcripts. To keep downloads manageable, audio is split across multiple ZIP files. Each ZIP fills up to this size, then a new one starts. 500 MB is a safe default; going much higher may strain your browser's memory."));
-    audioArea.appendChild(audioCapRow);
-    box.appendChild(audioArea);
-    audioCheck.onchange = () => { audioArea.style.display = audioCheck.checked ? "" : "none"; };
-    box.appendChild(divider());
+    secAudio.appendChild(audioCapRow);
+    secAudio.appendChild(divider());
+
+    /* ===== ZIP filename (batch or audio) ===== */
+    secZip.appendChild(sectionHead("ZIP Filename"));
+    const zipNameRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
+    zipNameRow.appendChild(el("span", { style: "font-size:12px;color:#374151;min-width:80px;" }, "ZIP filename:"));
+    const zipNameInput = el("input", { type: "text", value: draft.zipFileName || "", placeholder: `nexidia_export_${nowStamp()}.zip`, style: "flex:1;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+    zipNameInput.oninput = () => { draft.zipFileName = zipNameInput.value; };
+    zipNameRow.appendChild(zipNameInput);
+    zipNameRow.appendChild(tooltip("Base name for downloaded ZIP files. Audio ZIPs append _audio_001, _audio_002, etc. Leave blank to use the default systematic name."));
+    secZip.appendChild(zipNameRow);
+    secZip.appendChild(divider());
+
+    /* ===== Fetch Settings (advanced, always available) ===== */
     const fetchToggle = el("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:6px;" });
     const fetchLink = el("span", { style: "font-size:12px;color:#3b82f6;cursor:pointer;text-decoration:underline;" }, "Fetch Settings");
     fetchToggle.appendChild(fetchLink);
-    fetchToggle.appendChild(tooltip("These settings control how transcripts are fetched from the Nexidia API. Only adjust these if you are troubleshooting fetch errors or performance issues."));
+    fetchToggle.appendChild(tooltip("These settings control how transcripts and audio are fetched from the Nexidia API. Only adjust these if you are troubleshooting fetch errors or performance issues."));
     box.appendChild(fetchToggle);
     const fetchArea = el("div", { style: "display:none;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:10px;" });
     fetchLink.onclick = () => { fetchArea.style.display = fetchArea.style.display === "none" ? "block" : "none"; };
@@ -839,30 +893,53 @@
       const row = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
       const input = el("input", { type: "number", min, max, value: draft[key], style: "width:80px;padding:5px 7px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
       fetchRefs[key] = input;
-      row.appendChild(el("span", { style: "font-size:12px;color:#374151;min-width:160px;" }, labelText));
+      row.appendChild(el("span", { style: "font-size:12px;color:#374151;min-width:180px;" }, labelText));
       row.appendChild(input);
       if (tipText) row.appendChild(tooltip(tipText));
       return row;
     }
-    fetchArea.appendChild(fetchField("Concurrency", "Number of transcript fetches running at the same time. Higher = faster but may trigger rate limiting.", "concurrency", 1, 100));
+    fetchArea.appendChild(fetchField("Transcript concurrency", "Number of transcript fetches running at the same time. Higher = faster but may trigger rate limiting.", "concurrency", 1, 100));
+    fetchArea.appendChild(fetchField("Audio concurrency", "Number of audio downloads running at the same time. Audio is large, so keep this low (6 is safe).", "audioConcurrency", 1, 20));
     fetchArea.appendChild(fetchField("Delay (ms)", "Milliseconds to wait between each worker picking up a new fetch. Lower = faster pipeline.", "delayMs", 0, 2000));
     fetchArea.appendChild(fetchField("Fetch retries", "How many times to retry a failed transcript fetch before giving up.", "fetchRetries", 0, 10));
     fetchArea.appendChild(fetchField("Retry backoff (ms)", "How long to wait before each retry attempt. Multiplied by the attempt number.", "retryBackoffMs", 0, 5000));
     box.appendChild(fetchArea);
     box.appendChild(divider());
+
+    function updateSectionVisibility() {
+      const tx = txPill.get();
+      const audio = audioPill.get();
+      const batch = tx && transcriptMode === "batch";
+      const indiv = tx && transcriptMode === "individual";
+      modeRow.style.display = tx ? "flex" : "none";
+      secBatchSize.style.display = batch ? "" : "none";
+      secBatchNaming.style.display = batch ? "" : "none";
+      secFormatting.style.display = tx ? "" : "none";
+      secOutputFields.style.display = tx ? "" : "none";
+      secIndivNaming.style.display = indiv ? "" : "none";
+      secAudio.style.display = audio ? "" : "none";
+      secZip.style.display = (tx || audio) ? "" : "none";
+    }
+    updateSectionVisibility();
+
     const saveBtn = el("button", {
       style: "width:100%;padding:10px;border-radius:10px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(59,130,246,0.35);"
     }, "Apply Settings");
     saveBtn.onclick = () => {
-      draft.showTimestamps = tsCheck.checked;
-      draft.autoDownload = autoDlCheck.checked;
-      draft.keepAwake = keepAwakeCheck.checked;
-      draft.zipFileName = zipNameInput.value;
-      draft.includeAudio = audioCheck.checked;
+      let tx = txPill.get();
+      const audio = audioPill.get();
+      if (!tx && !audio) { tx = true; }
+      draft.exportTranscripts = tx;
+      draft.includeAudio = audio;
+      draft.transcriptMode = transcriptMode;
+      draft.individualNamingField = indivNamingPicker.getStorageName() || draft.individualNamingField;
+      draft.individualNamingDisplay = indivNamingPicker.getDisplayName() || draft.individualNamingDisplay;
       draft.audioNamingField = audioNamingPicker.getStorageName() || draft.audioNamingField;
       draft.audioNamingDisplay = audioNamingPicker.getDisplayName() || draft.audioNamingDisplay;
       const acap = parseInt(audioCapInput.value);
       if (!isNaN(acap) && acap > 0) draft.audioZipCapMB = acap;
+      draft.showTimestamps = tsCheck.checked;
+      draft.zipFileName = zipNameInput.value;
       const gapVal = parseInt(gapInput.value);
       if (!isNaN(gapVal) && gapVal >= 0) draft.gapThresholdSeconds = gapVal;
       if (radioLength.checked) {
@@ -1233,7 +1310,7 @@ function openTranscriptBatchBuilder() {
         job.values,
         job.inputStorageName,
         job.inputDisplayName,
-        job.singleFileConfig || { enabled: false },
+        null,
         { jobId: job.id, alreadyFetched, resumed: true }
       );
     } catch (e) {
@@ -1277,35 +1354,27 @@ function openTranscriptBatchBuilder() {
       textarea.value = preload;
       api.setShared("batchBuilderPreload", null);
     }
-    let singleFileEnabled = false;
-    const namingPicker = makeFieldPicker(metadataFields, PINNED_NAMING, PINNED_NAMING[0]);
-    const toggleRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:12px;" });
-    const pill = el("div", { style: "width:36px;height:20px;border-radius:10px;background:#d1d5db;position:relative;cursor:pointer;transition:background .2s;" });
-    const knob = el("div", { style: "width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);" });
-    pill.appendChild(knob);
-    const toggleLabel = el("span", { style: "font-size:13px;color:#374151;user-select:none;cursor:pointer;" }, "Single File Export");
-    toggleRow.appendChild(pill);
-    toggleRow.appendChild(toggleLabel);
-    const namingArea = el("div", { style: "display:none;padding:10px 12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:12px;" });
-    namingArea.appendChild(el("div", { style: "font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;" }, "Name files using:"));
-    namingArea.appendChild(namingPicker.wrapper);
-    function toggleSingle() {
-      singleFileEnabled = !singleFileEnabled;
-      pill.style.background = singleFileEnabled ? "#3b82f6" : "#d1d5db";
-      knob.style.left = singleFileEnabled ? "19px" : "3px";
-      namingArea.style.display = singleFileEnabled ? "block" : "none";
-      submitBtn.textContent = singleFileEnabled ? "Export Files" : "Build Batches";
+    //##> Export mode now lives entirely in Export Settings. This screen keeps only the fast-path controls: auto-download and the settings entry point. submitBtn label reflects cfg (batch/individual/audio-only).
+    function computeSubmitLabel() {
+      if (!cfg.exportTranscripts && cfg.includeAudio) return "Download Audio";
+      if (cfg.exportTranscripts && cfg.transcriptMode === "individual") return "Export Files";
+      return "Build Batches";
     }
-    pill.onclick = toggleSingle;
-    toggleLabel.onclick = toggleSingle;
-    card.appendChild(toggleRow);
-    card.appendChild(namingArea);
+    const autoDlRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:12px;" });
+    const autoDlCheck = el("input", { type: "checkbox" });
+    autoDlCheck.checked = !!cfg.autoDownload;
+    const autoDlLabel = el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;" });
+    autoDlLabel.appendChild(autoDlCheck);
+    autoDlLabel.appendChild(document.createTextNode("Auto-download ZIP when ready"));
+    autoDlLabel.appendChild(tooltip("Automatically trigger the download(s) as soon as the job finishes. Useful for long unattended runs. Requires the tab to remain open."));
+    autoDlRow.appendChild(autoDlLabel);
+    card.appendChild(autoDlRow);
     const bottomRow = el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
-    const settingsBtn = el("button", { style: "padding:8px 14px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:13px;cursor:pointer;font-weight:600;" }, "\u2699\uFE0F Batch Settings");
+    const settingsBtn = el("button", { style: "padding:8px 14px;border-radius:8px;border:1px solid #6366f1;background:#fff;color:#6366f1;font-size:13px;cursor:pointer;font-weight:600;" }, "\u2699\uFE0F Export Settings");
     settingsBtn.onclick = () => {
-      openSettingsModal(cfg, metadataFields, (newCfg) => { cfg = newCfg; });
+      openSettingsModal(cfg, metadataFields, (newCfg) => { cfg = newCfg; submitBtn.textContent = computeSubmitLabel(); });
     };
-    const submitBtn = el("button", { style: "flex:1;padding:9px 14px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Build Batches");
+    const submitBtn = el("button", { style: "flex:1;padding:9px 14px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, computeSubmitLabel());
     const saveLabel = el("label", { style: "display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;cursor:pointer;flex-shrink:0;" });
     const saveCheck = el("input", { type: "checkbox" });
     saveCheck.checked = false;
@@ -1320,7 +1389,7 @@ function openTranscriptBatchBuilder() {
       clearBtn = null;
       if (hasSavedSettings()) {
         clearBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #f87171;background:#fff;color:#ef4444;font-size:12px;cursor:pointer;flex-shrink:0;" }, "Clear saved settings");
-        clearBtn.onclick = () => { clearSavedSettings(); cfg = resolveConfig(); refreshClearBtn(); };
+        clearBtn.onclick = () => { clearSavedSettings(); cfg = resolveConfig(); submitBtn.textContent = computeSubmitLabel(); autoDlCheck.checked = !!cfg.autoDownload; refreshClearBtn(); };
         bottomRow.appendChild(clearBtn);
       }
     }
@@ -1330,7 +1399,9 @@ function openTranscriptBatchBuilder() {
     document.body.appendChild(modal);
     submitBtn.onclick = async () => {
       const raw = textarea.value.trim();
-      if (!raw) { alert("Please paste some values before building batches."); return; }
+      if (!raw) { alert("Please paste some values before exporting."); return; }
+      if (!cfg.exportTranscripts && !cfg.includeAudio) { alert("Nothing selected to export. Open Export Settings and enable Transcripts and/or Audio Files."); return; }
+      cfg.autoDownload = autoDlCheck.checked;
       if (saveCheck.checked) { saveSettings(cfg); refreshClearBtn(); }
       const values = parseValues(raw);
       if (!values.length) { alert("No valid values detected."); return; }
@@ -1338,17 +1409,21 @@ function openTranscriptBatchBuilder() {
       const inputDisplayName = inputPicker.getDisplayName();
       if (!inputStorageName) { alert("Please select a valid input field from the dropdown."); return; }
       modal.remove();
-      const singleFileConfig = { enabled: singleFileEnabled, namingField: namingPicker.getStorageName(), namingDisplay: namingPicker.getDisplayName() };
-      await runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig, null);
+      await runBatchBuild(cfg, values, inputStorageName, inputDisplayName, null, null);
     };
   }
-  async function runBatchBuild(cfg, values, inputStorageName, inputDisplayName, singleFileConfig, resumeContext) {
+  async function runBatchBuild(cfg, values, inputStorageName, inputDisplayName, _legacySingleFileConfig, resumeContext) {
     const UI = makeProgressUI();
+    //##> Export mode derived from cfg: individual transcript files when exportTranscripts && transcriptMode==="individual". Batch otherwise. Audio runs as a separate pass when includeAudio.
+    const singleFileConfig = {
+      enabled: cfg.exportTranscripts && cfg.transcriptMode === "individual",
+      namingField: cfg.individualNamingField,
+      namingDisplay: cfg.individualNamingDisplay
+    };
     const keepAwake = createKeepAwake();
-    if (cfg.keepAwake) {
-      await keepAwake.start();
-      UI.appendLog("Keep-awake active (best effort)");
-    }
+    //##> Keep-awake is always on during a job now (no user toggle). Best-effort; corporate idle-lock policies may still override.
+    await keepAwake.start();
+    UI.appendLog("Keep-awake active (best effort)");
     const TARGET_CHARS = Math.floor(cfg.targetTokens * cfg.charsPerToken);
     const pairingActive = isPairField(inputStorageName, inputDisplayName);
     const jobId = resumeContext?.jobId || generateJobId();
@@ -1424,7 +1499,7 @@ function openTranscriptBatchBuilder() {
       updatedAt: Date.now()
     };
     try { await idbPut("jobs", jobRecord); } catch (e) { UI.appendLog(`Warning: could not save job record: ${e.message}`); }
-    if (cfg.batchMode === "all" && !resumed) {
+    if (cfg.exportTranscripts && cfg.transcriptMode === "batch" && cfg.batchMode === "all" && !resumed) {
       if (items.length > 50) {
         const ok = confirm(
           `Batch files this size are not recommended if you're using them with Copilot. ` +
@@ -1440,10 +1515,12 @@ function openTranscriptBatchBuilder() {
         if (!ok) { UI.remove(); keepAwake.stop(); try { await deleteJobAndTranscripts(jobId); } catch (_) {} return; }
       }
     }
+    let failed = [];
+    let out;
+    if (cfg.exportTranscripts) {
     const toFetch = items.filter(it => !alreadyFetched.has(it.sourceMediaId));
     UI.setProgress(58, "Fetching transcripts...", `0 / ${toFetch.length} (${alreadyFetched.size} already saved)`);
     let cursor = 0;
-    const failed = [];
     let completedDelta = 0;
     async function fetchOne(it) {
       for (let attempt = 1; attempt <= cfg.fetchRetries; attempt++) {
@@ -1492,11 +1569,15 @@ function openTranscriptBatchBuilder() {
     UI.setProgress(86, "Assembling output from saved transcripts...", "");
     const allRecords = await idbGetAllByIndex("transcripts", "byJob", jobId);
     const recordsBySmid = new Map(allRecords.map(rec => [rec.sourceMediaId, rec]));
-    const out = items.map(it => {
+    out = items.map(it => {
       const rec = recordsBySmid.get(it.sourceMediaId);
       if (!rec) return { ...it, text: `NO RECORD\nSMID:${it.sourceMediaId}`, charCount: 0, failed: true };
       return { ...it, text: rec.text, charCount: rec.charCount, failed: rec.failed };
     });
+    } else {
+      UI.appendLog("Transcripts skipped (audio-only export).");
+      out = items.map(it => ({ ...it, text: "", charCount: 0, failed: false }));
+    }
     function attachBackToSearchHandler() {
       UI.btnBackToSearch.style.display = "inline-block";
       UI.btnBackToSearch.onclick = () => {
@@ -1532,7 +1613,7 @@ function openTranscriptBatchBuilder() {
         UI.btnRow.insertBefore(btn, UI.btnBackToSearch);
         d.button = btn;
       }
-      UI.setProgress(100, cfg.autoDownload ? "Done. Downloading..." : "Ready to download.", summaryDetail || `ZIPs ready: ${pendingDownloads.length}`);
+      UI.setProgress(100, cfg.autoDownload ? "Done. Downloading..." : "Ready to download.", summaryDetail || `Files ready: ${pendingDownloads.length}`);
       attachBackToSearchHandler();
       if (cfg.autoDownload) {
         for (let i = 0; i < pendingDownloads.length; i++) {
@@ -1541,11 +1622,11 @@ function openTranscriptBatchBuilder() {
         }
       }
     }
-    //##> Audio pass: fetches recordings directly (prepare -> poll -> fetch mediaUri), fills each ZIP up to audioZipCapMB then rolls to a new one. Concurrency capped low (6) because audio blobs are large vs transcripts.
+    //##> Audio pass: fetches recordings directly (prepare -> poll -> fetch mediaUri), fills each ZIP up to audioZipCapMB then rolls to a new one. Concurrency capped low (default 6) because audio blobs are large vs transcripts.
     async function runAudioPass() {
       const capBytes = Math.max(50, cfg.audioZipCapMB || 500) * 1024 * 1024;
       const audioConc = Math.max(1, Math.min(cfg.audioConcurrency || 6, 20));
-      UI.setProgress(86, "Fetching audio files...", `0 / ${out.length}`);
+      UI.setProgress(cfg.exportTranscripts ? 86 : 58, "Fetching audio files...", `0 / ${out.length}`);
       UI.appendLog(`Audio: fetching ${out.length} file(s), cap ${cfg.audioZipCapMB} MB per ZIP`);
       const zipBase = resolveZipName(cfg.zipFileName, `nexidia_${nowStamp()}.zip`).replace(/\.zip$/i, "");
       let bucket = [], bucketBytes = 0, zipIndex = 1;
@@ -1581,7 +1662,9 @@ function openTranscriptBatchBuilder() {
           }
           done++;
           if (done % 5 === 0 || done === out.length) {
-            const pct = 86 + Math.floor((done / Math.max(1, out.length)) * 8);
+            const base = cfg.exportTranscripts ? 86 : 58;
+            const span = cfg.exportTranscripts ? 8 : 36;
+            const pct = base + Math.floor((done / Math.max(1, out.length)) * span);
             UI.setProgress(Math.min(94, pct), "Fetching audio files...", `${done} / ${out.length}\nAudio failed: ${audioFailed}\nAudio ZIPs so far: ${zipIndex - 1}`);
           }
         }
@@ -1591,6 +1674,10 @@ function openTranscriptBatchBuilder() {
       UI.appendLog(`Audio complete. Failed: ${audioFailed}. ZIPs: ${zipIndex - 1}`);
     }
     if (cfg.includeAudio) { await runAudioPass(); }
+    if (!cfg.exportTranscripts) {
+      await finalizeDownloads(`Audio-only export.\nAudio ZIPs: ${pendingDownloads.length}`);
+      return;
+    }
     if (singleFileConfig && singleFileConfig.enabled) {
       UI.setProgress(88, "Building single files...", "");
       const singleFiles = [];
@@ -1613,8 +1700,7 @@ function openTranscriptBatchBuilder() {
       UI.setProgress(92, "Creating ZIP...", `Files: ${singleFiles.length}`);
       const zip = makeZip(singleFiles);
       const zipName = resolveZipName(cfg.zipFileName, `nexidia_singles_${nowStamp()}.zip`);
-      const blobUrl = URL.createObjectURL(zip);
-      pendingDownloads.push({ name: zipName, blobUrl });
+      pendingDownloads.push({ name: zipName, blobUrl: URL.createObjectURL(zip) });
       UI.appendLog(`ZIP READY: ${zipName}`);
       await finalizeDownloads(`Transcript files: ${singleFiles.length}\nFailed: ${failed.length}`);
       return;
@@ -1815,8 +1901,7 @@ function openTranscriptBatchBuilder() {
     UI.setProgress(94, "Creating ZIP...", `Files: ${batchFiles.length}`);
     const zip = makeZip(batchFiles);
     const zipName = resolveZipName(cfg.zipFileName, `nexidia_batches_${nowStamp()}.zip`);
-    const blobUrl = URL.createObjectURL(zip);
-    pendingDownloads.push({ name: zipName, blobUrl });
+    pendingDownloads.push({ name: zipName, blobUrl: URL.createObjectURL(zip) });
     UI.appendLog(`ZIP READY: ${zipName}`);
     await finalizeDownloads(`Batches: ${batches.length}\nFailed: ${failed.length}`);
   }
