@@ -1320,6 +1320,18 @@ function openTranscriptBatchBuilder() {
   }
   async function openInputModal() {
     let cfg = resolveConfig(loadSavedSettings());
+        //##> REPORT/EXPORT PRESET HOOK (generic). Any tool may stage a one-time batch
+    //##> preset via api.setShared("reportBatchPreset", { ...cfg keys }). Only known
+    //##> settings keys are honored; unknown keys are ignored so a caller can never
+    //##> corrupt internal config. Consumed at build time (see submit handler), not
+    //##> here, so reopening this modal preserves the staged preset.
+    const stagedPreset = api.getShared("reportBatchPreset");
+    if (stagedPreset && typeof stagedPreset === "object") {
+      const allowed = Object.keys(DEFAULTS);
+      for (const k of allowed) {
+        if (Object.prototype.hasOwnProperty.call(stagedPreset, k)) cfg[k] = stagedPreset[k];
+      }
+    }
     const metadataFields = await loadMetadataFields();
     const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const card = el("div", { style: "background:#fff;width:540px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -1398,6 +1410,7 @@ function openTranscriptBatchBuilder() {
     modal.appendChild(card);
     document.body.appendChild(modal);
     submitBtn.onclick = async () => {
+      api.setShared("reportBatchPreset", null);
       const raw = textarea.value.trim();
       if (!raw) { alert("Please paste some values before exporting."); return; }
       if (!cfg.exportTranscripts && !cfg.includeAudio) { alert("Nothing selected to export. Open Export Settings and enable Transcripts and/or Audio Files."); return; }
