@@ -1,6 +1,6 @@
-//[Last Update: 8/4/2026]
+//[Last Update: nyceFrustrated v6]
 //##> Standalone report. Population = the full NYCE call set, defined by three
-//##> filters (Node contains NYCE, DNIS, Group number). Phrase tiering (v5):
+//##> filters (Node contains NYCE, DNIS, Group number). Phrase tiering (v5+):
 //##>   Set A) strong, high-precision phrases, UNGATED (one hit qualifies at any
 //##>          sentiment). Surface as Search columns.
 //##>   Set B) weak, corroborating phrases, AND'd with a softer sentiment floor
@@ -13,7 +13,10 @@
 //##> phrase "Complaint"; that shows as an extra Search-column label on an already
 //##> kept row and never changes the keep decision. Each kept row is tagged with a
 //##> Route showing why it survived. Rows sort ascending by sentiment; columns are
-//##> ordered explicitly with blank placeholder columns interleaved.
+//##> ordered explicitly with blank placeholder columns interleaved. Before dispatch
+//##> the report stages a one-time batch/export preset (reportBatchPreset) so a
+//##> straight-to-Export run uses NYCE conventions; the user can still override in
+//##> Export Settings.
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
@@ -30,6 +33,11 @@
   const SENTIMENT_FLOOR = -99;
   const SENTIMENT_THRESHOLD = -1.2;   //##> standalone keep (unchanged)
   const SENTIMENT_CORROB = -0.4;      //##> weak-phrase companion floor
+
+  //##> Batch/export preset applied when this report's results are exported.
+  //##> Small batch = 18,500 tokens \u00d7 3.5 chars/token \u2248 64,750 chars.
+  const BATCH_TARGET_TOKENS = 18500;
+  const BATCH_FILE_BASE = "NYCE_Frust_";
 
   //##> Tier 1: high precision. UNGATED — one hit qualifies at any sentiment.
   const PHRASES_STRONG = [
@@ -83,6 +91,8 @@
   ];
 
   function blankKey(label) { return "_blank_" + label.replace(/[^a-zA-Z0-9]/g, "_"); }
+  //##> YYYY-MM-DD -> MM-DD-YYYY for the ZIP filename.
+  function toMDY(iso) { const p = String(iso || "").split("-"); return p.length === 3 ? p[1] + "-" + p[2] + "-" + p[0] : String(iso || ""); }
 
   registry.register({
     id: "nyceFrustrated",
@@ -177,6 +187,20 @@
         else if (resolvedReal[display]) { fields.push(resolvedReal[display]); headers.push(display); }
         else { fields.push(blankKey(display)); headers.push(display); }
       }
+
+      //##> Stage batch/export preset (one-shot; batch builder consumes + clears).
+      //##> ZIP name reflects the search window: single date -> one date, else a range.
+      const fromMDY = toMDY(ctx.fromVal), toMDY_ = toMDY(ctx.toVal);
+      const zipFileName = (ctx.fromVal && ctx.fromVal === ctx.toVal)
+        ? "NYCE Frustrated " + fromMDY
+        : "NYCE Frustrated " + fromMDY + " - " + toMDY_;
+      api.setShared("reportBatchPreset", {
+        batchMode: "length",
+        targetTokens: BATCH_TARGET_TOKENS,
+        showTimestamps: true,
+        fileBase: BATCH_FILE_BASE,
+        zipFileName: zipFileName
+      });
 
       ctx.progress.set(96, "Preparing results...", kept.length + " rows");
       ctx.dispatchToGrid(kept, {
