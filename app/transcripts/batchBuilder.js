@@ -1320,15 +1320,12 @@ function openTranscriptBatchBuilder() {
   }
   async function openInputModal() {
     let cfg = resolveConfig(loadSavedSettings());
-        //##> REPORT/EXPORT PRESET HOOK (generic). Any tool may stage a one-time batch
-    //##> preset via api.setShared("reportBatchPreset", { ...cfg keys }). Only known
-    //##> settings keys are honored; unknown keys are ignored so a caller can never
-    //##> corrupt internal config. Consumed at build time (see submit handler), not
-    //##> here, so reopening this modal preserves the staged preset.
+    //##> Generic one-time preset hook: any report/tool may stage batch settings via
+    //##> api.setShared("reportBatchPreset", { ...cfg keys }). Only known DEFAULTS keys
+    //##> are honored so a caller cannot corrupt internal config. Cleared at build.
     const stagedPreset = api.getShared("reportBatchPreset");
     if (stagedPreset && typeof stagedPreset === "object") {
-      const allowed = Object.keys(DEFAULTS);
-      for (const k of allowed) {
+      for (const k of Object.keys(DEFAULTS)) {
         if (Object.prototype.hasOwnProperty.call(stagedPreset, k)) cfg[k] = stagedPreset[k];
       }
     }
