@@ -55,6 +55,9 @@
     { display: "Provider Tax ID", fallback: "UDFVarchar136" },
     { display: "NPI", fallback: "UDFVarchar41" },
     { display: "Orig ANI", fallback: "UDFVarchar115" },
+    { display: "Contact Reason Level 1", fallback: "primaryIntentCategory" },
+    { display: "Contact Reason Level 2", fallback: "primaryIntentTopic" },
+    { display: "Contact Reason Level 3", fallback: "primaryIntentSubtopic" },
     { display: "User to User", fallback: "UDFVarchar1" }
   ];
   const BLANK_AFTER_TRANS = ["Valid", "Issue", "Notes", "Repeat Caller", "Passcode", "Inquiry Limit"];
@@ -66,7 +69,7 @@
     "Calluuid", "Node", "Member ID", "Trans_Id",
     "Valid", "Issue", "Notes", "Repeat Caller", "Passcode", "Inquiry Limit",
     "Provider Tax ID", "NPI", "Orig ANI", "User to User",
-    "Caller Name", "Provider", "Callback Number", "DOS", "Billed Amount", "Claim Number", "Received", "Status", "Reference Number"
+    "Caller Name", "Provider", "Callback Number", "DOS", "Billed Amount", "Claim Number", "Received", "Status", "Reference Number", "Contact Reason Level 1", "Contact Reason Level 2", "Contact Reason Level 3"
   ];
 
   function blankKey(label) { return "_blank_" + label.replace(/[^a-zA-Z0-9]/g, "_"); }
