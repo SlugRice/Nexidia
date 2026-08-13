@@ -1,4 +1,4 @@
-//[Last Update: 12:20 PM 7/24/2026]
+//[Last Update: 3:01 PM 8/13/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -1036,8 +1036,10 @@
   }
   function makeProgressUI() {
     const overlay = document.createElement("div");
+    //##> Item 2/3: moved off the top-right corner (where its X collided with the host
+    //##> app window's close button) to screen center so nothing overlaps.
     overlay.style.cssText = `
-      position: fixed; top: 20px; right: 20px; z-index: 999999;
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 999999;
       background: #0b1225; color: #e5e7eb; font-family: ui-monospace, Consolas, monospace;
       padding: 14px 14px 12px; border-radius: 10px; min-width: 360px; max-width: 520px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12);
@@ -1066,11 +1068,23 @@
     btnDownload.textContent = "Download ZIP";
     btnDownload.disabled = true;
     btnDownload.style.cssText = "background:#22c55e; color:#06210f; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700; opacity:0.6;";
+    //##> btnBackToSearch is retained only as a stable insert-anchor for download buttons;
+    //##> it is never shown anymore (item 2/3 removed the "Back to Search" action here).
     const btnBackToSearch = document.createElement("button");
     btnBackToSearch.textContent = "Back to Search";
     btnBackToSearch.style.cssText = "background:#3b82f6; color:#fff; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700; display:none;";
+    //##> Item 3: entry-menu launch gets a Done (terminate) and Back to Main Menu control.
+    //##> Both hidden by default and only revealed for the menu launch path.
+    const btnDone = document.createElement("button");
+    btnDone.textContent = "Done";
+    btnDone.style.cssText = "background:#ef4444; color:#fff; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700; display:none;";
+    const btnBackToMenu = document.createElement("button");
+    btnBackToMenu.textContent = "Back to Main Menu";
+    btnBackToMenu.style.cssText = "background:#3b82f6; color:#fff; border:0; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700; display:none;";
     btnRow.appendChild(btnDownload);
     btnRow.appendChild(btnBackToSearch);
+    btnRow.appendChild(btnDone);
+    btnRow.appendChild(btnBackToMenu);
     overlay.appendChild(closeBtn);
     overlay.appendChild(title);
     overlay.appendChild(status);
@@ -1088,7 +1102,11 @@
       appendLog(line) { log.textContent += (log.textContent ? "\n" : "") + line; log.scrollTop = log.scrollHeight; },
       btnDownload,
       btnBackToSearch,
+      btnDone,
+      btnBackToMenu,
       btnRow,
+      //##> Lets the caller rewire the top-right X per launch source (return to grid vs terminate).
+      setClose(fn) { closeBtn.onclick = fn; },
       remove() { try { overlay.remove(); } catch (_) {} }
     };
   }
@@ -1246,6 +1264,28 @@
   }
   //##> Back-to-search handler. Tries dispatcher first with the live result map,
   //##> falls back to a synthesized result from job items if no live result exists.
+  //##> Candidate tool ids for the entry / main menu. The launcher isn't in this file, so
+  //##> we resolve it at runtime. Preferred path: the launcher exposes a function via
+  //##> api.setShared("openEntryMenu", fn). Otherwise we fall back to matching a tool id.
+  //##> >>> If your entry menu uses a different id, add it here. <<<
+  const ENTRY_MENU_TOOL_IDS = ["menu", "entryMenu", "mainMenu", "home", "launcher", "entry"];
+  function backToMainMenu() {
+    const openFn = api.getShared("openEntryMenu");
+    if (typeof openFn === "function") { try { openFn(); return true; } catch (_) {} }
+    const menu = api.listTools().find(t => ENTRY_MENU_TOOL_IDS.includes(t.id));
+    if (menu) { menu.open(); return true; }
+    return false;
+  }
+  //##> Item 5: shared keys that make the app auto-restore an old session. Cleared on any
+  //##> true termination (Done, or the X when launched straight from the menu). Cached
+  //##> long-search jobs in IndexedDB are left intact so real derailed searches resume.
+  function clearEphemeralSearchState() {
+    const keys = ["lastSearchResult", "lastSearchConfig", "returnToSearch",
+      "resumeSearchJobId", "resumeSearchConfig", "activeResumeJobId",
+      "dispatcherState", "lastSearchQuery", "batchBuilderPreload",
+      "reportBatchPreset", "batchLaunchSource"];
+    for (const k of keys) { try { api.setShared(k, null); } catch (_) {} }
+  }
   function backToSearch(synthesizedResult) {
     const dispatcher = api.listTools().find(t => t.id === "dispatcher");
     const existing = api.getShared("lastSearchResult");
@@ -1283,6 +1323,10 @@
 function openTranscriptBatchBuilder() {
     (async () => {
       try {
+        //##> Default launch source is the entry menu. openInputModal upgrades this to
+        //##> "grid" when a preload payload is present (grid is the only caller that sets one).
+        //##> Resumed jobs skip openInputModal and correctly stay "menu".
+        api.setShared("batchLaunchSource", "menu");
         await requestPersistence();
         const candidates = await getResumeCandidates();
         if (candidates.length > 0) {
@@ -1362,6 +1406,12 @@ function openTranscriptBatchBuilder() {
     if (preload) {
       textarea.value = preload;
       api.setShared("batchBuilderPreload", null);
+      //##> A preload means we were launched from the results grid (its Export Transcripts
+      //##> handoff). That grid stays open behind us, so the finished popup should return to
+      //##> it on X. No preload => launched straight from the entry menu (item 3 path).
+      api.setShared("batchLaunchSource", "grid");
+    } else {
+      api.setShared("batchLaunchSource", "menu");
     }
     //##> Export mode now lives entirely in Export Settings. This screen keeps only the fast-path controls: auto-download and the settings entry point. submitBtn label reflects cfg (batch/individual/audio-only).
     function computeSubmitLabel() {
@@ -1424,6 +1474,11 @@ function openTranscriptBatchBuilder() {
   }
   async function runBatchBuild(cfg, values, inputStorageName, inputDisplayName, _legacySingleFileConfig, resumeContext) {
     const UI = makeProgressUI();
+    //##> Snapshot the launch source now and clear it so it can't leak into a later run.
+    //##> "grid" => finished popup returns to the still-open grid on X (item 2).
+    //##> "menu" => finished popup offers Done (terminate) + Back to Main Menu (item 3).
+    const launchSource = api.getShared("batchLaunchSource") || "menu";
+    api.setShared("batchLaunchSource", null);
     //##> Export mode derived from cfg: individual transcript files when exportTranscripts && transcriptMode==="individual". Batch otherwise. Audio runs as a separate pass when includeAudio.
     const singleFileConfig = {
       enabled: cfg.exportTranscripts && cfg.transcriptMode === "individual",
@@ -1588,16 +1643,26 @@ function openTranscriptBatchBuilder() {
       UI.appendLog("Transcripts skipped (audio-only export).");
       out = items.map(it => ({ ...it, text: "", charCount: 0, failed: false }));
     }
-    function attachBackToSearchHandler() {
-      UI.btnBackToSearch.style.display = "inline-block";
-      UI.btnBackToSearch.onclick = () => {
-        const synthesized = synthesizeSearchResult(items, cfg);
-        if (backToSearch(synthesized)) {
-          UI.remove();
-        } else {
-          UI.appendLog("Could not find dispatcher or search tool.");
-        }
-      };
+    //##> Item 2/3: post-export controls depend on how the builder was launched.
+    //##> The old "Back to Search" action is removed in both cases.
+    function attachFinalControls() {
+      if (launchSource === "grid") {
+        //##> Grid is still open behind us. X simply dismisses this popup and drops the
+        //##> user back onto that grid. No navigation buttons needed.
+        UI.setClose(() => { UI.remove(); });
+      } else {
+        //##> Launched straight from the entry menu (no grid behind). There is no valid
+        //##> search to return to, so offer Done (terminate + clear) and Back to Main Menu.
+        UI.setClose(() => { UI.remove(); clearEphemeralSearchState(); });
+        UI.btnDone.style.display = "inline-block";
+        UI.btnDone.onclick = () => { UI.remove(); clearEphemeralSearchState(); };
+        UI.btnBackToMenu.style.display = "inline-block";
+        UI.btnBackToMenu.onclick = () => {
+          clearEphemeralSearchState();
+          if (backToMainMenu()) { UI.remove(); }
+          else { UI.appendLog("Could not find the entry menu. Expose api.setShared('openEntryMenu', fn) from your launcher, or add its tool id to ENTRY_MENU_TOOL_IDS."); }
+        };
+      }
     }
     const pendingDownloads = [];
     async function finalizeDownloads(summaryDetail) {
@@ -1605,7 +1670,7 @@ function openTranscriptBatchBuilder() {
       keepAwake.stop();
       if (!pendingDownloads.length) {
         UI.setProgress(100, "Done.", summaryDetail || "No files produced.");
-        attachBackToSearchHandler();
+        attachFinalControls();
         return;
       }
       UI.btnDownload.style.display = "none";
@@ -1624,7 +1689,7 @@ function openTranscriptBatchBuilder() {
         d.button = btn;
       }
       UI.setProgress(100, cfg.autoDownload ? "Done. Downloading..." : "Ready to download.", summaryDetail || `Files ready: ${pendingDownloads.length}`);
-      attachBackToSearchHandler();
+      attachFinalControls();
       if (cfg.autoDownload) {
         for (let i = 0; i < pendingDownloads.length; i++) {
           pendingDownloads[i].button.click();
