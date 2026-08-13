@@ -1,4 +1,4 @@
-//[Last Update: 7:47 PM 8/3/2026]
+//[Last Update: 7:07 PM 8/13/2026]
 //##> Thin reports host. Loads the catalog, lets the user pick a report, collects
 //##> the date range plus any report-specific config, then calls report.run(ctx).
 //##> The hub owns no search/transcript/export logic; it wires shared services into
@@ -16,20 +16,17 @@
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
-
   const REPO_BASE = "https://raw.githubusercontent.com/SlugRice/Nexidia/main/";
   const REPORTS_CATALOG_URL = REPO_BASE + "reports.json";
   const BASE = "https://apug01.nxondemand.com";
   const METADATA_URL = BASE + "/NxIA/api-gateway/explore/api/v1.0/metadata/fields/names";
   const DEFAULT_FILTER_STORAGES = ["UDFVarchar10", "siteName", "DNIS", "UDFVarchar110"];
-
   const reportDefs = {};
   const reportRegistry = {
     register(def) { reportDefs[def.id] = def; },
     get(id) { return reportDefs[id] || null; }
   };
   api.setShared("reportRegistry", reportRegistry);
-
   function el(tag, props, ...children) {
     props = props || {};
     const node = document.createElement(tag);
@@ -38,7 +35,6 @@
     return node;
   }
   function hr() { return el("div", { style: "height:1px;background:#e5e7eb;margin:14px 0;" }); }
-
   function getServices() {
     return {
       searchEngine: api.getShared("searchEngine"),
@@ -47,7 +43,6 @@
       xlsBuilder: api.getShared("xlsBuilder")
     };
   }
-
   function makeProgressUI(title) {
     const overlay = el("div", { style: "position:fixed;top:20px;right:20px;z-index:999999;background:#0b1225;color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;padding:14px 14px 12px;border-radius:10px;min-width:380px;max-width:520px;box-shadow:0 10px 30px rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.12);" });
     const titleEl = el("div", { style: "font-size:14px;font-weight:700;color:#7dd3fc;margin-bottom:10px;" }, title || "Reports");
@@ -71,7 +66,6 @@
       remove() { try { overlay.remove(); } catch (_) {} }
     };
   }
-
   //##> Safeguard modal for the transcript phase (10 empty transcripts in a row).
   function showZeroRowSafeguardModal(items, onResume, onAbandon) {
     const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000010;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
@@ -93,7 +87,6 @@
     overlay.appendChild(box);
     document.body.appendChild(overlay);
   }
-
   function makeFieldPicker(metadataFields, defaultSn) {
     const wrapper = el("div", { style: "position:relative;flex:1;min-width:160px;" });
     const input = el("input", { type: "text", placeholder: "Search fields...", style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
@@ -121,7 +114,6 @@
     if (defaultSn) { const f = metadataFields.find((x) => x.storageName === defaultSn); if (f) pick(f); else { input.value = defaultSn; input.dataset.storageName = defaultSn; } }
     return { wrapper, input, getStorageName: () => input.dataset.storageName || "", getDisplayName: () => input.value };
   }
-
   //##> Build the ctx handed to report.run. Everything a report needs is here.
   function buildRunContext(activeReport, opts) {
     const services = getServices();
@@ -133,7 +125,6 @@
     const eng = services.searchEngine;
     function getDisplayName(sn) { const f = metadataFields.find((x) => x.storageName === sn); return f ? f.displayName : sn; }
     function resolveStorageByDisplay(name) { const f = metadataFields.find((x) => (x.displayName || "").toLowerCase() === String(name).toLowerCase()); return f ? f.storageName : null; }
-
     const ctx = {
       config: opts.config || {},
       dateFilter: opts.dateFilter,
@@ -148,7 +139,6 @@
       signal: abortController.signal,
       isCancelled: () => abortController.signal.aborted,
       columnPrefs: { fields: colPrefs.fields.slice(), headers: colPrefs.headers.slice() },
-
       //##> Run population + phrase searches through the shared engine.
       async runSearch(runSets, fields, env) {
         env = Object.assign({
@@ -159,7 +149,6 @@
         }, env || {});
         return eng.executeSearch(runSets, fields, opts.dateFilter, env);
       },
-
       //##> Run the transcript phase for items [{sourceMediaId, transId}].
       async runTranscriptPhase(items, phaseOpts) {
         return services.transcriptService.runTranscriptPhase(items, Object.assign({
@@ -168,8 +157,7 @@
           onSafeguard: (flagged, resume, abandon) => showZeroRowSafeguardModal(flagged, resume, abandon)
         }, phaseOpts || {}));
       },
-
-      //##> Publish rows to the dispatcher/grid.
+      //##> Publish rows to the results grid.
       //##> Either pass explicit ordered columns via { fields, headers }, or let the
       //##> hub append from { extraColumns:[{key,label}], blankColumns:["Name",...] }.
       //##> phraseInfo = { maxPhraseCols, includePhraseCol } if phrase labels are used.
@@ -197,13 +185,12 @@
           includePhraseCol: !!dispatchOpts.includePhraseCol
         });
         progress.remove();
-        const dispatcher = api.listTools().find((t) => t.id === "dispatcher");
-        if (dispatcher) dispatcher.open(); else alert("Dispatcher not loaded. Check manifest.");
+        const grid = api.listTools().find((t) => t.id === "resultsGrid");
+        if (grid) grid.open(); else alert("Results Grid not loaded. Check manifest.");
       }
     };
     return ctx;
   }
-
   async function executeReport(activeReport, params) {
     const abortController = new AbortController();
     const progress = makeProgressUI(activeReport.label + (params.resumed ? " (Resumed)" : ""));
@@ -215,6 +202,7 @@
       reportConfig: params.config, dateFilter: params.dateFilter,
       fromVal: params.fromVal, toVal: params.toVal,
       standardFilters: params.standardFilters || [],
+      customSource: params.customSource || null,
       createdAt: params.createdAt || Date.now(), updatedAt: Date.now()
     };
     try { await api.getShared("jobStore").put("jobs", jobRecord); } catch (_) {}
@@ -229,7 +217,6 @@
       try { await api.getShared("jobStore").updateJob(jobId, { status: "in-progress" }); } catch (_) {}
     }
   }
-
   async function loadReportModule(entry) {
     if (reportDefs[entry.id] || !entry.file) return reportDefs[entry.id] || null;
     const res = await fetch(REPO_BASE + entry.file + "?v=" + Date.now(), { credentials: "omit", cache: "no-store" });
@@ -237,7 +224,16 @@
     (0, eval)(await res.text());
     return reportDefs[entry.id] || null;
   }
-
+  //##> Evaluate custom report source text. Snapshots the registry so the newly
+  //##> registered id can be identified and returned along with the raw source
+  //##> (used to persist a resumable job for a report not in the GitHub catalog).
+  function loadReportFromSource(source) {
+    const before = new Set(Object.keys(reportDefs));
+    (0, eval)(source);
+    const added = Object.keys(reportDefs).filter((k) => !before.has(k));
+    const id = added.length ? added[added.length - 1] : null;
+    return { id, def: id ? reportDefs[id] : null };
+  }
   function showResumeModal(candidates, catalog, onResume, onFresh) {
     const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000005;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
     const box = el("div", { style: "background:#fff;width:520px;max-height:80vh;overflow-y:auto;border-radius:14px;padding:22px 24px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -267,7 +263,6 @@
     overlay.appendChild(box);
     document.body.appendChild(overlay);
   }
-
   function openReports() {
     (async () => {
       try {
@@ -276,29 +271,26 @@
         const services = getServices();
         if (!services.searchEngine || !services.jobStore) { alert("Report services not loaded. Check that reportServices is in the manifest before reportsHub."); return; }
         await services.jobStore.requestPersistence();
-
         let metadataFields = [];
         try { const res = await fetch(METADATA_URL, { credentials: "include", cache: "no-store" }); if (res.ok) { const json = await res.json(); metadataFields = Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : []; } } catch (_) {}
         api.setShared("reportMetadataFields", metadataFields);
-
         let catalog = [];
         try { const mRes = await fetch(REPORTS_CATALOG_URL + "?v=" + Date.now(), { credentials: "omit", cache: "no-store" }); if (mRes.ok) { const mJson = await mRes.json(); catalog = Array.isArray(mJson.reports) ? mJson.reports : []; } } catch (_) {}
-
         const candidates = await services.jobStore.getResumeCandidates(null);
         if (candidates.length > 0) {
           let choice = null;
           await new Promise((resolve) => showResumeModal(candidates, catalog, (job) => { choice = { type: "resume", job }; resolve(); }, () => { choice = { type: "fresh" }; resolve(); }));
           if (choice && choice.type === "resume") {
+            let def = null;
             const entry = catalog.find(c => c.id === choice.job.reportId);
-            if (!entry) { alert("Report definition not found: " + choice.job.reportId); return; }
-            const def = await loadReportModule(entry);
+            if (entry) { def = await loadReportModule(entry); }
+            else if (choice.job.customSource) { try { def = loadReportFromSource(choice.job.customSource).def; } catch (_) { def = null; } }
             if (!def) { alert("Report module not found: " + choice.job.reportId); return; }
-            await executeReport(def, { resumed: true, jobId: choice.job.id, config: choice.job.reportConfig, dateFilter: choice.job.dateFilter, fromVal: choice.job.fromVal, toVal: choice.job.toVal, standardFilters: choice.job.standardFilters, createdAt: choice.job.createdAt });
+            await executeReport(def, { resumed: true, jobId: choice.job.id, config: choice.job.reportConfig, dateFilter: choice.job.dateFilter, fromVal: choice.job.fromVal, toVal: choice.job.toVal, standardFilters: choice.job.standardFilters, customSource: choice.job.customSource, createdAt: choice.job.createdAt });
             return;
           }
         }
-
-        let activeReport = null, configGetter = null;
+        let activeReport = null, configGetter = null, customSource = null;
         const filterRows = [];
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const card = el("div", { style: "background:#f8fafc;width:720px;max-height:90vh;overflow-y:auto;border-radius:14px;padding:22px 24px;box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;" });
@@ -313,6 +305,12 @@
         select.appendChild(el("option", { value: "" }, "\u2014 Choose a report \u2014"));
         for (const entry of catalog) select.appendChild(el("option", { value: entry.id }, entry.label));
         selectWrap.appendChild(select);
+        const customRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:8px;" });
+        const customBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #6b7280;background:#fff;color:#374151;cursor:pointer;font-size:12px;" }, "Load custom report (.js)");
+        const customNote = el("div", { style: "font-size:11px;color:#6b7280;" }, "");
+        const fileInput = el("input", { type: "file", accept: ".js,text/javascript", style: "display:none;" });
+        customRow.appendChild(customBtn); customRow.appendChild(customNote); customRow.appendChild(fileInput);
+        selectWrap.appendChild(customRow);
         card.appendChild(selectWrap);
         const descArea = el("div", { style: "font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:10px;min-height:18px;" });
         card.appendChild(descArea);
@@ -357,7 +355,6 @@
         card.appendChild(runBtn);
         modal.appendChild(card);
         document.body.appendChild(modal);
-
         function setFiltersVisible(show, defaults) {
           filtersHr.style.display = show ? "" : "none";
           filtersHeader.style.display = show ? "" : "none";
@@ -368,10 +365,20 @@
           if (show) for (const sn of (defaults || DEFAULT_FILTER_STORAGES)) addFilterRow(sn);
         }
         setFiltersVisible(false);
-
+        //##> Activate a definition in the modal (shared by dropdown select and
+        //##> custom file load). Wires description, filter rows, and config panel.
+        function activateDef(def, descText) {
+          configArea.innerHTML = "";
+          activeReport = def;
+          configGetter = null;
+          descArea.textContent = descText || def.description || "";
+          setFiltersVisible(!!def.usesStandardFilters, def.defaultFilters);
+          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el, metadataFields, makeFieldPicker });
+        }
         select.onchange = async () => {
           const id = select.value;
-          configArea.innerHTML = ""; descArea.textContent = ""; activeReport = null; configGetter = null;
+          configArea.innerHTML = ""; descArea.textContent = ""; activeReport = null; configGetter = null; customSource = null;
+          customNote.textContent = "";
           setFiltersVisible(false);
           if (!id) return;
           const entry = catalog.find((c) => c.id === id);
@@ -380,11 +387,28 @@
           try { descArea.textContent = "Loading report module..."; def = await loadReportModule(entry); descArea.textContent = entry.description || ""; }
           catch (e) { descArea.textContent = "Failed to load report module: " + e.message; return; }
           if (!def) { descArea.textContent = "Report module not found for id: " + id; return; }
-          activeReport = def;
-          setFiltersVisible(!!def.usesStandardFilters, def.defaultFilters);
-          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el, metadataFields, makeFieldPicker });
+          activateDef(def, entry.description || "");
         };
-
+        customBtn.onclick = () => fileInput.click();
+        fileInput.onchange = () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const source = String(reader.result || "");
+            let loaded;
+            try { loaded = loadReportFromSource(source); }
+            catch (e) { customNote.textContent = ""; alert("That file could not be loaded as a report:\n\n" + (e && e.message || e)); fileInput.value = ""; return; }
+            if (!loaded || !loaded.def) { alert("That file did not register a report. Make sure it registers through reportRegistry.register."); fileInput.value = ""; return; }
+            select.value = "";
+            customSource = source;
+            activateDef(loaded.def, loaded.def.description || "");
+            customNote.textContent = "Loaded: " + (loaded.def.label || loaded.id) + " (custom)";
+            fileInput.value = "";
+          };
+          reader.onerror = () => { alert("Could not read that file."); fileInput.value = ""; };
+          reader.readAsText(file);
+        };
         runBtn.onclick = async () => {
           if (!activeReport) { alert("Please select a report before running."); return; }
           const fromVal = fromInput.value, toVal = toInput.value;
@@ -404,7 +428,7 @@
           modal.remove();
           const dateFilter = services.searchEngine.buildDateFilter(fromVal, toVal);
           const jobId = services.jobStore.generateJobId("rptjob");
-          await executeReport(activeReport, { jobId, config, dateFilter, fromVal, toVal, standardFilters, createdAt: Date.now() });
+          await executeReport(activeReport, { jobId, config, dateFilter, fromVal, toVal, standardFilters, customSource, createdAt: Date.now() });
         };
       } catch (e) {
         console.error(e);
@@ -412,6 +436,5 @@
       }
     })();
   }
-
   api.registerTool({ id: "reports", label: "Reports", open: openReports });
 })();
