@@ -1,4 +1,4 @@
-//[Last Update: 3:41 PM 8/3/2026]
+//[Last Update: 3:01 PM 8/13/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -1256,6 +1256,8 @@
         document.body.appendChild(modal);
         document.body.appendChild(stickyClose);
         let stopPlayer = null;
+        //##> DOM teardown only. Used by navigation (Back to Search) where session state
+        //##> must be preserved so the search form can replay lastSearchConfig.
         function close() {
           if (typeof stopPlayer === "function") stopPlayer();
           removeDragGhost();
@@ -1265,8 +1267,24 @@
           document.removeEventListener("keydown", onCellCopyKey);
           document.querySelectorAll("[data-cell-ctx]").forEach((p) => p.remove());
         }
-        stickyClose.onclick = close;
+        //##> True termination of the app from the grid. Item 5: clear ephemeral session
+        //##> state (grid result, search config, resume pointers) so reopening later starts
+        //##> fresh instead of hopping back into this session. Cached long-search jobs in
+        //##> IndexedDB are left untouched and remain resumable via their own prompt.
+        function clearEphemeralSearchState() {
+          const keys = ["lastSearchResult", "lastSearchConfig", "returnToSearch",
+            "resumeSearchJobId", "resumeSearchConfig", "activeResumeJobId",
+            "dispatcherState", "lastSearchQuery", "batchBuilderPreload",
+            "reportBatchPreset", "batchLaunchSource"];
+          for (const k of keys) { try { api.setShared(k, null); } catch (_) {} }
+        }
+        function terminateApp() {
+          close();
+          clearEphemeralSearchState();
+        }
+        stickyClose.onclick = terminateApp;
         backToSearchBtn.onclick = () => {
+          //##> Navigation, not termination: keep lastSearchConfig so the form restores.
           close();
           api.setShared("returnToSearch", true);
           const searchTool = api.listTools().find((t) => t.id === "search");
