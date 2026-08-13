@@ -1,4 +1,4 @@
-//[Last Update: 2:34 PM 6/24/2026]
+//[Last Update: 3:01 PM 8/13/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -956,10 +956,21 @@ function buildPaneEl(paneIndex) {
         }
         const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
         const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
+        //##> Ephemeral session state that must NOT survive a voluntary app termination.
+        //##> Cached long-search jobs live in IndexedDB (status "in-progress") and are
+        //##> intentionally left alone here so a genuinely derailed search stays resumable.
+        //##> These shared keys are what cause the app to auto-hop back into an old session,
+        //##> so any true termination clears them.
+        function clearEphemeralSearchState() {
+          const keys = ["lastSearchResult", "lastSearchConfig", "returnToSearch",
+            "resumeSearchJobId", "resumeSearchConfig", "activeResumeJobId",
+            "dispatcherState", "lastSearchQuery", "batchBuilderPreload",
+            "reportBatchPreset", "batchLaunchSource"];
+          for (const k of keys) { try { api.setShared(k, null); } catch (_) {} }
+        }
         function closeAll() {
           abortController.abort();
-          api.setShared("lastSearchResult", null);
-          api.setShared("dispatcherState", null);
+          clearEphemeralSearchState();
           try { modal.remove(); } catch (_) {}
           try { stickyClose.remove(); } catch (_) {}
           window.removeEventListener("resize", resizePanes);
@@ -1346,7 +1357,15 @@ function buildPaneEl(paneIndex) {
               progressUI.set("Filtering by time windows...", 90, "Pre-filter: " + result.finalRows.length + " rows");
               result.finalRows = filterRowsByTimeWindows(result.finalRows, timeFilters);
             }
-            if (!result.finalRows.length) { progressUI.set("No results returned.", 100, ""); alert("No results returned."); return; }
+            if (!result.finalRows.length) {
+              //##> Terminate the search so it is NOT left "in-progress" and re-offered as a
+              //##> resumable job next launch. Then offer a real path back to the search form
+              //##> (state restored from lastSearchConfig) instead of a dead-end alert.
+              try { await updateJob(jobId, { status: "complete", totalRowsCollected: 0 }); } catch (_) {}
+              progressUI.remove();
+              showNoResultsModal();
+              return;
+            }
             progressUI.set("Done.", 100, "Rows: " + result.finalRows.length);
             try { await updateJob(jobId, { status: "complete", totalRowsCollected: result.finalRows.length }); } catch (_) {}
             sendToDispatcher(result, colPrefs);
@@ -1791,15 +1810,43 @@ function buildPaneEl(paneIndex) {
           for (let i = 0; i < passthroughNoKey.length; i++) { if (passthroughNoKey[i].phrases.length > maxPhraseCols) maxPhraseCols = passthroughNoKey[i].phrases.length; finalRows.push(passthroughNoKey[i]); }
           return { finalRows, maxPhraseCols, includePhraseCol: distinctPhraseLabels.size >= 2 };
         }
+        //##> No-results terminus. Replaces the old dead-end alert. Offers a way back to the
+        //##> search form (state restored via returnToSearch + lastSearchConfig) or a clean
+        //##> Close that clears ephemeral state so nothing hops back in later.
+        function showNoResultsModal() {
+          const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000006;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
+          const box = el("div", { style: "background:#fff;width:420px;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35);text-align:center;" });
+          box.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:8px;" }, "No results found"));
+          box.appendChild(el("div", { style: "font-size:13px;color:#374151;line-height:1.6;margin-bottom:18px;" },
+            "Your search returned no matching calls. Head back to refine it \u2014 your last search is still filled in \u2014 or close out."));
+          const btnRow = el("div", { style: "display:flex;gap:8px;" });
+          const backBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "\u2190 Back to Search");
+          const closeBtn2 = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;" }, "Close");
+          backBtn.onclick = () => {
+            overlay.remove();
+            //##> lastSearchConfig is still set from this run; returnToSearch replays it into the form.
+            api.setShared("returnToSearch", true);
+            const searchTool = api.listTools().find((t) => t.id === "search");
+            if (searchTool) searchTool.open();
+          };
+          closeBtn2.onclick = () => { overlay.remove(); clearEphemeralSearchState(); };
+          btnRow.appendChild(backBtn); btnRow.appendChild(closeBtn2);
+          box.appendChild(btnRow);
+          overlay.appendChild(box);
+          document.body.appendChild(overlay);
+        }
         function sendToDispatcher(result, colPrefs) {
           api.setShared("lastSearchResult", {
             rows: result.finalRows, fields: colPrefs.fields, headers: colPrefs.headers,
             maxPhraseCols: result.maxPhraseCols, includePhraseCol: result.includePhraseCol
           });
           progressUI.remove();
-          const dispatcher = api.listTools().find((t) => t.id === "dispatcher");
-          if (dispatcher) { dispatcher.open(); }
-          else { alert("Dispatcher not loaded. Check manifest."); }
+          //##> Item 4: skip the old dispatcher chooser entirely and drop straight into the grid.
+          //##> Every option that chooser exposed (grid / export metadata / export transcripts)
+          //##> is already available from the grid toolbar.
+          const grid = api.listTools().find((t) => t.id === "resultsGrid");
+          if (grid) { grid.open(); }
+          else { alert("Results Grid not loaded. Check manifest."); }
         }
         const LS_KEY = "NEXIDIA_SAVED_SEARCHES";
         function getSavedSearches() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_) { return {}; } }
