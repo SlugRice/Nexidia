@@ -16,6 +16,13 @@
         const hiddenFields = api.getShared("hiddenFields") || new Set(["sourceMediaId"]);
         const xls = api.getShared("xlsBuilder");
         const searchQuery = api.getShared("lastSearchQuery") || null;
+        //##> Report-driven grid session: a report may stage a gridSession with named
+        //##> sheets. Captured once, then cleared from shared state so a normal search
+        //##> never inherits it. When present, the grid shows a sheet switcher and routes
+        //##> export + back through the session.
+        const gridSession = api.getShared("gridSession") || null;
+        api.setShared("gridSession", null);
+        let activeSheetIndex = 0;
         const BASE_SEARCH_URL = "https://apug01.nxondemand.com/NxIA/api-gateway/explore/api/v1.0/search";
         const PLAYER_URL = (smid) => `https://apug01.nxondemand.com/NxIA/ui/explore/(search//player:player/${encodeURIComponent(smid)})`;
         const ROW_HEIGHT = 28;
@@ -94,18 +101,19 @@
         const measureCtx = document.createElement("canvas").getContext("2d");
         measureCtx.font = "11px 'Segoe UI',Arial,sans-serif";
         function measureText(text) { return measureCtx.measureText(text || "").width + 24; }
-        const allFields = colPrefs.fields.filter((f) => !hiddenFields.has(f));
-        const allHeaders = colPrefs.headers.filter((_, i) => !hiddenFields.has(colPrefs.fields[i]));
+        const sessionSheet = gridSession && gridSession.sheets && gridSession.sheets.length ? gridSession.sheets[0] : null;
+        const allFields = sessionSheet ? sessionSheet.fields.slice() : colPrefs.fields.filter((f) => !hiddenFields.has(f));
+        const allHeaders = sessionSheet ? sessionSheet.headers.slice() : colPrefs.headers.filter((_, i) => !hiddenFields.has(colPrefs.fields[i]));
         const phraseFields = [];
         const phraseHeaders = [];
-        if (data.includePhraseCol) {
+        if (!gridSession && data.includePhraseCol) {
           for (let i = 1; i <= data.maxPhraseCols; i++) {
             phraseFields.push("__PHRASE_" + i + "__");
             phraseHeaders.push(i === 1 ? "Search" : "Search" + i);
           }
         }
         const state = {
-          rows: data.rows.slice(),
+          rows: (sessionSheet ? sessionSheet.rows.slice() : data.rows.slice()),
           fields: [...phraseFields, ...allFields],
           headers: [...phraseHeaders, ...allHeaders],
           visible: new Set([...phraseFields, ...allFields]),
@@ -268,7 +276,18 @@
           const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
           xls.downloadExcelFile("nexidia_grid_export_" + stamp + ".xls", html);
         }
-        function exportToExcel() { confirmExportScope(() => doExcelExport(getSelectedItems()), () => doExcelExport(state.filteredRows)); }
+        function doMultiSheetExport() {
+          if (!xls || !xls.buildMultiSheetExcelHtml) { alert("Multi-sheet export builder not loaded. Update export.js."); return; }
+          const defs = gridSession.sheets.filter((s) => s.export !== false).map((s) => ({ name: s.name || "Sheet", fields: s.fields, headers: s.headers, rows: s.rows }));
+          if (!defs.length) { alert("No sheets are marked for export. Tick at least one Export box."); return; }
+          const html = xls.buildMultiSheetExcelHtml(defs);
+          const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
+          xls.downloadExcelFile("nexidia_report_export_" + stamp + ".xls", html);
+        }
+        function exportToExcel() {
+          if (gridSession) { doMultiSheetExport(); return; }
+          confirmExportScope(() => doExcelExport(getSelectedItems()), () => doExcelExport(state.filteredRows));
+        }
         function doTranscriptExport(rows) {
           const smids = rows.map((item) => getSourceMediaId(item)).filter(Boolean);
           const transIds = rows.map((item) => getCellValue(item, "UDFVarchar110")).filter((v) => v && v !== "0");
@@ -420,7 +439,43 @@
           const handler = () => { dismiss(); document.removeEventListener("mousedown", handler); };
           setTimeout(() => document.addEventListener("mousedown", handler), 50);
         }
+        function applySheet(idx) {
+          if (!gridSession || !gridSession.sheets[idx]) return;
+          const sh = gridSession.sheets[idx];
+          activeSheetIndex = idx;
+          state.rows = sh.rows.slice();
+          state.fields = sh.fields.slice();
+          state.headers = sh.headers.slice();
+          state.visible = new Set(sh.fields);
+          state.sorts = []; state.columnFilters = {}; state.globalFilter = "";
+          state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
+          state.cellSel.clear(); state.cellAnchor = null; state.cellDragging = false;
+          globalSearchBox.value = "";
+          buildCarousel();
+          rebuildColumnPanel(); renderSortBadges(); recomputeAndRender();
+        }
+        function buildCarousel() {
+          if (!gridSession) return;
+          carouselBar.style.display = "flex";
+          carouselBar.innerHTML = "";
+          for (let i = 0; i < gridSession.sheets.length; i++) {
+            const sh = gridSession.sheets[i];
+            const active = i === activeSheetIndex;
+            const pane = el("div", { style: `display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;border:1px solid ${active ? "#3b82f6" : "#d1d5db"};background:${active ? "#eff6ff" : "#fff"};flex-shrink:0;cursor:pointer;` });
+            ((idx) => { pane.onclick = (e) => { if (e.target.tagName === "INPUT") return; if (idx !== activeSheetIndex) applySheet(idx); }; })(i);
+            const nameInput = el("input", { type: "text", value: sh.name || "", title: "Sheet name", style: `width:120px;padding:3px 6px;border:1px solid ${active ? "#93c5fd" : "#ccc"};border-radius:5px;font-size:12px;font-weight:${active ? "700" : "500"};color:${active ? "#1d4ed8" : "#374151"};background:#fff;` });
+            ((sheet) => { nameInput.oninput = () => { sheet.name = nameInput.value; }; })(sh);
+            const expLabel = el("label", { style: "display:flex;align-items:center;gap:3px;font-size:10px;color:#6b7280;cursor:pointer;" });
+            const expCb = el("input", { type: "checkbox" });
+            expCb.checked = sh.export !== false;
+            ((sheet) => { expCb.onchange = () => { sheet.export = expCb.checked; }; })(sh);
+            expLabel.appendChild(expCb); expLabel.appendChild(el("span", {}, "Export"));
+            pane.appendChild(nameInput); pane.appendChild(expLabel);
+            carouselBar.appendChild(pane);
+          }
+        }
         function resetGrid() {
+          if (gridSession) { applySheet(activeSheetIndex); return; }
           state.sorts = []; state.columnFilters = {}; state.globalFilter = "";
           state.visible = new Set([...phraseFields, ...allFields]);
           state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
@@ -656,6 +711,7 @@
         toolbar.appendChild(exportExcelBtn); toolbar.appendChild(exportTranscriptsBtn);
         toolbar.appendChild(queryEnrichBtn); toolbar.appendChild(resetBtn); toolbar.appendChild(saveSearchGridBtn); toolbar.appendChild(layoutBtn); toolbar.appendChild(clickModeBtn);
         toolbar.appendChild(globalSearchBox);
+        const carouselBar = el("div", { style: "display:none;padding:6px 16px;gap:8px;align-items:center;overflow-x:auto;border-bottom:1px solid #e5e7eb;background:#f8fafc;" });
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
         function renderSortBadges() {
           sortBar.innerHTML = "";
@@ -1250,6 +1306,7 @@
         body.appendChild(colPanel);
         body.appendChild(gridWrap);
         card.appendChild(toolbar);
+        card.appendChild(carouselBar);
         card.appendChild(sortBar);
         card.appendChild(body);
         modal.appendChild(card);
@@ -1275,7 +1332,7 @@
           const keys = ["lastSearchResult", "lastSearchConfig", "returnToSearch",
             "resumeSearchJobId", "resumeSearchConfig", "activeResumeJobId",
             "dispatcherState", "lastSearchQuery", "batchBuilderPreload",
-            "reportBatchPreset", "batchLaunchSource"];
+            "reportBatchPreset", "batchLaunchSource", "gridSession"];
           for (const k of keys) { try { api.setShared(k, null); } catch (_) {} }
         }
         function terminateApp() {
@@ -1286,6 +1343,10 @@
         backToSearchBtn.onclick = () => {
           //##> Navigation, not termination: keep lastSearchConfig so the form restores.
           close();
+          if (gridSession && gridSession.back && gridSession.back.toolId) {
+            const backTool = api.listTools().find((t) => t.id === gridSession.back.toolId);
+            if (backTool) { backTool.open(); return; }
+          }
           api.setShared("returnToSearch", true);
           const searchTool = api.listTools().find((t) => t.id === "search");
           if (searchTool) searchTool.open();
@@ -1297,6 +1358,7 @@
             api.setShared("metadataFields", Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : []);
           }
         } catch (_) {}
+        if (gridSession) { backToSearchBtn.textContent = "\u2190 Back to Report"; buildCarousel(); }
         rebuildColumnPanel();
         renderSortBadges();
         recomputeAndRender();
