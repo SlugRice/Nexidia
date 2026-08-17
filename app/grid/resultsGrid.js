@@ -439,6 +439,14 @@
           const handler = () => { dismiss(); document.removeEventListener("mousedown", handler); };
           setTimeout(() => document.addEventListener("mousedown", handler), 50);
         }
+        let sheetNavLabelEl = null;
+        function navArrowStyle(enabled) {
+          return `width:26px;height:24px;border-radius:6px;border:1px solid ${enabled ? "#6366f1" : "#e5e7eb"};background:#fff;color:${enabled ? "#4338ca" : "#cbd5e1"};font-size:15px;line-height:1;cursor:${enabled ? "pointer" : "default"};`;
+        }
+        function goToSheet(idx) {
+          if (!gridSession || idx < 0 || idx >= gridSession.sheets.length) return;
+          if (idx !== activeSheetIndex) applySheet(idx);
+        }
         function applySheet(idx) {
           if (!gridSession || !gridSession.sheets[idx]) return;
           const sh = gridSession.sheets[idx];
@@ -451,27 +459,40 @@
           state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
           state.cellSel.clear(); state.cellAnchor = null; state.cellDragging = false;
           globalSearchBox.value = "";
-          buildCarousel();
+          buildSheetUI();
           rebuildColumnPanel(); renderSortBadges(); recomputeAndRender();
         }
-        function buildCarousel() {
+        function buildSheetUI() {
           if (!gridSession) return;
-          carouselBar.style.display = "flex";
-          carouselBar.innerHTML = "";
-          for (let i = 0; i < gridSession.sheets.length; i++) {
-            const sh = gridSession.sheets[i];
+          const sheets = gridSession.sheets;
+          const count = sheets.length;
+          sheetNavBar.style.display = "flex";
+          sheetNavBar.innerHTML = "";
+          sheetNavBar.appendChild(el("span", { style: "font-size:12px;font-weight:700;color:#4338ca;flex-shrink:0;" }, "\uD83D\uDCD1 " + count + " sheets in this report"));
+          const leftBtn = el("button", { style: navArrowStyle(activeSheetIndex > 0), title: "Previous sheet" }, "\u2039");
+          leftBtn.disabled = activeSheetIndex === 0;
+          leftBtn.onclick = () => goToSheet(activeSheetIndex - 1);
+          sheetNavLabelEl = el("div", { style: "font-size:12px;color:#3730a3;font-weight:600;min-width:170px;" }, (sheets[activeSheetIndex].name || "Sheet") + "  \u00B7  Sheet " + (activeSheetIndex + 1) + " of " + count);
+          const rightBtn = el("button", { style: navArrowStyle(activeSheetIndex < count - 1), title: "Next sheet" }, "\u203A");
+          rightBtn.disabled = activeSheetIndex === count - 1;
+          rightBtn.onclick = () => goToSheet(activeSheetIndex + 1);
+          sheetNavBar.appendChild(leftBtn); sheetNavBar.appendChild(sheetNavLabelEl); sheetNavBar.appendChild(rightBtn);
+          sheetTabBar.style.display = "flex";
+          sheetTabBar.innerHTML = "";
+          for (let i = 0; i < count; i++) {
+            const sh = sheets[i];
             const active = i === activeSheetIndex;
-            const pane = el("div", { style: `display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;border:1px solid ${active ? "#3b82f6" : "#d1d5db"};background:${active ? "#eff6ff" : "#fff"};flex-shrink:0;cursor:pointer;` });
-            ((idx) => { pane.onclick = (e) => { if (e.target.tagName === "INPUT") return; if (idx !== activeSheetIndex) applySheet(idx); }; })(i);
-            const nameInput = el("input", { type: "text", value: sh.name || "", title: "Sheet name", style: `width:120px;padding:3px 6px;border:1px solid ${active ? "#93c5fd" : "#ccc"};border-radius:5px;font-size:12px;font-weight:${active ? "700" : "500"};color:${active ? "#1d4ed8" : "#374151"};background:#fff;` });
-            ((sheet) => { nameInput.oninput = () => { sheet.name = nameInput.value; }; })(sh);
-            const expLabel = el("label", { style: "display:flex;align-items:center;gap:3px;font-size:10px;color:#6b7280;cursor:pointer;" });
+            const tab = el("div", { style: `display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #cbd5e1;border-bottom:none;border-radius:7px 7px 0 0;background:${active ? "#fff" : "#e2e8f0"};margin-top:${active ? "0" : "4px"};box-shadow:${active ? "0 -2px 5px rgba(0,0,0,.07)" : "none"};cursor:pointer;flex-shrink:0;` });
+            ((idx) => { tab.onclick = (e) => { if (e.target.tagName === "INPUT") return; goToSheet(idx); }; })(i);
+            const nameInput = el("input", { type: "text", value: sh.name || "", title: "Rename sheet", style: `width:110px;padding:2px 4px;border:0;background:transparent;font-size:12px;font-weight:${active ? "700" : "500"};color:${active ? "#111827" : "#475569"};` });
+            ((sheet, myIdx) => { nameInput.oninput = () => { sheet.name = nameInput.value; if (myIdx === activeSheetIndex && sheetNavLabelEl) sheetNavLabelEl.textContent = (sheet.name || "Sheet") + "  \u00B7  Sheet " + (activeSheetIndex + 1) + " of " + count; }; })(sh, i);
+            const expLabel = el("label", { style: "display:flex;align-items:center;gap:3px;font-size:10px;color:#6b7280;cursor:pointer;", title: "Include this sheet in the export" });
             const expCb = el("input", { type: "checkbox" });
             expCb.checked = sh.export !== false;
             ((sheet) => { expCb.onchange = () => { sheet.export = expCb.checked; }; })(sh);
             expLabel.appendChild(expCb); expLabel.appendChild(el("span", {}, "Export"));
-            pane.appendChild(nameInput); pane.appendChild(expLabel);
-            carouselBar.appendChild(pane);
+            tab.appendChild(nameInput); tab.appendChild(expLabel);
+            sheetTabBar.appendChild(tab);
           }
         }
         function resetGrid() {
@@ -711,7 +732,8 @@
         toolbar.appendChild(exportExcelBtn); toolbar.appendChild(exportTranscriptsBtn);
         toolbar.appendChild(queryEnrichBtn); toolbar.appendChild(resetBtn); toolbar.appendChild(saveSearchGridBtn); toolbar.appendChild(layoutBtn); toolbar.appendChild(clickModeBtn);
         toolbar.appendChild(globalSearchBox);
-        const carouselBar = el("div", { style: "display:none;padding:6px 16px;gap:8px;align-items:center;overflow-x:auto;border-bottom:1px solid #e5e7eb;background:#f8fafc;" });
+        const sheetNavBar = el("div", { style: "display:none;padding:7px 16px;gap:10px;align-items:center;border-bottom:1px solid #e5e7eb;background:#eef2ff;" });
+        const sheetTabBar = el("div", { style: "display:none;align-items:flex-end;gap:3px;padding:0 12px;background:#f1f5f9;border-top:1px solid #cbd5e1;min-height:34px;flex-shrink:0;overflow-x:auto;" });
         const sortBar = el("div", { style: "padding:4px 16px;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
         function renderSortBadges() {
           sortBar.innerHTML = "";
@@ -1306,9 +1328,10 @@
         body.appendChild(colPanel);
         body.appendChild(gridWrap);
         card.appendChild(toolbar);
-        card.appendChild(carouselBar);
+        card.appendChild(sheetNavBar);
         card.appendChild(sortBar);
         card.appendChild(body);
+        card.appendChild(sheetTabBar);
         modal.appendChild(card);
         document.body.appendChild(modal);
         document.body.appendChild(stickyClose);
@@ -1358,7 +1381,7 @@
             api.setShared("metadataFields", Array.isArray(json) ? json.filter((f) => f.isEnabled !== false) : []);
           }
         } catch (_) {}
-        if (gridSession) { backToSearchBtn.textContent = "\u2190 Back to Report"; buildCarousel(); }
+        if (gridSession) { backToSearchBtn.textContent = "\u2190 Back to Report"; buildSheetUI(); }
         rebuildColumnPanel();
         renderSortBadges();
         recomputeAndRender();
