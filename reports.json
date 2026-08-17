@@ -17,6 +17,12 @@
       "label": "WGS Transcripts",
       "file": "app/reports/wgsTranscripts.js",
       "description": "Paste pairs of key value and minimum date. Runs one search across the selected range and keeps only calls strictly after each row's paired threshold."
-    }
+    },
+    {
+      "id": "southwestDaily",
+      "label": "Southwest Daily",
+      "file": "app/reports/southwestDaily.js",
+      "description": "Pulls SWA Plan Advisor and Provider calls by node, group, and duration, then places a random daily sample on top followed by the remaining calls sorted by node."
+    }    
   ]
 }
