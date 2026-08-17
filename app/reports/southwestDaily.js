@@ -24,7 +24,7 @@
     "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110", "sourceMediaId"
   ];
 
-  //##> Population sheet: standard metadata only, no workup/manual columns.
+  //##> All Calls sheet: standard metadata only, no workup/manual columns.
   const POP_FIELDS = [
     "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
     "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
@@ -38,7 +38,7 @@
     "Employee ID", "DNIS", "Actual Site", "Node", "Trans_Id"
   ];
 
-  //##> Selected sheet: full workup layout including the blank manual columns.
+  //##> SWA Daily sheet: full workup layout including the blank manual columns.
   const SEL_FIELDS = [
     "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
     "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
@@ -87,6 +87,7 @@
       const el = helpers.el;
       const metadataFields = helpers.metadataFields;
       const makeFieldPicker = helpers.makeFieldPicker;
+      const savedGroups = helpers && helpers.savedConfig && Array.isArray(helpers.savedConfig.groups) ? helpers.savedConfig.groups : null;
 
       const groupsWrap = el("div", {});
       container.appendChild(groupsWrap);
@@ -172,7 +173,7 @@
         for (let i = 0; i < groupObjs.length; i++) groupObjs[i].titleEl.textContent = "Group " + (i + 1);
       }
 
-      function makeGroup(prefill) {
+      function makeGroupShell() {
         const group = { rows: [], rowsContainer: null, el: null, titleEl: null };
         const groupEl = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;" });
         const header = el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;" });
@@ -196,27 +197,45 @@
           groupEl.remove();
           renumberGroups();
         };
-        addRow(group, "field", { storageName: NODE, value: prefill.node });
-        addRow(group, "field", { storageName: GROUP_ID, value: DEFAULT_GROUP_ID });
-        addRow(group, "calls", { value: prefill.calls });
-        addRow(group, "durmin", { value: 10 });
-        addRow(group, "durmax", { value: 60 });
         return group;
       }
 
-      function addGroup(prefill) {
-        const group = makeGroup(prefill || { node: "", calls: 0 });
+      function mountGroup(group) {
         groupObjs.push(group);
         groupsWrap.appendChild(group.el);
         renumberGroups();
         return group;
       }
 
-      addGroup({ node: G1_NODE, calls: 18 });
-      addGroup({ node: G2_NODE, calls: 8 });
+      function addDefaultGroup(prefill) {
+        const group = makeGroupShell();
+        addRow(group, "field", { storageName: NODE, value: prefill.node });
+        addRow(group, "field", { storageName: GROUP_ID, value: DEFAULT_GROUP_ID });
+        addRow(group, "calls", { value: prefill.calls });
+        addRow(group, "durmin", { value: 10 });
+        addRow(group, "durmax", { value: 60 });
+        return mountGroup(group);
+      }
+
+      function addGroupFromSpec(spec) {
+        const group = makeGroupShell();
+        const fields = Array.isArray(spec.fields) ? spec.fields : [];
+        for (const f of fields) addRow(group, "field", { storageName: f.storageName, value: (f.values || []).join(", ") });
+        if (spec.callsToSelect != null) addRow(group, "calls", { value: spec.callsToSelect });
+        if (spec.durMinMs != null) addRow(group, "durmin", { value: spec.durMinMs / 60000 });
+        if (spec.durMaxMs != null) addRow(group, "durmax", { value: spec.durMaxMs / 60000 });
+        return mountGroup(group);
+      }
+
+      if (savedGroups && savedGroups.length) {
+        for (const spec of savedGroups) addGroupFromSpec(spec);
+      } else {
+        addDefaultGroup({ node: G1_NODE, calls: 18 });
+        addDefaultGroup({ node: G2_NODE, calls: 8 });
+      }
 
       const addGroupBtn = el("button", { style: "padding:6px 14px;border-radius:8px;border:1px dashed #6b7280;background:#fff;color:#374151;cursor:pointer;font-size:12px;" }, "+ Add group");
-      addGroupBtn.onclick = () => addGroup({ node: "", calls: 0 });
+      addGroupBtn.onclick = () => addDefaultGroup({ node: "", calls: 0 });
       container.appendChild(addGroupBtn);
 
       return {
@@ -275,6 +294,9 @@
       const H = ctx.helpers;
       const groups = (ctx.config && ctx.config.groups) || [];
 
+      //##> Save the launch state so the grid's Back to Report can restore the form.
+      try { api.setShared("reportReturnState", { reportId: "southwestDaily", config: ctx.config, fromVal: ctx.fromVal, toVal: ctx.toVal }); } catch (_) {}
+
       function dayKey(row) {
         const s = String(H.getFieldValue(row, RECORDED) || "");
         const m = s.match(/^\d{4}-\d{2}-\d{2}/);
@@ -331,7 +353,7 @@
         }
       }
 
-      //##> Population: full deduped union of all groups, sorted by node.
+      //##> All Calls: full deduped union of all groups, sorted by node.
       const popSeen = new Set();
       const populationRows = [];
       for (let gi = 0; gi < groupPools.length; gi++) {
@@ -351,10 +373,11 @@
 
       const gridSession = {
         title: "Southwest Daily",
+        exportBaseName: "SWA Daily",
         back: { toolId: "reports" },
         sheets: [
-          { id: "population", name: "Population", export: true, rows: populationRows, fields: POP_FIELDS, headers: POP_HEADERS },
-          { id: "selected", name: "Selected", export: true, rows: selectedRows, fields: SEL_FIELDS, headers: SEL_HEADERS }
+          { id: "population", name: "All Calls", export: true, rows: populationRows, fields: POP_FIELDS, headers: POP_HEADERS },
+          { id: "selected", name: "SWA Daily", export: true, rows: selectedRows, fields: SEL_FIELDS, headers: SEL_HEADERS }
         ]
       };
       try { api.setShared("gridSession", gridSession); } catch (_) {}
