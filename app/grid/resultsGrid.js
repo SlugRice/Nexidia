@@ -278,11 +278,22 @@
         }
         function doMultiSheetExport() {
           if (!xls || !xls.buildMultiSheetExcelHtml) { alert("Multi-sheet export builder not loaded. Update export.js."); return; }
-          const defs = gridSession.sheets.filter((s) => s.export !== false).map((s) => ({ name: s.name || "Sheet", fields: s.fields, headers: s.headers, rows: s.rows }));
-          if (!defs.length) { alert("No sheets are marked for export. Tick at least one Export box."); return; }
+          captureSheetState();
+          const chosen = gridSession.sheets.filter((s) => s.export !== false);
+          if (!chosen.length) { alert("No sheets are marked for export. Tick at least one Export box on the sheet tabs."); return; }
+          const defs = chosen.map((s) => {
+            const st = s._state;
+            const fields = st ? st.fields.filter((f) => st.visible.has(f)) : s.fields;
+            const headers = st ? st.fields.map((f, i) => ({ f, h: st.headers[i] })).filter(({ f }) => st.visible.has(f)).map(({ h }) => h) : s.headers;
+            const rows = st ? st.rows : s.rows;
+            return { name: s.name || "Sheet", fields: fields, headers: headers, rows: rows };
+          });
           const html = xls.buildMultiSheetExcelHtml(defs);
-          const stamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
-          xls.downloadExcelFile("nexidia_report_export_" + stamp + ".xls", html);
+          const d = new Date();
+          const p = (n) => String(n).padStart(2, "0");
+          const stamp = p(d.getMonth() + 1) + "-" + p(d.getDate()) + "-" + d.getFullYear();
+          const base = (gridSession.exportBaseName || "Report").replace(/[\\\/:*?"<>|]/g, " ").trim();
+          xls.downloadExcelFile(base + " - " + stamp + ".xls", html);
         }
         function exportToExcel() {
           if (gridSession) { doMultiSheetExport(); return; }
@@ -440,6 +451,30 @@
           setTimeout(() => document.addEventListener("mousedown", handler), 50);
         }
         let sheetNavLabelEl = null;
+        function defaultSheetState(sh) {
+          return {
+            rows: sh.rows.slice(), fields: sh.fields.slice(), headers: sh.headers.slice(),
+            visible: new Set(sh.fields), sorts: [], columnFilters: {}, colWidths: new Map(),
+            globalFilter: "", selected: new Set(), hiddenRows: new Set()
+          };
+        }
+        function captureSheetState() {
+          if (!gridSession) return;
+          const sh = gridSession.sheets[activeSheetIndex];
+          if (!sh) return;
+          sh._state = {
+            rows: state.rows,
+            fields: state.fields.slice(),
+            headers: state.headers.slice(),
+            visible: new Set(state.visible),
+            sorts: state.sorts.map((s) => ({ field: s.field, dir: s.dir })),
+            columnFilters: JSON.parse(JSON.stringify(state.columnFilters || {})),
+            colWidths: new Map(state.colWidths),
+            globalFilter: state.globalFilter,
+            selected: new Set(state.selected),
+            hiddenRows: new Set(state.hiddenRows)
+          };
+        }
         function navArrowStyle(enabled) {
           return `width:26px;height:24px;border-radius:6px;border:1px solid ${enabled ? "#6366f1" : "#e5e7eb"};background:#fff;color:${enabled ? "#4338ca" : "#cbd5e1"};font-size:15px;line-height:1;cursor:${enabled ? "pointer" : "default"};`;
         }
@@ -449,18 +484,39 @@
         }
         function applySheet(idx) {
           if (!gridSession || !gridSession.sheets[idx]) return;
+          captureSheetState();
           const sh = gridSession.sheets[idx];
           activeSheetIndex = idx;
-          state.rows = sh.rows.slice();
-          state.fields = sh.fields.slice();
-          state.headers = sh.headers.slice();
-          state.visible = new Set(sh.fields);
-          state.sorts = []; state.columnFilters = {}; state.globalFilter = "";
-          state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
+          const src = sh._state || defaultSheetState(sh);
+          state.rows = src.rows;
+          state.fields = src.fields.slice();
+          state.headers = src.headers.slice();
+          state.visible = new Set(src.visible);
+          state.sorts = src.sorts.map((s) => ({ field: s.field, dir: s.dir }));
+          state.columnFilters = JSON.parse(JSON.stringify(src.columnFilters || {}));
+          state.colWidths = new Map(src.colWidths);
+          state.globalFilter = src.globalFilter || "";
+          state.selected = new Set(src.selected);
+          state.hiddenRows = new Set(src.hiddenRows);
           state.cellSel.clear(); state.cellAnchor = null; state.cellDragging = false;
-          globalSearchBox.value = "";
+          globalSearchBox.value = state.globalFilter;
           buildSheetUI();
           rebuildColumnPanel(); renderSortBadges(); recomputeAndRender();
+        }
+        function selectAllAcrossSheets() {
+          for (let i = 0; i < gridSession.sheets.length; i++) {
+            const sh = gridSession.sheets[i];
+            if (i === activeSheetIndex) {
+              state.selected = new Set(state.filteredRows.map((_, k) => k));
+            } else {
+              if (!sh._state) sh._state = defaultSheetState(sh);
+              const cnt = sh._state.rows.length;
+              const set = new Set();
+              for (let k = 0; k < cnt; k++) set.add(k);
+              sh._state.selected = set;
+            }
+          }
+          renderVisibleRows(); updateToolbarCounts();
         }
         function buildSheetUI() {
           if (!gridSession) return;
@@ -476,27 +532,53 @@
           const rightBtn = el("button", { style: navArrowStyle(activeSheetIndex < count - 1), title: "Next sheet" }, "\u203A");
           rightBtn.disabled = activeSheetIndex === count - 1;
           rightBtn.onclick = () => goToSheet(activeSheetIndex + 1);
-          sheetNavBar.appendChild(leftBtn); sheetNavBar.appendChild(sheetNavLabelEl); sheetNavBar.appendChild(rightBtn);
+          const selAllBtn = el("button", { style: "margin-left:auto;padding:4px 10px;border-radius:7px;border:1px solid #7c3aed;background:#fff;color:#6d28d9;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;", title: "Select every row on every sheet" }, "Select all \u00B7 all sheets");
+          selAllBtn.onclick = () => selectAllAcrossSheets();
+          sheetNavBar.appendChild(leftBtn); sheetNavBar.appendChild(sheetNavLabelEl); sheetNavBar.appendChild(rightBtn); sheetNavBar.appendChild(selAllBtn);
           sheetTabBar.style.display = "flex";
           sheetTabBar.innerHTML = "";
           for (let i = 0; i < count; i++) {
             const sh = sheets[i];
             const active = i === activeSheetIndex;
-            const tab = el("div", { style: `display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #cbd5e1;border-bottom:none;border-radius:7px 7px 0 0;background:${active ? "#fff" : "#e2e8f0"};margin-top:${active ? "0" : "4px"};box-shadow:${active ? "0 -2px 5px rgba(0,0,0,.07)" : "none"};cursor:pointer;flex-shrink:0;` });
-            ((idx) => { tab.onclick = (e) => { if (e.target.tagName === "INPUT") return; goToSheet(idx); }; })(i);
-            const nameInput = el("input", { type: "text", value: sh.name || "", title: "Rename sheet", style: `width:110px;padding:2px 4px;border:0;background:transparent;font-size:12px;font-weight:${active ? "700" : "500"};color:${active ? "#111827" : "#475569"};` });
-            ((sheet, myIdx) => { nameInput.oninput = () => { sheet.name = nameInput.value; if (myIdx === activeSheetIndex && sheetNavLabelEl) sheetNavLabelEl.textContent = (sheet.name || "Sheet") + "  \u00B7  Sheet " + (activeSheetIndex + 1) + " of " + count; }; })(sh, i);
+            const tab = el("div", { style: `display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid #cbd5e1;border-bottom:none;border-radius:7px 7px 0 0;background:${active ? "#fff" : "#e2e8f0"};margin-top:${active ? "0" : "4px"};box-shadow:${active ? "0 -2px 5px rgba(0,0,0,.07)" : "none"};cursor:pointer;flex-shrink:0;` });
+            ((idx) => { tab.onclick = () => goToSheet(idx); })(i);
+            const renameBtn = el("span", { style: "font-size:11px;color:#94a3b8;cursor:text;padding:0 2px;", title: "Rename" }, "\u270E");
+            const nameLabel = el("span", { style: `font-size:12px;font-weight:${active ? "700" : "500"};color:${active ? "#111827" : "#475569"};` }, sh.name || "Sheet");
+            ((sheet, myIdx) => {
+              renameBtn.onclick = (e) => {
+                e.stopPropagation();
+                const input = el("input", { type: "text", value: sheet.name || "", style: "width:110px;padding:1px 4px;border:1px solid #93c5fd;border-radius:4px;font-size:12px;" });
+                input.onclick = (ev) => ev.stopPropagation();
+                input.oninput = () => { sheet.name = input.value; if (myIdx === activeSheetIndex && sheetNavLabelEl) sheetNavLabelEl.textContent = (sheet.name || "Sheet") + "  \u00B7  Sheet " + (myIdx + 1) + " of " + count; };
+                input.onblur = () => { nameLabel.textContent = sheet.name || "Sheet"; input.replaceWith(nameLabel); };
+                input.onkeydown = (ev) => { if (ev.key === "Enter") input.blur(); };
+                nameLabel.replaceWith(input); input.focus(); input.select();
+              };
+            })(sh, i);
             const expLabel = el("label", { style: "display:flex;align-items:center;gap:3px;font-size:10px;color:#6b7280;cursor:pointer;", title: "Include this sheet in the export" });
             const expCb = el("input", { type: "checkbox" });
             expCb.checked = sh.export !== false;
+            expCb.onclick = (e) => e.stopPropagation();
             ((sheet) => { expCb.onchange = () => { sheet.export = expCb.checked; }; })(sh);
             expLabel.appendChild(expCb); expLabel.appendChild(el("span", {}, "Export"));
-            tab.appendChild(nameInput); tab.appendChild(expLabel);
+            tab.appendChild(renameBtn); tab.appendChild(nameLabel); tab.appendChild(expLabel);
             sheetTabBar.appendChild(tab);
           }
         }
         function resetGrid() {
-          if (gridSession) { applySheet(activeSheetIndex); return; }
+          if (gridSession) {
+            const sh = gridSession.sheets[activeSheetIndex];
+            delete sh._state;
+            const d = defaultSheetState(sh);
+            state.rows = d.rows; state.fields = d.fields; state.headers = d.headers;
+            state.visible = d.visible; state.sorts = d.sorts; state.columnFilters = d.columnFilters;
+            state.colWidths = d.colWidths; state.globalFilter = "";
+            state.selected.clear(); state.hiddenRows.clear();
+            state.cellSel.clear(); state.cellAnchor = null; state.cellDragging = false;
+            globalSearchBox.value = "";
+            rebuildColumnPanel(); renderSortBadges(); recomputeAndRender();
+            return;
+          }; }
           state.sorts = []; state.columnFilters = {}; state.globalFilter = "";
           state.visible = new Set([...phraseFields, ...allFields]);
           state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
