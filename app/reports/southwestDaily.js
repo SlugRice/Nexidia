@@ -8,6 +8,7 @@
   const GROUP_ID = "UDFVarchar10";
   const DURATION = "mediaFileDuration";
   const TRANS = "UDFVarchar110";
+  const RECORDED = "recordedDateTime";
   const OPEN_MAX_MS = 24 * 60 * 60 * 1000;
   const WARN_MAX_MS = 3 * 60 * 1000;
   const WARN_MIN_MS = 60 * 60 * 1000;
@@ -23,15 +24,29 @@
     "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110", "sourceMediaId"
   ];
 
-  const OUTPUT_FIELDS = [
+  //##> Population sheet: standard metadata only, no workup/manual columns.
+  const POP_FIELDS = [
+    "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
+    "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
+    "experienceId", "UDFVarchar122", "UDFVarchar104", "UDFVarchar105", "siteName",
+    "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110"
+  ];
+  const POP_HEADERS = [
+    "Agent", "Group ID (Policy ID)", "Provider Flag", "Caller Type", "Member ID",
+    "Date/Time", "Duration", "Hold Time", "Supervisor", "Sentiment",
+    "Experience Id", "Calluuid", "Member First Name", "Member Last Name", "Site",
+    "Employee ID", "DNIS", "Actual Site", "Node", "Trans_Id"
+  ];
+
+  //##> Selected sheet: full workup layout including the blank manual columns.
+  const SEL_FIELDS = [
     "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
     "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
     "_blank_Score", "experienceId", "UDFVarchar122", "UDFVarchar104", "UDFVarchar105",
     "siteName", "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110",
     "_blank_Tags", "_blank_SubTags", "_blank_Notes", "_blank_BA", "_blank_Date_Completed"
   ];
-
-  const OUTPUT_HEADERS = [
+  const SEL_HEADERS = [
     "Agent", "Group ID (Policy ID)", "Provider Flag", "Caller Type", "Member ID",
     "Date/Time", "Duration", "Hold Time", "Supervisor", "Sentiment",
     "Score", "Experience Id", "Calluuid", "Member First Name", "Member Last Name",
@@ -39,7 +54,7 @@
     "Tags", "SubTags", "Notes", "BA", "Date Completed"
   ];
 
-  const SPECIAL_LABEL = { calls: "Calls to select", durmin: "Duration Minimum", durmax: "Duration Maximum" };
+  const SPECIAL_LABEL = { calls: "Calls per day to select", durmin: "Duration Minimum", durmax: "Duration Maximum" };
   const SPECIAL_KINDS = ["calls", "durmin", "durmax"];
 
   function splitValues(raw) {
@@ -60,13 +75,13 @@
       const j = i + Math.floor(Math.random() * (copy.length - i));
       const tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp;
     }
-    return { picked: copy.slice(0, count), rest: copy.slice(count) };
+    return copy.slice(0, count);
   }
 
   registry.register({
     id: "southwestDaily",
     label: "Southwest Daily",
-    description: "Pulls SWA Plan Advisor and Provider calls by node, group, and duration, then places a random daily sample on top followed by the remaining calls sorted by node.",
+    description: "Pulls SWA Plan Advisor and Provider calls by node, group, and duration. The full population and the random per-day sample export as two tabs of one workbook.",
 
     buildConfig(container, helpers) {
       const el = helpers.el;
@@ -96,15 +111,15 @@
           rowEl.appendChild(picker.wrapper);
           rowEl.appendChild(valueInput);
         } else if (kind === "calls") {
-          const label = el("div", { style: "display:flex;align-items:center;gap:6px;flex:0 0 200px;font-size:13px;color:#374151;" });
-          label.appendChild(el("span", {}, "Calls to select:"));
-          label.appendChild(el("span", { title: "Amount of qualifying calls to set aside for the report.", style: "display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e5e7eb;color:#374151;font-size:11px;font-style:italic;cursor:help;" }, "i"));
+          const label = el("div", { style: "display:flex;align-items:center;gap:6px;flex:0 0 220px;font-size:13px;color:#374151;" });
+          label.appendChild(el("span", {}, "Calls per day to select:"));
+          label.appendChild(el("span", { title: "Amount of qualifying calls to set aside per day for the report.", style: "display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e5e7eb;color:#374151;font-size:11px;font-style:italic;cursor:help;" }, "i"));
           const input = el("input", { type: "number", min: "0", value: opts.value != null ? String(opts.value) : "0", style: "width:90px;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
           row.input = input;
           rowEl.appendChild(label);
           rowEl.appendChild(input);
         } else {
-          const label = el("div", { style: "flex:0 0 200px;font-size:13px;color:#374151;" }, SPECIAL_LABEL[kind]);
+          const label = el("div", { style: "flex:0 0 220px;font-size:13px;color:#374151;" }, SPECIAL_LABEL[kind]);
           const input = el("input", { type: "number", min: "0", step: "0.5", value: opts.value != null ? String(opts.value) : "0", style: "width:90px;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
           row.input = input;
           rowEl.appendChild(label);
@@ -131,7 +146,7 @@
       function openAddMenu(group, anchorBtn) {
         const wrap = el("div", { style: "position:relative;display:inline-block;" });
         anchorBtn.parentNode.insertBefore(wrap, anchorBtn.nextSibling);
-        const menu = el("div", { style: "position:absolute;top:4px;left:0;z-index:30;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);padding:4px;min-width:170px;" });
+        const menu = el("div", { style: "position:absolute;top:4px;left:0;z-index:30;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);padding:4px;min-width:190px;" });
         const options = [{ kind: "field", label: "Nexidia field" }];
         for (const s of SPECIAL_KINDS) if (!specialPresent(group, s)) options.push({ kind: s, label: SPECIAL_LABEL[s] });
         function cleanup() { document.removeEventListener("mousedown", onDoc, true); try { wrap.remove(); } catch (_) {} }
@@ -260,17 +275,23 @@
       const H = ctx.helpers;
       const groups = (ctx.config && ctx.config.groups) || [];
 
-      const pickedRows = [];
-      const usedTransIds = new Set();
-      let restPool = [];
-      const shortfalls = [];
+      function dayKey(row) {
+        const s = String(H.getFieldValue(row, RECORDED) || "");
+        const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+        if (m) return m[0];
+        const d = new Date(s);
+        return isNaN(d) ? "unknown" : d.toISOString().slice(0, 10);
+      }
+      function nodeVal(item) { return H.getFieldValue(item.row, NODE).toLowerCase(); }
+
+      const groupPools = [];
       const skipped = [];
       let searchedAny = false;
 
       for (let gi = 0; gi < groups.length; gi++) {
         if (ctx.isCancelled()) return;
         const g = groups[gi];
-        if (!g.fields || !g.fields.length) { skipped.push(gi + 1); continue; }
+        if (!g.fields || !g.fields.length) { skipped.push(gi + 1); groupPools[gi] = []; continue; }
 
         const kwFilters = g.fields.map((f) => B.buildKeywordFilter(f.storageName, f.values, "IN"));
         if (g.durMinMs != null || g.durMaxMs != null) {
@@ -283,48 +304,72 @@
         const result = await ctx.runSearch([{ keywordGroup, phraseGroups: [] }], SEARCH_FIELDS, {});
         if (!result) return;
         searchedAny = true;
-
-        const pool = result.finalRows || [];
-        const n = g.callsToSelect == null ? 0 : g.callsToSelect;
-        if (n > 0 && pool.length < n) shortfalls.push({ group: gi + 1, requested: n, got: pool.length });
-        const { picked, rest } = pickRandom(pool, n);
-        for (const p of picked) {
-          pickedRows.push(p);
-          const t = H.getFieldValue(p.row, TRANS);
-          if (t) usedTransIds.add(t);
-        }
-        restPool = restPool.concat(rest);
+        groupPools[gi] = result.finalRows || [];
       }
 
       if (!searchedAny) { ctx.progress.remove(); alert("No searchable groups. Please add at least one field filter."); return; }
 
-      const seen = new Set();
-      const finalRest = [];
-      for (const r of restPool) {
-        const t = H.getFieldValue(r.row, TRANS);
-        if (t && usedTransIds.has(t)) continue;
-        if (t) { if (seen.has(t)) continue; seen.add(t); }
-        finalRest.push(r);
-      }
-      finalRest.sort((a, b) => {
-        const na = H.getFieldValue(a.row, NODE).toLowerCase();
-        const nb = H.getFieldValue(b.row, NODE).toLowerCase();
-        return na < nb ? -1 : na > nb ? 1 : 0;
-      });
+      //##> Per-day sampling: pick each group's "calls per day" at random from that
+      //##> group's calls on each day. Selected rows are ordered by date, then group.
+      const dayset = new Set();
+      for (let gi = 0; gi < groupPools.length; gi++) for (const r of groupPools[gi]) dayset.add(dayKey(r.row));
+      const days = [...dayset].sort();
 
-      const blanks = [{ row: {}, phrases: [] }, { row: {}, phrases: [] }, { row: {}, phrases: [] }];
-      const outRows = pickedRows.concat(blanks, finalRest);
+      const used = new Set();
+      const selectedRows = [];
+      const shortfalls = [];
+
+      for (const day of days) {
+        for (let gi = 0; gi < groups.length; gi++) {
+          const g = groups[gi];
+          const n = g.callsToSelect == null ? 0 : g.callsToSelect;
+          if (n <= 0 || !groupPools[gi] || !groupPools[gi].length) continue;
+          const dayRows = groupPools[gi].filter((r) => dayKey(r.row) === day && (() => { const t = H.getFieldValue(r.row, TRANS); return !t || !used.has(t); })());
+          if (dayRows.length < n) shortfalls.push({ group: gi + 1, day, requested: n, got: dayRows.length });
+          const picks = pickRandom(dayRows, n);
+          for (const p of picks) { selectedRows.push(p); const t = H.getFieldValue(p.row, TRANS); if (t) used.add(t); }
+        }
+      }
+
+      //##> Population: full deduped union of all groups, sorted by node.
+      const popSeen = new Set();
+      const populationRows = [];
+      for (let gi = 0; gi < groupPools.length; gi++) {
+        for (const r of groupPools[gi]) {
+          const t = H.getFieldValue(r.row, TRANS);
+          if (t) { if (popSeen.has(t)) continue; popSeen.add(t); }
+          populationRows.push(r);
+        }
+      }
+      populationRows.sort((a, b) => { const na = nodeVal(a), nb = nodeVal(b); return na < nb ? -1 : na > nb ? 1 : 0; });
+
+      //##> Fallback rows for a grid without the session hook: selected on top, a
+      //##> three-row gap, then the remaining population sorted by node.
+      const restRows = populationRows.filter((r) => { const t = H.getFieldValue(r.row, TRANS); return !t || !used.has(t); });
+      const gap = [{ row: {}, phrases: [] }, { row: {}, phrases: [] }, { row: {}, phrases: [] }];
+      const fallbackRows = selectedRows.concat(gap, restRows);
+
+      const gridSession = {
+        title: "Southwest Daily",
+        back: { toolId: "reports" },
+        sheets: [
+          { id: "population", name: "Population", export: true, rows: populationRows, fields: POP_FIELDS, headers: POP_HEADERS },
+          { id: "selected", name: "Selected", export: true, rows: selectedRows, fields: SEL_FIELDS, headers: SEL_HEADERS }
+        ]
+      };
+      try { api.setShared("gridSession", gridSession); } catch (_) {}
 
       const msgs = [];
-      for (const s of shortfalls) {
-        msgs.push(s.requested + " calls requested from Group " + s.group + ", but the results only contained " + s.got + " qualifying calls. All of them have been placed on top. If more are required, try redoing the search with broader filters.");
+      if (shortfalls.length) {
+        const lines = shortfalls.map((s) => s.requested + " calls requested from Group " + s.group + " for " + s.day + ", but only " + s.got + " qualifying calls were found. All of them were placed on top.");
+        msgs.push(lines.join("\n") + "\n\nIf more are required, try broadening the filters or the date range.");
       }
       if (skipped.length) {
         msgs.push("Group" + (skipped.length > 1 ? "s " : " ") + skipped.join(", ") + " had no field filters and " + (skipped.length > 1 ? "were" : "was") + " skipped.");
       }
       if (msgs.length) alert(msgs.join("\n\n"));
 
-      ctx.dispatchToGrid(outRows, { fields: OUTPUT_FIELDS, headers: OUTPUT_HEADERS });
+      ctx.dispatchToGrid(fallbackRows, { fields: SEL_FIELDS, headers: SEL_HEADERS });
     }
   });
 })();
