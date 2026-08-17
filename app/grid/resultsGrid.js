@@ -578,7 +578,7 @@
             globalSearchBox.value = "";
             rebuildColumnPanel(); renderSortBadges(); recomputeAndRender();
             return;
-          }; }
+          }
           state.sorts = []; state.columnFilters = {}; state.globalFilter = "";
           state.visible = new Set([...phraseFields, ...allFields]);
           state.selected.clear(); state.hiddenRows.clear(); state.colWidths.clear();
