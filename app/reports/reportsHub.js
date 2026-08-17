@@ -1,4 +1,4 @@
-//[Last Update: 7:07 PM 8/13/2026]
+//[Last Update: 8/17/26 2:14 PM - reportsHub - custom load + direct grid]
 //##> Thin reports host. Loads the catalog, lets the user pick a report, collects
 //##> the date range plus any report-specific config, then calls report.run(ctx).
 //##> The hub owns no search/transcript/export logic; it wires shared services into
@@ -308,7 +308,7 @@
         const customRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-top:8px;" });
         const customBtn = el("button", { style: "padding:6px 12px;border-radius:8px;border:1px solid #6b7280;background:#fff;color:#374151;cursor:pointer;font-size:12px;" }, "Load custom report (.js)");
         const customNote = el("div", { style: "font-size:11px;color:#6b7280;" }, "");
-        const fileInput = el("input", { type: "file", accept: ".js,text/javascript", style: "display:none;" });
+        const fileInput = el("input", { type: "file", accept: ".js,.txt,text/javascript,text/plain", style: "display:none;" });
         customRow.appendChild(customBtn); customRow.appendChild(customNote); customRow.appendChild(fileInput);
         selectWrap.appendChild(customRow);
         card.appendChild(selectWrap);
