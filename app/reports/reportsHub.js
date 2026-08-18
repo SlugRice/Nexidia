@@ -367,13 +367,13 @@
         setFiltersVisible(false);
         //##> Activate a definition in the modal (shared by dropdown select and
         //##> custom file load). Wires description, filter rows, and config panel.
-        function activateDef(def, descText) {
+        function activateDef(def, descText, savedConfig) {
           configArea.innerHTML = "";
           activeReport = def;
           configGetter = null;
           descArea.textContent = descText || def.description || "";
           setFiltersVisible(!!def.usesStandardFilters, def.defaultFilters);
-          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el, metadataFields, makeFieldPicker });
+          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el, metadataFields, makeFieldPicker, savedConfig: savedConfig || null });
         }
         select.onchange = async () => {
           const id = select.value;
@@ -430,6 +430,26 @@
           const jobId = services.jobStore.generateJobId("rptjob");
           await executeReport(activeReport, { jobId, config, dateFilter, fromVal, toVal, standardFilters, customSource, createdAt: Date.now() });
         };
+        //##> Rehydrate from a grid "Back to Report" return: restore the report
+        //##> selection, its saved config, and the date range, then clear the state so
+        //##> it only applies once.
+        try {
+          const ret = api.getShared("reportReturnState");
+          if (ret && ret.reportId) {
+            api.setShared("reportReturnState", null);
+            const retEntry = catalog.find((c) => c.id === ret.reportId);
+            if (retEntry) {
+              descArea.textContent = "Restoring your last report...";
+              const retDef = await loadReportModule(retEntry);
+              if (retDef) {
+                select.value = ret.reportId;
+                activateDef(retDef, retEntry.description || "", ret.config || null);
+                if (ret.fromVal) fromInput.value = ret.fromVal;
+                if (ret.toVal) toInput.value = ret.toVal;
+              }
+            }
+          }
+        } catch (_) {}
       } catch (e) {
         console.error(e);
         alert("Failed to open Reports. Make sure you're running this from an active Nexidia session.");
