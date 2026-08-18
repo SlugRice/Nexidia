@@ -1276,6 +1276,22 @@
           const box = el("div", { style: "background:#fff;width:480px;max-height:80vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
           box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:4px;" }, "Query Search"));
           box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:14px;" }, "Select queries to check which calls matched."));
+          const querySheetChecks = [];
+          if (gridSession && gridSession.sheets && gridSession.sheets.length) {
+            captureSheetState();
+            const shBox = el("div", { style: "border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;margin-bottom:12px;background:#f8fafc;" });
+            shBox.appendChild(el("div", { style: "font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;" }, "Run against sheets:"));
+            for (let i = 0; i < gridSession.sheets.length; i++) {
+              const sh = gridSession.sheets[i];
+              const lbl = el("label", { style: "display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:12px;color:#111827;cursor:pointer;" });
+              const cb = el("input", { type: "checkbox" });
+              cb.checked = true;
+              lbl.appendChild(cb); lbl.appendChild(el("span", {}, sh.name || ("Sheet " + (i + 1))));
+              shBox.appendChild(lbl);
+              querySheetChecks.push({ index: i, cb: cb });
+            }
+            box.appendChild(shBox);
+          }
           const searchInput = el("input", { type: "text", placeholder: "Search queries...", style: "width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;margin-bottom:8px;" });
           box.appendChild(searchInput);
           const listWrap = el("div", { style: "max-height:220px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:14px;" });
@@ -1319,21 +1335,50 @@
           searchInput.addEventListener("input", () => renderQList(searchInput.value));
           renderQList("");
           box.appendChild(listWrap); box.appendChild(queueWrap);
-          runBtn.onclick = async () => { if (!queryQueue.length) return; const toRun = queryQueue.slice(); overlay.remove(); await runQueryEnrichment(toRun); };
+          runBtn.onclick = async () => {
+            if (!queryQueue.length) return;
+            const toRun = queryQueue.slice();
+            let sheetTargets = null;
+            if (querySheetChecks.length) {
+              sheetTargets = querySheetChecks.filter((s) => s.cb.checked).map((s) => s.index);
+              if (!sheetTargets.length) { alert("Select at least one sheet to run the query against."); return; }
+            }
+            overlay.remove();
+            await runQueryEnrichment(toRun, sheetTargets);
+          };
           const cancelBtn = el("button", { style: "width:100%;padding:8px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:13px;color:#6b7280;" }, "Cancel");
           cancelBtn.onclick = () => overlay.remove();
           box.appendChild(runBtn); box.appendChild(cancelBtn);
           overlay.appendChild(box); document.body.appendChild(overlay);
           setTimeout(() => searchInput.focus(), 50);
         }
-        async function runQueryEnrichment(queries) {
+        async function runQueryEnrichment(queries, sheetTargets) {
           if (!Array.isArray(queries)) queries = [queries];
           const HITS_URL = (smid) => "https://apug01.nxondemand.com/NxIA/api/hits/fetch/" + smid;
           const BATCH = 50;
+          //##> Gather the unique SMIDs to score. In a report session the user may pick
+          //##> which sheets to run against; scores are written back to each chosen
+          //##> sheet's saved state (and the active sheet's live state) so switching
+          //##> tabs preserves the new query columns.
+          const sessionMode = !!(gridSession && Array.isArray(sheetTargets) && sheetTargets.length);
+          const smidSet = new Set();
           const smids = [];
-          for (let si = 0; si < state.rows.length; si++) {
-            const smid = getSourceMediaId(state.rows[si]);
-            if (smid) smids.push({ idx: si, smid: String(smid) });
+          function addSmid(item) {
+            const smid = getSourceMediaId(item);
+            if (!smid) return;
+            const s = String(smid);
+            if (smidSet.has(s)) return;
+            smidSet.add(s);
+            smids.push({ smid: s });
+          }
+          if (sessionMode) {
+            for (const ti of sheetTargets) {
+              const sh = gridSession.sheets[ti];
+              const src = (ti === activeSheetIndex) ? state.rows : (sh._state ? sh._state.rows : sh.rows);
+              for (const item of src) addSmid(item);
+            }
+          } else {
+            for (let si = 0; si < state.rows.length; si++) addSmid(state.rows[si]);
           }
           if (!smids.length) { alert("No SMIDs found in results."); return; }
           const scoreMaps = new Map();
@@ -1386,22 +1431,40 @@
           }
           progOverlay.remove();
           if (cancelled) return;
-          for (let qi = 0; qi < queries.length; qi++) {
-            const query = queries[qi];
-            const colName = "__QUERY_" + query.id + "__";
-            const colHeader = query.name;
-            const qScoreMap = scoreMaps.get(query.id);
-            for (let ri = 0; ri < state.rows.length; ri++) {
-              const item = state.rows[ri];
-              const rowSmid = String(getSourceMediaId(item) || "");
-              const r = item.row || item;
-              r[colName] = qScoreMap.has(rowSmid) ? qScoreMap.get(rowSmid) : "";
+          function applyToSheet(sheetRows, sheetState, isActive) {
+            for (let qi = 0; qi < queries.length; qi++) {
+              const query = queries[qi];
+              const colName = "__QUERY_" + query.id + "__";
+              const qScoreMap = scoreMaps.get(query.id);
+              for (const item of sheetRows) {
+                const rowSmid = String(getSourceMediaId(item) || "");
+                const r = item.row || item;
+                r[colName] = qScoreMap.has(rowSmid) ? qScoreMap.get(rowSmid) : "";
+              }
+              if (sheetState) {
+                if (!sheetState.fields.includes(colName)) {
+                  sheetState.fields.unshift(colName);
+                  sheetState.headers.unshift(query.name);
+                  sheetState.visible.add(colName);
+                }
+              }
+              if (isActive && !state.fields.includes(colName)) {
+                state.fields.unshift(colName);
+                state.headers.unshift(query.name);
+                state.visible.add(colName);
+              }
             }
-            if (!state.fields.includes(colName)) {
-              state.fields.unshift(colName);
-              state.headers.unshift(colHeader);
-              state.visible.add(colName);
+          }
+          if (sessionMode) {
+            for (const ti of sheetTargets) {
+              const sh = gridSession.sheets[ti];
+              const isActive = ti === activeSheetIndex;
+              if (!sh._state) sh._state = defaultSheetState(sh);
+              const rows = isActive ? state.rows : sh._state.rows;
+              applyToSheet(rows, sh._state, isActive);
             }
+          } else {
+            applyToSheet(state.rows, null, true);
           }
           rebuildColumnPanel();
           renderSortBadges();
