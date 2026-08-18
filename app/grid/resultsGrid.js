@@ -289,11 +289,19 @@
             return { name: s.name || "Sheet", fields: fields, headers: headers, rows: rows };
           });
           const html = xls.buildMultiSheetExcelHtml(defs);
-          const d = new Date();
-          const p = (n) => String(n).padStart(2, "0");
-          const stamp = p(d.getMonth() + 1) + "-" + p(d.getDate()) + "-" + d.getFullYear();
-          const base = (gridSession.exportBaseName || "Report").replace(/[\\\/:*?"<>|]/g, " ").trim();
-          xls.downloadExcelFile(base + " - " + stamp + ".xls", html);
+          let outName;
+          if (gridSession.exportFileName) {
+            outName = String(gridSession.exportFileName).replace(/[\\\/:*?"<>|]/g, " ").trim();
+          } else {
+            const d = new Date();
+            const p = (n) => String(n).padStart(2, "0");
+            const stamp = p(d.getMonth() + 1) + "-" + p(d.getDate()) + "-" + d.getFullYear();
+            const base = (gridSession.exportBaseName || "Report").replace(/[\\\/:*?"<>|]/g, " ").trim();
+            outName = base + " - " + stamp;
+          }
+          if (!/\.xls$/i.test(outName)) outName += ".xls";
+          xls.downloadExcelFile(outName, html);
+
         }
         function exportToExcel() {
           if (gridSession) { doMultiSheetExport(); return; }
