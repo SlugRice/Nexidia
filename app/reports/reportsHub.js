@@ -373,7 +373,12 @@
           configGetter = null;
           descArea.textContent = descText || def.description || "";
           setFiltersVisible(!!def.usesStandardFilters, def.defaultFilters);
-          if (def.buildConfig) configGetter = def.buildConfig(configArea, { el, metadataFields, makeFieldPicker, savedConfig: savedConfig || null });
+          if (def.buildConfig) configGetter = def.buildConfig(configArea, {
+            el, metadataFields, makeFieldPicker,
+            resolveStorageByDisplay: (name) => { const f = metadataFields.find((x) => (x.displayName || "").toLowerCase() === String(name).toLowerCase()); return f ? f.storageName : null; },
+            getDisplayName: (sn) => { const f = metadataFields.find((x) => x.storageName === sn); return f ? f.displayName : sn; },
+            savedConfig: savedConfig || null
+          });
         }
         select.onchange = async () => {
           const id = select.value;
