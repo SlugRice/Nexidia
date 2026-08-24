@@ -23,6 +23,11 @@
       "label": "Southwest Daily",
       "file": "app/reports/southwestDaily.js",
       "description": "Pulls SWA Plan Advisor and Provider calls by node, group, and duration, then places a random daily sample on top followed by the remaining calls sorted by node."
-    }    
+    },
+    { 
+      "id": "nyceDaily",
+      "label": "NYCE Daily",
+      "file": "app/reports/nyceDaily.js",
+      "description": "Pulls NYCE OGA provider calls by node and date, trims by call length, and takes a random daily sample with batched transcript export." }
   ]
 }
