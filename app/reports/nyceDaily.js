@@ -64,6 +64,22 @@
     return String(name || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\.+$/, "").trim();
   }
 
+  function toYmd(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+
+  function previousWeekRange() {
+    const now = new Date();
+    const sinceMon = (now.getDay() + 6) % 7;
+    const thisMon = new Date(now);
+    thisMon.setDate(now.getDate() - sinceMon);
+    const prevMon = new Date(thisMon);
+    prevMon.setDate(thisMon.getDate() - 7);
+    const prevFri = new Date(prevMon);
+    prevFri.setDate(prevMon.getDate() + 4);
+    return { from: toYmd(prevMon), to: toYmd(prevFri) };
+  }
+
   function shuffle(arr) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) {
@@ -77,6 +93,8 @@
     id: "nyceDaily",
     label: "NYCE Daily",
     description: "Pulls NYCE OGA provider calls by node and date, trims by call length, and takes a random daily sample with batched transcript export.",
+
+    defaultDateRange() { return previousWeekRange(); },
 
     buildConfig(container, helpers) {
       const el = helpers.el;
@@ -112,12 +130,12 @@
       const numStyle = "width:120px;";
 
       const minInput = el("input", { type: "number", min: "0", step: "1", style: numStyle,
-        value: saved && saved.durationMin != null ? String(saved.durationMin) : "0" });
+        value: saved && saved.durationMin != null ? String(saved.durationMin) : "120" });
       const maxInput = el("input", { type: "number", min: "0", step: "1", style: numStyle,
         value: saved && saved.durationMax != null ? String(saved.durationMax) : "0" });
       const perDayInput = el("input", { type: "number", min: "1", step: "1", style: numStyle,
         placeholder: "All", title: "Leave blank to pull all calls.",
-        value: saved && saved.callsPerDay != null ? String(saved.callsPerDay) : "" });
+        value: saved && saved.callsPerDay != null ? String(saved.callsPerDay) : "20" });
 
       const addBtn = el("button", { type: "button", style: "margin-top:4px;" }, "Add field");
       addBtn.onclick = () => addFilterRow(null);
@@ -297,7 +315,7 @@
         transcriptMode: "batch",
         batchMode: "length",
         targetTokens: 18500,
-        showTimestamps: false,
+        showTimestamps: true,
         autoDownload: false,
         zipFileName: zipName
       });
