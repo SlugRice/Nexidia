@@ -1,0 +1,232 @@
+Bottom line
+
+The review is directionally strong, but I would not classify T4 or T8 as sound yet. The main correction is to separate four concepts throughout the world:
+
+Licensure or NY registration
+Credentialing verification
+Medical-staff appointment and clinical privileges
+Payer enrollment and billing identifiers
+
+Several tasks currently treat these as interchangeable. That creates professionally incorrect “correct answers,” even when the arithmetic works.
+
+Cross-cutting corrections
+1. Use the governing-body chain consistently
+
+Change every privileging workflow to:
+
+Credentials Committee reviews and recommends → MEC reviews or forwards as defined by the bylaws → governing body grants, restricts, restores, or terminates privileges → authorized staff implement the approved decision.
+
+Federal rules place appointment authority with the governing body and make the medical staff responsible for examining credentials and recommending candidates. New York likewise makes the medical staff accountable to the governing body and gives it a recommendation role regarding limitation or suspension.
+
+Apply this to T6, T7 and T10. A Compliance Committee should not issue a privileging decision.
+
+2. Do not automatically equate a data gap with uncredentialed practice
+
+“No record in the migration log or OpenMRS” proves a system or repository gap, not necessarily that credentialing never occurred. Before concluding that a provider practiced without credentialing, the task must establish that the search covered the authoritative credentialing file, governing-body approvals, legacy records and archived materials.
+
+This materially changes T3 and should also constrain T1 and T7.
+
+3. Do not make every discovered defect an automatic overpayment
+
+42 CFR 401.305 applies to identified Medicare Parts A and B overpayments. The current rule requires reporting and return generally within 60 days after identification, subject to its investigation and other provisions. It does not establish that every service during a credentialing discrepancy was necessarily an overpayment.
+
+Use this language instead:
+
+Initiate a retrospective service and claims review. Route any identified overpayments through the applicable Medicare, Medicaid, commercial-payer and contractual processes.
+
+Do not hard-code a universal six-year lookback across all payers unless a specific governing source supports it.
+
+4. Identify every provider by NPI
+
+For all task subjects, source documents, minutes, reports and expected outputs, use:
+
+Full name | NPI | profession or specialty
+
+Former names should be aliases attached to the same NPI. This resolves the surname traps without making the task easier.
+
+Task-by-task disposition
+T1: Fix required
+
+Keep the risk-ranking trap, but correct these points:
+
+The NY physician license is generally enduring; current registration is required to practice. NYSED states that physicians re-register every two years, while most other professions use three-year periods.
+Replace “license expired” with**“NY registration lapsed”** if that is the intended fact.
+Do not require month-end expiration dates. I did not find authoritative support that every individual physician registration period must end on the last day of a month.
+If policy requires immediate suspension when registration lapses, Santoro is 60 days past the suspension point, not “30 days past the suspension trigger.” The separate 30-day advance-renewal threshold does not move the lapse date.
+Add NPIs for every ranked provider.
+Add retrospective service and claims review, but do not presume that all claims are refundable.
+Do not state that every administrative suspension automatically triggers a §2803-e report. That section applies when the action relates to alleged impairment, incompetence, malpractice, misconduct or patient-safety concerns, or when information reasonably appears to show physician misconduct. A registration lapse may support reporting, but the task needs facts connecting it to those statutory criteria.
+
+Recommended answer scope: immediate operational hold or suspension under the bylaws, leadership escalation, registration verification, retrospective service review and a legal/compliance determination regarding external reporting.
+
+T2: Redesign required
+
+If the intended task is duplicate-record reconciliation, give each duplicate pair the same NPI. A Type 1 provider should have one unique NPI.
+
+Two records with different NPIs create a different task:
+
+identity verification
+NPPES investigation
+possible incorrect enumeration
+payer and claim reconciliation
+possible fraud or disclosure review
+
+Do not make “deactivate the surplus NPI” an automatic analyst conclusion. The regulation allows deactivation when appropriate, but the task first needs authoritative confirmation that both NPIs belong to the same individual and one was improperly issued.
+
+Best fix: same NPI on both internal records, interleave duplicates in A01, merge/link them into one surviving identity and retain an audit trail. Former-name records remain single identities with aliases.
+
+T3: Fix required
+
+The arithmetic can stay, but “no entry in A02 and OpenMRS” should initially mean missing authoritative evidence, not conclusively “never credentialed.”
+
+Add a defined evidence hierarchy:
+
+Governing-body appointment or privilege record
+Authoritative credentialing repository
+Legacy Winston archive
+OpenMRS operational copy
+Tracking log
+
+Only classify someone as a true zero-record provider after all applicable authoritative sources are negative.
+
+The analyst should not personally suspend privileges. A safer expected output is:
+
+place an administrative hold or review flag if authorized
+prevent new scheduling where policy permits
+immediately escalate for emergency action under the bylaws
+begin verification and retrospective service review
+
+Also specify whether the 12 were actually furnishing hospital services. Being on a roster alone does not establish uncredentialed practice.
+
+T4: Fix required, not sound
+
+“NPI_Number” and “Group_NPI” are not inherently equivalent.
+
+A Type 1 NPI identifies an individual.
+A Type 2 NPI identifies an organization, including a group practice.
+
+The crosswalk is valid only if A08 explicitly says Winston’s NPI_Number field stored the billing organization’s Type 2 NPI, despite its misleading name.
+
+Recommended source fields:
+
+Individual_NPI
+Billing_Group_NPI
+Legacy_Billing_Group_NPI
+effective date
+source system
+
+The agent should copy the six legacy organization NPIs into the new group-NPI field without changing their individual NPIs.
+
+T5: Fix required
+
+Choose the transaction structure and state it explicitly.
+
+Equity acquisition: Winston’s legal entity, TIN and Type 2 NPI may plausibly remain active.
+Asset acquisition: continued use requires a more specific transition arrangement and cannot be assumed merely because systems were not converted.
+
+Also distinguish:
+
+delegated credentialing
+payer contracting
+provider enrollment
+provider-directory submission
+claims billing
+
+A delegated credentialing agreement does not automatically establish every requirement for enrollment under a new organization. A10 must expressly define the covered entities, notice obligations, submission window and consequence of adding an acquired affiliate.
+
+The outcome should be a systemic delegation and roster failure, with directory, network and audit exposure, plus payer-specific claims review. Avoid asserting network-adequacy failure unless the underlying network data actually demonstrates it.
+
+Use**“41 days past the 12-month deadline”** rather than “12 months and 41 days later.”
+
+T6: Redesign required
+
+Do not keep two generic “status” rows. Model separate statuses:
+
+credentialing verification
+medical-staff appointment
+privileges
+employment
+payer enrollment
+scheduling eligibility
+
+A later employment or credentialing status must not silently override a privilege restriction.
+
+Swap the pharmacist for a physician if the documents remain medical-staff privileging documents. Otherwise create a pharmacist-specific competency and scope process under hospital pharmacy governance.
+
+The override source must be a governing-body-approved action if it changes privileges. Committee minutes alone may support a recommendation, but not final reinstatement.
+
+T7: Substantial fix required
+
+The former-name/NPI trap is good. The underlying attestation rule is not yet realistic.
+
+Clinical privileges generally do not require a new Credentials Committee “attestation” every quarter merely because a quarterly meeting occurred. Privileges arise from a governing-body grant for a defined term and scope. Federal rules require medical-staff credential review and recommendation to the governing body.
+
+Use one of these two versions:
+
+Recommended: Cross-tab active registration against the current governing-body privilege roster and expiration dates.
+
+Alternative: Keep quarterly attestation, but label it a Coopa Blue internal monitoring control, not the legal source of privileges. Missing attestation then triggers review, not an automatic conclusion that privileges are absent.
+
+Pin all candidates and minute entries by NPI. Former names should be searched only as aliases for that same NPI.
+
+“Privileging Review Pending” is reasonable only if the attribute clearly does not restrict or grant privileges and the analyst role is authorized to set it.
+
+T8: Fix required, despite the strong trap
+
+A correction dated April 2 should normally precede an audit run on April 6. If the audit still flags it, explain the data latency:
+
+snapshot date before April 2
+delayed ETL
+report generated April 6 from an earlier extract
+correction recorded in a source not yet consumed by the audit
+
+A17 should not merely say “corrected.” It should identify the authoritative system, field, effective timestamp and audit extract cutoff.
+
+The analyst should correct operational attributes only if authorized. Changes to billing identifiers should be routed through billing master-data controls if OpenMRS is not the billing system of record.
+
+Coordinate the acquisition structure and legacy-NPI facts with T5.
+
+T9: Fix required
+
+Use CAQH or its current portal identity as a credentialing and provider-data source, not as the claims-adjudication system of record. Its provider-facing materials describe information sharing for credentialing, directory management and authorized health-plan use.
+
+Best framing:
+
+payer audit found a directory or credentialing-data mismatch
+CAQH history explains the stale source
+A19 identifies the current organizational NPI
+payer enrollment or roster data must be separately corrected
+OpenMRS is corrected only if it is one of the governed source systems
+
+A profile more than 120 days from confirmation should visibly show a stale or non-current attestation condition. The official provider site emphasizes confirmation within the last 120 days, but the exact reminder cadence in your review was not verified and should not be hard-coded without a source document.
+
+Rename the provider to a surname unique across the entire fixture.
+
+T10: Fix required
+
+Do not let the analyst implement full privileges from Compliance Committee or Credentials Committee minutes alone.
+
+Required document chain:
+
+Credentials Committee recommendation
+MEC action, if required by the bylaws
+Governing-body approval with effective date and privilege scope
+implementation work item
+system update by an authorized role
+
+The trap should be that the valid governing-body approval exists but the implementation ticket remained pending.
+
+Move the 10-business-day implementation SLA into the credentialing or medical-staff governance document. Keep the February 18 decision date and March 4 due date only if the SLA starts on the next business day and the generated calendar uses that counting convention.
+
+Revised priority
+T7: minutes absence cannot be the legal test for privileges.
+T2: duplicate internal records should not also manufacture duplicate federal identities.
+T6/T10: status dimensions and final privileging authority.
+T3: missing-system-data versus proof of no credentialing.
+T4: individual versus organizational NPI semantics.
+T1: registration terminology, suspension timing and conditional reporting.
+T5/T8: acquisition structure, billing continuity and audit snapshot timing.
+T9: CAQH versus payer-enrollment authority.
+Main review improvement
+
+Your trap design is strongest when the agent must reconcile two valid sources with different effective dates. It becomes weaker when the “trap” depends on an incorrect legal authority, ambiguous identity, or a system field that combines unrelated statuses. Keep the reasoning traps, but make the source hierarchy and authority boundaries explicit.
