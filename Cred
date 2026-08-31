@@ -1,0 +1,433 @@
+World Spec Review · Coopa Blue Health
+
+Credentialing task review
+Ten tasks, walked through one at a time: what each one asks, how it resolves, the trap built into it, and what needs confirming or fixing before submission.
+
+What this is
+We're building a set of credentialing tasks for a fictitious healthcare organization called Coopa Blue Health. The purpose is training data: an AI agent is dropped into a realistic workplace, given a realistic mess, and has to reason its way to the professionally correct answer. Everything about the organization is invented, but everything about the rules it operates under — licensure, privileging, payer enrollment, federal identifiers — has to be real, because that's the reasoning being tested.
+
+Coopa Blue is a nonprofit, two-hospital system in upstate New York: Coopa Blue Regional Medical Center (150 beds), Coopa Blue North (65 beds), roughly 1,800 employees and 249 credentialed providers. On 03/03/2025 it acquired Winston Imaging, a three-site outpatient imaging group with 24 providers. The integration was never finished cleanly, and that unfinished integration is where every task comes from.
+
+The agent plays Gordon Sawyer, a Senior Ops Analyst who reconciles credentialing and payer-enrollment discrepancies. He has two systems: OpenMRS, the clinical record system, which he can read and write, and Metabase, an analytics layer he can only read. He also has a document library of 50 files — policies, memos, committee minutes, audit letters, logs — numbered A01 through A50. Every task points him at specific documents and specific system queries.
+
+The world's "now" is 04/13/2026, called the anchor date. Nothing in any document may be dated after it. Every deadline, lapse and interval in these tasks is measured against it.
+
+Each task has exactly one profession-correct answer and a deliberate trap: a plausible wrong path that a capable but careless agent would take. Five of the traps are formally registered against a specific document. The rest are traps of reasoning, described in the task itself.
+
+How to read this
+Appears sound
+No changes needed beyond a confirmation or two.
+Decision needed
+Works as written, but the correct answer may be scoped too narrowly. Your call, or the domain lead's.
+Fix required
+Something is factually wrong, ambiguous, or not reliably derivable. Should change before submission.
+Each task below has three sections: As it stands (the task as currently written, including the arithmetic and the trap), Concerns, and To reconcile — a checklist you can work through. Items marked lead need a domain-lead or your own judgment call; items marked edit are mechanical changes to the workbook.
+
+Where to start
+T1
+Credentialing Compliance Risk
+Decision
+T2
+Duplicate Provider Record
+Decision
+T3
+Missing Credentialing Record
+Decision
+T4
+Attribute Taxonomy Drift
+Sound
+T5
+Cross-System Identifier Linking
+Fix
+T6
+Conflicting Provider Status
+Fix
+T7
+Privileging Attestation Gap
+Fix
+T8
+Winston Integration Deadline Breach
+Sound
+T9
+Stale Payer Enrollment Value
+Fix
+T10
+Unactioned Governance Decision
+Fix
+Three problems that span several tasks
+Fixing each of these once resolves pieces of multiple tasks, so they're worth settling before working task by task.
+
+Who actually grants clinical privileges
+The spec says privileging is "reserved to the CMO/Credentials Committee," and has the Compliance Committee issuing privileging rulings. Both are wrong. Under CMS's State Operations Manual (tag A-0046), only the hospital's governing body has the authority to grant a practitioner privileges; 42 CFR 482.22 puts the medical staff in the recommending role, and New York's own 10 NYCRR 405.2(e)(5)–(6) says the same. The real chain is Credentials Committee recommends → Medical Executive Committee forwards → governing body grants.
+
+Separately, a hospital Compliance Committee runs the corporate compliance program; it does not grant, restrict or reinstate clinical privileges. The spec already knows this — A26, the Credentials Committee Charter, exists specifically to distinguish the two — so this is an internal contradiction as well as a real-world error.
+
+Touches T6, T7, T10 · documents A12, A13, A21, A25, A26
+
+People are identified by surname, and surnames repeat heavily
+The provider roster underneath this world reuses surnames a lot — 5 Whitcombes, 6 Delacroix, 6 Lindqvists, 5 Santoros, 5 Templetons. Several tasks name their subjects by bare surname. Where a task also carries the person's NPI (the unique 10-digit federal provider number), that's fine. Where it doesn't, the task can become ambiguous or, in T7's case, unsolvable as instructed.
+
+The pre-submission checklist item about surnames only covers the 11 named staff characters, which are clean. It never looks at the 249-person provider population.
+
+Touches T1, T6, T7, T8, T9 · document A01
+
+Several correct answers stop at the halfway point
+Three tasks discover a serious compliance failure and then stop at the forward-looking half of the response. In real credentialing work, discovering that someone practiced without a valid license — or with no credentialing file at all — triggers a backward look too: what did they render, what got billed, and what has to be refunded. Under 42 CFR 401.305 an overpayment must be reported and returned within 60 days of identification, with a six-year lookback.
+
+This isn't necessarily wrong — you may have deliberately scoped these tasks to triage only. But if the answer key says "the correct answer is X" and a credentialing professional would say the correct answer is X plus a look-back, that's a gap worth closing on purpose rather than by omission.
+
+Touches T1, T2, T3
+
+Reconcile items
+0 of 31 done
+Reset
+T1
+Credentialing Compliance Risk
+Decision needed
+Documents
+A02 tracking log · A03 policy manual · A04 coverage schedule
+Systems
+Metabase surfaces · OpenMRS updates
+Deliverable
+Prioritized suspension memo
+Registered trap
+Yes — on A02
+As it stands
+
+Five providers are within 30 days of their license lapsing — 30 days being the renewal threshold set by the Credentialing Policy Manual (A03), which also says a lapsed license triggers immediate suspension of clinical privileges. The agent has to rank them by risk and update each one's status in OpenMRS.
+
+The ranking isn't simply by date. Dr. Nicholas Santoro's license already expired, and of the remaining four, only Dr. Katherine Castellano is scheduled to work a shift after her own license runs out.
+
+How it resolves
+
+Santoro's license expired 02/12/2026; the anchor date is 04/13/2026 — that's 60 days lapsed, and 30 days past the policy's suspension trigger. He ranks first regardless of his schedule. Castellano's coverage shift is 04/29/2026 but her license expires 04/22/2026 — she would be working seven days into a lapse, so she ranks second. The other three are all scheduled before their expiration dates, so they rank third through fifth in expiration-date order.
+
+The trap. OpenMRS still displays Santoro's status as "Active" and nothing in the system visibly flags the expired license. An agent that trusts the system's own status field and ranks purely by how soon each person is next on shift will miss him entirely.
+
+Concerns
+
+The correct answer stops at suspension. In New York a 60-day lapse isn't a paperwork delay — it's a period of unlicensed practice. NY licenses are permanent but registration must be current; Education Law §6512 makes unauthorized practice a class E felony, no grace period authorizes practice, and renewing later does not cure the gap retroactively. The professionally complete response also looks backward at what Santoro rendered and billed during those 60 days, and — once his privileges are suspended — files a report to the NY Office of Professional Medical Conduct within 30 days under Public Health Law §2803-e. Stopping at "suspend him going forward" is the single most common professional error in exactly this fact pattern, which makes it excellent trap material if you want it, but only if the answer key contains it.
+Neither provider is pinned to an NPI in the task text. There are five Santoros and five Castellanos in the roster. First names disambiguate them if the generated data honors first names. Santoro's NPI (1232089467) appears in A02's description but not in the task; Castellano has no NPI anywhere in the spec.
+The license dates aren't shaped like New York dates. NY physician registrations expire on the last day of a month and are staggered per licensee. Both 02/12/2026 and 04/22/2026 fall mid-month. Also, NY physicians renew every two years, not three — the roster model underneath uses a uniform three-year cycle for everyone, and 225 of the 254 rows are physicians.
+To reconcile
+
+
+leadDecide whether the answer key should include the claims look-back and the §2803-e report, or whether T1 is deliberately scoped to triage only. If included, extend both the Design Purpose and the Expected Output memo.
+
+editAdd Santoro's and Castellano's NPIs to the task text so neither depends on first-name matching.
+
+editAdd a Key Facts line pinning NY physician registration to a 2-year cycle and non-physicians to 3, so the generated license data comes out NY-correct.
+
+leadOptional: move expiration dates to month-end for NY realism. Note this cascades — the 60-day figure appears in the task, in A02's description, in A02's trap content, and in the canonical values tab.
+T2
+Duplicate Provider Record
+Decision needed
+Documents
+A01 master roster · A05 migration memo · A06 reconciliation SOP
+Systems
+Metabase confirms · OpenMRS updates
+Deliverable
+Reconciliation memo
+Registered trap
+No — reasoning trap only
+As it stands
+
+During the Winston migration, provider records were loaded in two waves — once before the acquisition closed and again in a post-acquisition reconciliation pass. Five people ended up with two records each. The Migration Memo (A05) establishes that the post-acquisition entry is the canonical one; the Reconciliation SOP (A06) says the earlier record gets marked stale rather than deleted, to preserve the audit trail.
+
+How it resolves
+
+Metabase's provider count shows 254 roster entries against 249 real people — 254 − 249 = 5 duplicates. The agent marks those 5 pre-acquisition records stale in OpenMRS with an audit trail, and leaves the 17 providers who merely have a former name on file alone, because a name change is not a duplicate.
+
+The trap. Two ways to fail: guessing a merge rule from what the OpenMRS tooling implies rather than reading the Migration Memo's canonical-record rule, or conflating the 17 former-name providers with actual duplicates and "fixing" records that were never broken.
+
+Concerns
+
+These aren't just duplicate records — they're duplicate NPIs, and that's a federal problem. In the roster model each of the five people holds two different NPIs (Steven Pemberton, for instance, appears as both 1856038958 and 1402560831). An individual provider may only ever have one NPI — 45 CFR 162.408(b), and CMS's own form instructions say so explicitly. The current answer cleans up the internal record and leaves the federal identifier defect standing. The complete response also routes each provider to deactivate the surplus NPI through NPPES (the provider must initiate this, not the analyst — a nice authority boundary), and reconciles PECOS, CAQH, payer rosters and any claims already billed under the wrong number.
+The SOP's rule conflicts with standard practice. A06 prescribes marking stale and "retaining both NPIs on file." Standard health-information practice is to merge to a single surviving record with an audit trail. Leaving two live records is the condition that produces split credentialing files, expirables tracked on only one record, and privilege decisions filed against the wrong identity.
+A credentialing professional treats a second NPI as an identity question first. Obtaining a second NPI is a known way to mask adverse-action or exclusion history, so it's investigated as possible fraud until proven administrative. Nothing in the task acknowledges this.
+A01 gives the answer away. Its description says the five duplicate rows appear "as a separate labeled block," which pre-solves the detection step the task exists to test.
+To reconcile
+
+
+leadDecide whether the answer is internal-hygiene-only or includes NPPES deactivation and downstream reconciliation. If the latter, extend the Design Purpose and Expected Output, and state the authority boundary (analyst routes; provider deactivates).
+
+editReword A06 to merge-and-retain-with-audit-trail, or state explicitly why Coopa Blue's SOP keeps both records live.
+
+editChange A01 so the five duplicate rows are interleaved through the roster rather than sitting in a labeled block.
+
+editConfirm the 17 former-name rows are genuinely distinguishable from duplicates in the generated data — same person, one record, a populated former-name field.
+T3
+Missing Credentialing Record
+Decision needed
+Documents
+A02 tracking log · A07 review kickoff memo
+Systems
+Metabase cross-references · OpenMRS confirms
+Deliverable
+Gap escalation memo
+Registered trap
+No — reasoning trap only
+As it stands
+
+The Integration Review Kickoff Memo (A07) draws a distinction credentialing teams genuinely use: an administrative backlog item is in-process and expected, while a true gap means no record exists at all and is past due. The agent has to apply that test to the population.
+
+How it resolves
+
+The roster holds 249 providers; the 12/2025 Re-Credentialing Tracking Log (A02) has records for 237 of them. 249 − 237 = 12 providers with no credentialing record whatsoever — a true gap by the memo's own test, confirmed by OpenMRS holding no credentialing attributes for any of them either. All 12 get escalated to Alexis Hoyt, Director of Credentialing.
+
+The trap. The 12 could plausibly be read as ordinary backlog — the kind of thing that resolves itself in a queue. An agent that defers action misses that zero-record is categorically different from in-process.
+
+Concerns
+
+The remediation is understated for what's actually been found. Twelve physicians practicing at a New York hospital with no credentialing file is a CMS Conditions of Participation exposure, a 10 NYCRR 405.3/405.4/405.6 exposure, and a patient-safety event — not a queue item. The professionally correct response suspends privileges pending verification and looks at what those 12 have billed, in addition to escalating. Same judgment call as T1: fine if scoped deliberately, a gap if scoped by accident.
+The 249 figure comes from the app, not from either document. Neither A02 nor A07 states the total provider population; Metabase supplies it. That's defensible — the task names Metabase explicitly and record counts are exactly what an analytics layer is for — but it's worth confirming the domain lead accepts app-surfaced population counts as task inputs, since the same pattern appears in T5 and T6.
+The 12 need to be identifiable. The task says "all 12" without naming them. That's fine as long as the generated data makes the set unambiguous by NPI.
+To reconcile
+
+
+leadDecide whether the answer key includes suspension-pending-verification and a billing look-back, or stays at escalation only.
+
+leadConfirm app-surfaced population counts (249 here, 24 in T5, 8 in T6) are acceptable as task inputs without a document also stating them.
+
+editConfirm the 12 zero-record providers are resolvable by NPI in the generated data.
+T4
+Attribute Taxonomy Drift
+Appears sound
+Documents
+A08 field mapping crosswalk · A09 exception list
+Systems
+Metabase query · OpenMRS updates
+Deliverable
+Reconciliation log (XLSX)
+Registered trap
+No — reasoning trap only
+As it stands
+
+Winston's systems called a field NPI_Number; Coopa Blue calls the same field Group_NPI. The Systems Field Mapping Crosswalk (A08) establishes the equivalence. Because a Metabase query written against the new field name only sees providers who have been migrated, the six who still carry the value under the old field name show up as though they aren't enrolled at all.
+
+How it resolves
+
+The Data Standardization Exception List (A09) names exactly 6 of the 24 Winston-origin providers as still keyed on the legacy field — by full name and NPI — and states the remaining 24 − 6 = 18 are already reconciled. The agent adds the Group_NPI attribute for those six only, copying each one's existing NPI_Number value.
+
+The trap. Applying the fix uniformly to all 24 Winston-origin providers looks simpler and safer, but overwrites 18 already-correct values and introduces errors into records that were fine.
+
+Concerns
+
+This one holds up. All six subjects are named with full names and NPIs, all are physicians, every figure (24, 6, 18) is stated in the source document, the arithmetic is consistent, nothing leaks the answer, and adding a data attribute is squarely inside a Senior Ops Analyst's authority.
+
+To reconcile
+
+
+leadOne sanity check with the domain lead: the world stores a group (organizational) NPI as a per-provider attribute in OpenMRS. That's a reasonable EHR modeling choice, but confirm it matches how they'd expect it held, since the same modeling appears in T8 and T9.
+T5
+Cross-System Identifier Linking
+Fix required
+Documents
+A10 delegated agreement · A11 routine payer email
+Systems
+Metabase enrollment report · OpenMRS
+Deliverable
+Escalation memo to Kathleen Hall
+Registered trap
+No — reasoning trap only
+As it stands
+
+Coopa Blue signed a delegated credentialing agreement with Briarcrest Health Partners on 04/15/2019, well before the Winston acquisition. Under it, providers from any newly acquired entity must be submitted for enrollment within a set window of the acquisition closing. The agreement was never amended to name Winston Imaging as a covered acquired entity — so nobody ever submitted them.
+
+How it resolves
+
+Metabase's enrollment report shows all 24 Winston-origin providers missing the Briarcrest enrollment attribute — not one, all of them. The acquisition closed 03/03/2025; the anchor is 04/13/2026, which is 12 months and 41 days later. That pattern is systemic, not a data-entry slip, so the correct answer is to escalate it as a systemic enrollment failure covering the whole population.
+
+The trap. Jessica Kaufman's email (A11) is the freshest-looking correspondence in the file and looks like it might be a status update — it's actually a routine rate-schedule notice with nothing to do with enrollment. The agent either waits for a signal that never comes, or finds one missing attribute and treats it as an isolated fix.
+
+Concerns
+
+Thirteen months of silence needs an in-world explanation. Twenty-four providers missing from a payer's roster normally surfaces within one or two claim cycles as denials — accounts-receivable dashboards make it very hard to miss for over a year. It's only credible if the claims never failed, which means Winston kept billing under its own surviving legacy group NPI. This world has exactly that — it's the entire premise of T8 — but nothing in T5 says so, so a reviewer reading T5 alone will ask the obvious question.
+If that's the mechanism, the memo names the wrong exposure. With claims still paying under the legacy identifier, the harm isn't lost revenue. It's provider-directory accuracy, network-adequacy compliance, and a delegation-oversight failure — the kind of thing that draws a payer corrective action plan and, at the extreme, de-delegation. The escalation memo should say that.
+A load-bearing world fact is unstated: how was the acquisition structured? A legacy tax ID and group NPI survive an equity deal but generally not an asset deal. Whether Winston could still have been billing under its own identifier for 13 months depends entirely on which this was, and the spec never says.
+To reconcile
+
+
+leadSettle whether the Winston acquisition was an equity or asset deal, then state it in Key Facts. Everything below depends on it.
+
+editAdd a line (Key Facts, A10 or A15) saying Winston continued billing under its legacy group NPI, which is why the roster gap stayed dormant. This ties T5 and T8 together instead of leaving them as unrelated coincidences.
+
+editUpdate the Expected Output so the memo characterizes the exposure as directory accuracy, network adequacy and delegation oversight rather than implying revenue loss.
+T6
+Conflicting Provider Status
+Fix required
+Documents
+A03 policy manual · A12 committee roster change log
+Systems
+Metabase surfaces and re-verifies · OpenMRS updates
+Deliverable
+Status-reconciliation memo
+Registered trap
+Yes — on A12
+As it stands
+
+Eight providers each carry two conflicting status rows in OpenMRS. The Credentialing Policy Manual (A03) says the most recently dated entry governs — unless superseded by a documented governance action. That exception is the whole task.
+
+How it resolves
+
+Recency correctly resolves seven of the eight. For the eighth, the committee log (A12) records a ruling on 04/05/2026 reinstating a provider (NPI 1503062761) to Active — 8 days after her most recent OpenMRS timestamp of Suspended on 03/28/2026, and never entered into the system. So the real answer is 7 by recency, plus 1 by governance override.
+
+The trap. Recency works on 7 of 8 cases, which makes it look like a completely reliable universal rule. An agent that applies it uniformly gets one provider wrong and reports her as Suspended when she has in fact been reinstated.
+
+Concerns
+
+The subject is a pharmacist being treated as a privileged clinician. NPI 1503062761 is a PharmD, taxonomy Pharmacist–Oncology, in the roster model. The governance documents surrounding this world (A13 privileging bylaws, A14 Credentials Committee minutes) are medical-staff instruments; hospital pharmacists don't run through the medical-staff privileging cycle. It's defensible if you mean clinical-pharmacist credentialing, but the spec never says that, and she also appears in T7's privileging list where it definitely doesn't fit.
+Two different people share the surname Delacroix across T6 and T7. T6's subject is Stephanie Delacroix (1503062761); T7's is Nicholas Delacroix, MD (1974030337). Both tasks are about credentialing status, they sit next to each other, and only one carries an NPI — any reader assumes they're the same person. This is the same collision class already fixed once elsewhere in the spec.
+The Compliance Committee is issuing status rulings. Softer than the T10 version of this problem — a roster or employment status arguably is within a compliance body's remit — but worth settling alongside the cross-cutting committee question above.
+To reconcile
+
+
+editSwap T6's subject to a physician, or scope her explicitly as clinical-pharmacist credentialing and keep the medical-staff artifacts out of her chain.
+
+editOnce swapped, make sure the new subject's surname doesn't appear anywhere in T7's candidate list.
+
+leadConfirm which body should be issuing status overrides, consistent with the committee-authority fix.
+
+editConfirm all 8 conflicting-status providers are resolvable by NPI in the generated data.
+T7
+Privileging Attestation Gap
+Fix required
+Documents
+A01 master roster · A13 privileging bylaws · A14 committee minutes
+Systems
+Metabase cross-tab · OpenMRS flags
+Deliverable
+Flag memo to Daniel Gould (CMO)
+Registered trap
+Yes — on A14
+As it stands
+
+This is the most conceptually interesting task in the set. Having an active license is not the same as being privileged to practice at the hospital — privileges additionally require a current attestation from the most recent Credentials Committee cycle. The agent cross-tabs everyone with an active license against the Q1 2026 privileging minutes and finds who's missing.
+
+How it resolves
+
+The naive cross-tab surfaces 7 candidates by current name. But one of them, Dr. Janet Whitcombe (1132083719), was formerly named Elizabeth Constantine — and that's the name the minutes list her under. She is attested. So the true gap is 6, not 7. The agent flags those six to the CMO and takes no privileging action itself.
+
+The trap. Two layers. Six of the seven genuinely do have a clean license and no matching minutes entry, so the seventh doesn't stand out; and Whitcombe's former name isn't visible from her current record without checking the roster. There's also an authority trap — an agent that tries to clear the six itself has exceeded what a Senior Ops Analyst may do.
+
+Concerns
+
+The bylaws misstate who grants privileges. A13 says granting or restoring privileges is "reserved to the CMO/Credentials Committee." Under CMS guidance only the governing body may grant privileges; 42 CFR 482.22 makes the medical staff a recommending body; Joint Commission MS.06.01.07 permits delegation only to a committee of the governing body; and New York's 10 NYCRR 405.2 says the same. This sits in a bylaws excerpt — the one document type a credentialing reviewer reads most closely — and it's the authority fork the task turns on.
+The correct answer may not be derivable as instructed. All seven candidates are identified by bare surname, and the roster underneath has 5 Whitcombes, 6 Delacroix, 6 Lindqvists and 9 Abernathy-related rows. Worse, two other former-name rows use surnames already on the candidate list: Shirley Abernathy's former name is Anna Lindqvist, and Dennis Lindqvist's former name is Robert Fenwick. An agent following the task's own prescribed method — check each unmatched name against the roster's former-name field — can legitimately conclude 5, or 4. The trap works when you reason by NPI; the procedure the task actually instructs is name-based. This is the one I'd fix before uploading.
+Delacroix collides with T6. See T6 above — different person, same surname, adjacent task.
+The OpenMRS action needs a sanity check. Setting a "Privileging Review Pending" attribute on the six was added late, to satisfy a rule requiring every task to use both systems. It reads as within an analyst's authority — flagging, not granting — but it's a change worth a second opinion.
+To reconcile
+
+
+editRewrite the authority language in A13 and in the task: Credentials Committee recommends → MEC forwards → governing body grants. Gould stays the correct escalation target for the analyst.
+
+editPin all seven candidates by NPI in both the task and A14.
+
+editConstrain A01's 17 former-name rows so none reuses a surname that appears in any task's named population — otherwise the generated data can manufacture extra former-name matches.
+
+leadConfirm "Privileging Review Pending" is an attribute a Senior Ops Analyst may set without exceeding authority.
+T8
+Winston Integration Deadline Breach
+Appears sound
+Documents
+A15 integration plan · A16 IT audit log · A17 legacy systems directory
+Systems
+Metabase live report · OpenMRS corrections
+Deliverable
+IT remediation escalation memo
+Registered trap
+Yes — on A16
+As it stands
+
+The Acquisition Integration Plan (A15) gave the organization 12 months from closing to retire Winston's legacy group NPI from its billing systems. That deadline has passed and the work isn't finished — but the audit that reports it is itself slightly out of date.
+
+How it resolves
+
+Deadline: 03/03/2025 close + 12 months = 03/03/2026. Anchor is 04/13/2026, so the breach is 41 days old. The IT audit (A16), run 04/06/2026, flags 5 billing records still tagged to the legacy identifier. But the Legacy Systems Directory (A17) shows Patrick Nakamura's record was corrected 04/02/2026 — four days before the audit ran. His flag is stale. 5 − 1 = 4 genuinely unmigrated records to escalate and correct.
+
+The trap. The audit log lists Nakamura alongside the other four with no visible distinction, and it's the most recent and most authoritative-looking system output in the file. An agent that treats an automated audit as automatically current escalates all five.
+
+Concerns
+
+Structurally the strongest task in the set. All five providers are named with NPIs in the source document, the arithmetic is verified, the "an audit can be stale" judgment is realistic and distinct from every other task's fork, and the remediation sits squarely inside the analyst's authority.
+
+One dependency: this task's premise — that the legacy group NPI is still live in billing systems — is exactly the fact T5 needs stated to explain its own 13-month silence. Handle them together.
+
+To reconcile
+
+
+editConfirm the five audit-flagged NPIs survive into the generated A16 file, not just the surnames — there are 5 Templetons and 4 Nakamuras in the roster.
+
+editCoordinate with the T5 fix so both tasks describe the legacy-billing situation consistently.
+T9
+Stale Payer Enrollment Value
+Fix required
+Documents
+A18 audit finding letter · A19 enrollment reference sheet · A20 CAQH update history
+Systems
+Metabase confirms isolation · OpenMRS corrects
+Deliverable
+Correction memo
+Registered trap
+Yes — on A20
+As it stands
+
+A payer audit letter from Dennis O'Shields (A18) flags that one provider's group NPI on file doesn't match Coopa Blue's current organizational identifier — but deliberately doesn't say what the right value is. The agent has to go find it.
+
+How it resolves
+
+Dr. Melissa Prentiss's CAQH profile history (A20) shows exactly one entry, dated 02/27/2025 — four days before the acquisition closed — still carrying Winston's legacy group NPI 1342281246, and nothing since. That's 410 days stale at the anchor. The correct current value, 1384970290, lives only in the Enrollment Reference Sheet (A19). The agent corrects her attribute in OpenMRS and confirms via Metabase that no one else is affected — unlike T5, this one really is isolated.
+
+The trap. The audit letter is the most recent and most official-looking document in the chain, so it reads as though it should contain the fix. It doesn't. An agent that expects the answer in the letter reports the mismatch as unresolvable.
+
+Concerns
+
+CAQH can't carry the harm this task assigns it. CAQH is a credentialing and directory data repository — it does not feed claims adjudication. The billing entity that actually controls payment lives in NPPES, PECOS and the payer's own enrollment record. So a stale group NPI sitting in CAQH produces directory and credentialing problems, not the enrollment/billing mismatch the audit letter describes.
+410 days of silence isn't plausible as written. CAQH requires re-attestation every 120 days. A profile untouched since 02/27/2025 would have sat in "Expired Attestation" status across roughly three missed cycles, generating automated notices at 15, 10 and 5 days before each expiry and again at 1, 14, 28 and 42 days after. Presenting the staleness as invisible is the weak point; showing it as an expired profile actually strengthens the world, because it explains how the payer's audit caught the problem in the first place.
+A surname collision I introduced. This provider was renamed from Melissa Constantine to Melissa Prentiss earlier, to clear a clash with Whitcombe's former name in T7. But the roster model already contains a different Prentiss (1024856072), who happens to be one of T3's twelve missing-record providers.
+To reconcile
+
+
+leadChoose the frame: either recast the harm as directory and roster accuracy (keeps A20 as-is), or move the stale value into the payer's own enrollment record and repurpose A20. The first is less work and professionally clean.
+
+editHave A20 show the profile in Expired Attestation status with missed re-attestation cycles, and let that be why the audit caught it.
+
+editGive this provider a surname used nowhere else, and update the roster model too, so regenerating data doesn't reintroduce the original clash.
+T10
+Unactioned Governance Decision
+Fix required
+Documents
+A21 committee minutes · A22 action follow-up log
+Systems
+Metabase checks for others · OpenMRS updates
+Deliverable
+Implementation memo
+Registered trap
+No — reasoning trap only
+As it stands
+
+A committee already made a decision — lifting a restriction on Dr. Carol Renauld and granting her conditional full privileges — and nobody ever entered it into the system. The agent's job is to implement an existing decision, not to make one.
+
+How it resolves
+
+The ruling is dated 02/18/2026; under the Committee Charter's 10-business-day SLA it was due 03/04/2026. The follow-up log (A22) was last updated 04/06/2026 and still shows it "Pending Implementation" — 33 days overdue at that point, and 40 days overdue by the anchor. OpenMRS still shows her old restricted status. The agent updates it to match the ruling.
+
+The trap. Nothing in OpenMRS looks recently changed or wrong, so the record reads as settled and correct. An agent that treats the system as authoritative takes no action and never discovers that a governance decision superseded it 40 days ago.
+
+Concerns
+
+The wrong committee is granting privileges. A21 has the Compliance Committee granting conditional full privileges. A hospital compliance committee runs the corporate compliance program — the OIG seven-element structure that A25's own source document is modeled on. It does not grant, restrict or restore clinical privileges; that's the Credentials Committee → MEC → governing body chain. The spec already draws this distinction itself in A26, the Credentials Committee Charter, so this contradicts the world's own documents as well as real practice.
+The SLA belongs to whichever committee ends up owning the ruling. The 10-business-day implementation SLA currently lives in the Compliance Committee Charter (A25) and is restated in A22. If the ruling moves to the Credentials Committee, the SLA has to move with it — and it's a registered canonical value, so both places need updating together.
+The rest holds up well. The arithmetic is right, the "implement, don't decide" authority framing is correct for a Senior Ops Analyst, and an unimplemented governance ruling is a genuinely realistic failure mode.
+To reconcile
+
+
+leadDecide the fix direction: either move the privileging ruling to the Credentials Committee with governing-body approval, or change what the Compliance Committee ruled on to something inside its actual remit.
+
+editMove the 10-business-day SLA to the correct charter and update both A22 and the canonical values entry to match.
+
+editRe-check A12 and T6 at the same time — the same committee lives there too.
+A note on what I can and can't decide
+Everything marked edit is mechanical — wording, identifiers, cross-references — and I can make those changes and re-run the validation script in one pass. Everything marked lead changes what "correct" means for a task, and that belongs to you and the domain lead rather than to me; the world-building process is explicit that the expert owns correctness.
+
+If you want a starting point: T7's second concern is the one I'd resolve before uploading anything, because it's the only case where a careful, competent agent can reach a defensibly different number than the answer key says is right. The committee-authority question is second, since one decision there settles pieces of three tasks at once.
