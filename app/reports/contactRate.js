@@ -14,6 +14,8 @@
   const SHOW_TIMESTAMPS = false;
   const CHARS_PER_TOKEN = 3.5;
 
+  const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
   /* ---------- ZIP reading (xlsx is a zip of xml) ---------- */
 
   function readU16(b, o) { return b[o] | (b[o + 1] << 8); }
@@ -346,17 +348,85 @@
     return groups;
   }
 
+  //##> Converts a YYYY-MM month value into the first and last calendar day of
+  //##> that month. Day zero of the following month is the last day of this one,
+  //##> which handles leap years without a lookup table.
+  function monthToRange(value) {
+    const m = String(value || "").match(/^(\d{4})-(\d{2})$/);
+    if (!m) return null;
+    const year = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    if (month < 1 || month > 12) return null;
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const pad = (n) => String(n).padStart(2, "0");
+    return {
+      from: year + "-" + pad(month) + "-01",
+      to: year + "-" + pad(month) + "-" + pad(lastDay),
+      label: MONTH_NAMES[month - 1] + " " + year
+    };
+  }
+
+  function previousMonthValue() {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+
   /* ---------- Config panel ---------- */
 
   function buildConfig(container, helpers) {
     const el = helpers.el;
     const saved = helpers.savedConfig || null;
+    const dateControl = helpers.dateControl || null;
 
     let loadedFiles = saved && Array.isArray(saved.loadedFiles) ? saved.loadedFiles.slice() : [];
     let callsPerTopic = saved && saved.callsPerTopic ? saved.callsPerTopic : DEFAULT_CALLS_PER_TOPIC;
     let takeAll = !!(saved && saved.takeAll);
+    let reportMonth = saved && saved.reportMonth ? saved.reportMonth : previousMonthValue();
     let warnings = [];
     let busy = false;
+
+    /* ---- Report month ---- */
+
+    container.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Report Month"));
+
+    const monthRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;" });
+    const monthInput = el("input", { type: "month", value: reportMonth, style: "padding:7px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;" });
+    const monthNote = el("div", { style: "font-size:11px;color:#6b7280;" }, "");
+    monthRow.appendChild(monthInput);
+    monthRow.appendChild(monthNote);
+    container.appendChild(monthRow);
+
+    if (!dateControl) {
+      container.appendChild(el("div", { style: "font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-bottom:10px;" },
+        "This report cannot set the date range automatically on this version of the hub. Set the From and To dates below by hand."));
+    }
+
+    //##> Pushes the selected month onto the hub's own From and To inputs. The hub
+    //##> stays the single source of truth for the date range; this report only
+    //##> writes to it.
+    function pushMonth() {
+      const range = monthToRange(monthInput.value);
+      if (!range) {
+        monthNote.textContent = "Pick a month to set the date range.";
+        monthNote.style.color = "#b45309";
+        return;
+      }
+      reportMonth = monthInput.value;
+      if (dateControl) {
+        dateControl.setRange(range.from, range.to);
+        monthNote.textContent = "Date range set to " + range.from + " through " + range.to + ".";
+        monthNote.style.color = "#15803d";
+      } else {
+        monthNote.textContent = "Set the range below to " + range.from + " through " + range.to + ".";
+        monthNote.style.color = "#b45309";
+      }
+    }
+
+    monthInput.onchange = pushMonth;
+    monthInput.oninput = pushMonth;
+
+    /* ---- Workbooks ---- */
 
     container.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Contact Rate Workbooks"));
 
@@ -422,6 +492,7 @@
       countInput.disabled = on || takeAll;
       allBtn.disabled = on;
       clearBtn.disabled = on;
+      monthInput.disabled = on;
     }
 
     function renderFileList() {
@@ -434,14 +505,14 @@
         row.appendChild(el("div", { style: "flex:1;color:#1d4ed8;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, entry.name));
         row.appendChild(el("div", { style: "color:#6b7280;flex-shrink:0;" }, topics + " topic" + (topics === 1 ? "" : "s")));
         const removeBtn = el("span", { style: "cursor:pointer;color:#6b7280;font-size:14px;line-height:1;flex-shrink:0;" }, "\u2715");
-        ((key) => {
+        ((key, name) => {
           removeBtn.onclick = () => {
             if (busy) return;
             loadedFiles = loadedFiles.filter((f) => f.key !== key);
-            warnings = warnings.filter((w) => w.indexOf(key.split("::")[0] + " ->") !== 0);
+            warnings = warnings.filter((w) => w.indexOf(name + " ->") !== 0);
             render();
           };
-        })(entry.key);
+        })(entry.key, entry.name);
         row.appendChild(removeBtn);
         fileListWrap.appendChild(row);
       }
@@ -579,12 +650,14 @@
 
     paintAll();
     render();
+    pushMonth();
 
     return {
       getConfig() {
         return {
           callsPerTopic,
           takeAll,
+          reportMonth,
           loadedFiles,
           groups: applyCap(loadedFiles, callsPerTopic, takeAll)
         };
