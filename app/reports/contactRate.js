@@ -151,7 +151,10 @@
     return String(name || "").replace(/[\\/:*?"<>|]/g, "").trim() || "unnamed";
   }
 
-  async function parseWorkbook(file, callsPerTopic, takeAll) {
+  //##> Workbooks are read once and every UCID on each sheet is kept. The calls
+  //##> per topic cap is applied later, at preview and run time, so changing the
+  //##> number never requires re-reading the files.
+  async function parseWorkbook(file) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const entries = listZipEntries(bytes);
     const byName = new Map(entries.map((e) => [e.name, e]));
@@ -216,7 +219,6 @@
       const malformed = [];
 
       for (let ri = 1; ri < rows.length; ri++) {
-        if (!takeAll && ucids.length >= callsPerTopic) break;
         const rowNode = rows[ri];
         if (rowNumber(rowNode.getAttribute("r")) === 1) continue;
 
@@ -331,38 +333,71 @@
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes());
   }
 
+  //##> Applies the calls per topic cap to the stored full UCID lists. Called at
+  //##> preview time and again at run time so the live number is always honored.
+  function applyCap(loadedFiles, callsPerTopic, takeAll) {
+    const groups = [];
+    for (const entry of loadedFiles) {
+      for (const group of entry.groups) {
+        const ucids = takeAll ? group.ucids.slice() : group.ucids.slice(0, callsPerTopic);
+        if (ucids.length) groups.push({ key: group.key, sourceFile: group.sourceFile, topic: group.topic, ucids });
+      }
+    }
+    return groups;
+  }
+
   /* ---------- Config panel ---------- */
 
   function buildConfig(container, helpers) {
     const el = helpers.el;
     const saved = helpers.savedConfig || null;
 
-    let parsedGroups = saved && Array.isArray(saved.groups) ? saved.groups.slice() : [];
+    let loadedFiles = saved && Array.isArray(saved.loadedFiles) ? saved.loadedFiles.slice() : [];
     let callsPerTopic = saved && saved.callsPerTopic ? saved.callsPerTopic : DEFAULT_CALLS_PER_TOPIC;
     let takeAll = !!(saved && saved.takeAll);
+    let warnings = [];
+    let busy = false;
 
     container.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Contact Rate Workbooks"));
 
-    const dropZone = el("div", { style: "border:2px dashed #cbd5e1;border-radius:10px;padding:18px;text-align:center;background:#fff;cursor:pointer;margin-bottom:10px;" });
-    dropZone.appendChild(el("div", { style: "font-size:13px;color:#374151;font-weight:600;margin-bottom:4px;" }, "Drop Contact Rate files here, or click to browse"));
-    dropZone.appendChild(el("div", { style: "font-size:11px;color:#6b7280;" }, "Every sheet with a UCID header is treated as a topic."));
+    const dropZone = el("div", { style: "border:2px dashed #cbd5e1;border-radius:10px;padding:18px;text-align:center;background:#fff;cursor:pointer;margin-bottom:10px;transition:border-color .15s,background .15s;" });
+    const dropTitle = el("div", { style: "font-size:13px;color:#374151;font-weight:600;margin-bottom:4px;" }, "Drop Contact Rate files here, or click to browse");
+    const dropHint = el("div", { style: "font-size:11px;color:#6b7280;" }, "Files add to the list. Dropping the same file twice is ignored.");
+    dropZone.appendChild(dropTitle);
+    dropZone.appendChild(dropHint);
+
+    //##> Determinate progress for the read phase. Workbook parsing is synchronous
+    //##> enough per file that a file-by-file counter reads better than a spinner.
+    const loadWrap = el("div", { style: "display:none;margin-top:10px;" });
+    const loadLabel = el("div", { style: "font-size:11px;color:#1d4ed8;font-weight:600;margin-bottom:5px;" }, "Reading...");
+    const loadBarOuter = el("div", { style: "height:6px;background:#e5e7eb;border-radius:999px;overflow:hidden;" });
+    const loadBarInner = el("div", { style: "height:100%;width:0%;background:linear-gradient(90deg,#38bdf8,#a78bfa);transition:width .2s;" });
+    loadBarOuter.appendChild(loadBarInner);
+    loadWrap.appendChild(loadLabel);
+    loadWrap.appendChild(loadBarOuter);
+    dropZone.appendChild(loadWrap);
 
     const fileInput = el("input", { type: "file", accept: ".xlsx,.xlsm", multiple: true, style: "display:none;" });
     container.appendChild(dropZone);
     container.appendChild(fileInput);
 
-    const countRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;" });
+    const countRow = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;" });
     countRow.appendChild(el("span", { style: "font-size:12px;color:#374151;font-weight:600;" }, "Calls per topic:"));
     const countInput = el("input", { type: "number", min: 1, max: 10000, value: String(callsPerTopic), style: "width:80px;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
     const allBtn = el("button", { style: "padding:5px 12px;border-radius:7px;border:1px solid #d1d5db;background:#f9fafb;font-size:12px;cursor:pointer;" }, "All");
+    const allNote = el("span", { style: "font-size:11px;color:#b45309;font-weight:600;display:none;" }, "Taking every UCID on every sheet.");
+    const clearBtn = el("button", { style: "margin-left:auto;padding:5px 12px;border-radius:7px;border:1px solid #ef4444;background:#fff;color:#ef4444;font-size:12px;cursor:pointer;display:none;" }, "Clear All");
     countRow.appendChild(countInput);
     countRow.appendChild(allBtn);
-    const allNote = el("span", { style: "font-size:11px;color:#b45309;font-weight:600;display:none;" }, "Taking every UCID on every sheet.");
     countRow.appendChild(allNote);
+    countRow.appendChild(clearBtn);
     container.appendChild(countRow);
 
     const summary = el("div", { style: "font-size:12px;color:#6b7280;margin-bottom:8px;" }, "No files loaded.");
     container.appendChild(summary);
+
+    const fileListWrap = el("div", { style: "display:none;margin-bottom:8px;" });
+    container.appendChild(fileListWrap);
 
     const previewWrap = el("div", { style: "display:none;max-height:220px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;background:#fff;margin-bottom:8px;" });
     container.appendChild(previewWrap);
@@ -376,18 +411,56 @@
       countInput.disabled = takeAll;
       allNote.style.display = takeAll ? "" : "none";
     }
-    paintAll();
 
-    function renderPreview(warnings) {
+    function setBusy(on) {
+      busy = on;
+      loadWrap.style.display = on ? "" : "none";
+      dropZone.style.cursor = on ? "default" : "pointer";
+      dropZone.style.opacity = on ? "0.75" : "1";
+      dropTitle.style.display = on ? "none" : "";
+      dropHint.style.display = on ? "none" : "";
+      countInput.disabled = on || takeAll;
+      allBtn.disabled = on;
+      clearBtn.disabled = on;
+    }
+
+    function renderFileList() {
+      fileListWrap.innerHTML = "";
+      if (!loadedFiles.length) { fileListWrap.style.display = "none"; return; }
+      fileListWrap.style.display = "";
+      for (const entry of loadedFiles) {
+        const topics = entry.groups.length;
+        const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:5px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;margin-bottom:4px;font-size:12px;" });
+        row.appendChild(el("div", { style: "flex:1;color:#1d4ed8;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, entry.name));
+        row.appendChild(el("div", { style: "color:#6b7280;flex-shrink:0;" }, topics + " topic" + (topics === 1 ? "" : "s")));
+        const removeBtn = el("span", { style: "cursor:pointer;color:#6b7280;font-size:14px;line-height:1;flex-shrink:0;" }, "\u2715");
+        ((key) => {
+          removeBtn.onclick = () => {
+            if (busy) return;
+            loadedFiles = loadedFiles.filter((f) => f.key !== key);
+            warnings = warnings.filter((w) => w.indexOf(key.split("::")[0] + " ->") !== 0);
+            render();
+          };
+        })(entry.key);
+        row.appendChild(removeBtn);
+        fileListWrap.appendChild(row);
+      }
+    }
+
+    function render() {
+      renderFileList();
       previewWrap.innerHTML = "";
-      if (!parsedGroups.length) {
+      clearBtn.style.display = loadedFiles.length ? "" : "none";
+
+      const groups = applyCap(loadedFiles, callsPerTopic, takeAll);
+      if (!groups.length) {
         previewWrap.style.display = "none";
-        summary.textContent = "No files loaded.";
+        summary.textContent = loadedFiles.length ? "No topics found in the loaded files." : "No files loaded.";
       } else {
         previewWrap.style.display = "";
         const unique = new Set();
         let total = 0;
-        for (const g of parsedGroups) {
+        for (const g of groups) {
           total += g.ucids.length;
           for (const u of g.ucids) unique.add(u);
           const row = el("div", { style: "display:flex;justify-content:space-between;gap:10px;padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;" });
@@ -395,9 +468,10 @@
           row.appendChild(el("div", { style: "color:#6b7280;flex-shrink:0;" }, g.ucids.length + " calls"));
           previewWrap.appendChild(row);
         }
-        summary.textContent = parsedGroups.length + " topic(s), " + total + " call slot(s), " + unique.size + " unique UCID(s) to fetch.";
+        summary.textContent = loadedFiles.length + " file(s), " + groups.length + " topic(s), " + total + " call slot(s), " + unique.size + " unique UCID(s) to fetch.";
       }
-      if (warnings && warnings.length) {
+
+      if (warnings.length) {
         warningWrap.style.display = "";
         warningWrap.textContent = warnings.join("\n");
       } else {
@@ -405,47 +479,115 @@
       }
     }
 
-    async function ingest(fileList) {
-      const files = Array.from(fileList || []).filter((f) => /\.xlsm?$|\.xlsx$/i.test(f.name));
-      if (!files.length) { alert("Please choose .xlsx workbooks."); return; }
-      summary.textContent = "Reading workbooks...";
-      parsedGroups = [];
-      const warnings = [];
-      for (const file of files) {
-        try {
-          const result = await parseWorkbook(file, callsPerTopic, takeAll);
-          parsedGroups.push(...result.groups);
-          warnings.push(...result.warnings.map((w) => file.name + " -> " + w));
-        } catch (e) {
-          warnings.push(file.name + " -> could not be read: " + (e && e.message ? e.message : e));
-        }
-      }
-      if (!parsedGroups.length) warnings.push("No sheets with a UCID header were found.");
-      renderPreview(warnings);
+    //##> Files are keyed by name, size and last modified date so the same workbook
+    //##> dropped twice is ignored, but a re-saved version of it is treated as new.
+    function fileKey(file) {
+      return file.name + "::" + file.size + "::" + (file.lastModified || 0);
     }
 
-    dropZone.onclick = () => fileInput.click();
-    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.style.borderColor = "#3b82f6"; dropZone.style.background = "#eff6ff"; };
+    async function ingest(fileList) {
+      if (busy) return;
+      const all = Array.from(fileList || []);
+      const candidates = all.filter((f) => /\.xlsx$|\.xlsm$/i.test(f.name));
+      if (!candidates.length) {
+        alert("Please choose .xlsx workbooks.");
+        return;
+      }
+
+      const existingKeys = new Set(loadedFiles.map((f) => f.key));
+      const fresh = [];
+      let duplicates = 0;
+      for (const file of candidates) {
+        const key = fileKey(file);
+        if (existingKeys.has(key)) { duplicates++; continue; }
+        existingKeys.add(key);
+        fresh.push({ file, key });
+      }
+
+      if (!fresh.length) {
+        summary.textContent = duplicates + " file(s) already loaded. Nothing added.";
+        setTimeout(render, 1600);
+        return;
+      }
+
+      setBusy(true);
+      const newWarnings = [];
+
+      for (let i = 0; i < fresh.length; i++) {
+        const { file, key } = fresh[i];
+        loadLabel.textContent = "Reading " + (i + 1) + " of " + fresh.length + ": " + file.name;
+        loadBarInner.style.width = Math.round((i / fresh.length) * 100) + "%";
+        await new Promise((r) => setTimeout(r, 0));
+
+        try {
+          const result = await parseWorkbook(file);
+          if (!result.groups.length) {
+            newWarnings.push(file.name + " -> no sheets with a UCID header were found.");
+          }
+          loadedFiles.push({ key, name: file.name, groups: result.groups });
+          newWarnings.push(...result.warnings.map((w) => file.name + " -> " + w));
+        } catch (e) {
+          newWarnings.push(file.name + " -> could not be read: " + (e && e.message ? e.message : e));
+        }
+      }
+
+      loadBarInner.style.width = "100%";
+      loadLabel.textContent = "Finishing up...";
+      await new Promise((r) => setTimeout(r, 120));
+
+      warnings = warnings.concat(newWarnings);
+      if (duplicates) warnings.push(duplicates + " file(s) were already loaded and were skipped.");
+
+      setBusy(false);
+      loadBarInner.style.width = "0%";
+      render();
+    }
+
+    dropZone.onclick = () => { if (!busy) fileInput.click(); };
+    dropZone.ondragover = (e) => {
+      e.preventDefault();
+      if (busy) return;
+      dropZone.style.borderColor = "#3b82f6";
+      dropZone.style.background = "#eff6ff";
+    };
     dropZone.ondragleave = () => { dropZone.style.borderColor = "#cbd5e1"; dropZone.style.background = "#fff"; };
     dropZone.ondrop = (e) => {
       e.preventDefault();
       dropZone.style.borderColor = "#cbd5e1";
       dropZone.style.background = "#fff";
+      if (busy) return;
       ingest(e.dataTransfer.files);
     };
     fileInput.onchange = () => { ingest(fileInput.files); fileInput.value = ""; };
 
     countInput.oninput = () => {
       const v = parseInt(countInput.value, 10);
-      if (!isNaN(v) && v > 0) { callsPerTopic = v; takeAll = false; paintAll(); }
+      if (!isNaN(v) && v > 0) { callsPerTopic = v; takeAll = false; paintAll(); render(); }
     };
-    allBtn.onclick = () => { takeAll = !takeAll; paintAll(); };
+    allBtn.onclick = () => { if (busy) return; takeAll = !takeAll; paintAll(); render(); };
+    clearBtn.onclick = () => {
+      if (busy) return;
+      if (loadedFiles.length && !confirm("Clear all loaded workbooks?")) return;
+      loadedFiles = [];
+      warnings = [];
+      callsPerTopic = DEFAULT_CALLS_PER_TOPIC;
+      takeAll = false;
+      countInput.value = String(DEFAULT_CALLS_PER_TOPIC);
+      paintAll();
+      render();
+    };
 
-    if (parsedGroups.length) renderPreview([]);
+    paintAll();
+    render();
 
     return {
       getConfig() {
-        return { callsPerTopic, takeAll, groups: parsedGroups };
+        return {
+          callsPerTopic,
+          takeAll,
+          loadedFiles,
+          groups: applyCap(loadedFiles, callsPerTopic, takeAll)
+        };
       }
     };
   }
