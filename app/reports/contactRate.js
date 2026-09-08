@@ -441,7 +441,7 @@
       const tail = range.partial ? " (month to date)" : "";
       if (dateControl) {
         dateControl.setRange(range.from, range.to);
-        monthNote.textContent = "Date range set to " + range.from + " through " + range.to + tail + ".";
+        monthNote.textContent = "Select the month for your Contact Rate Analysis Report.";
         monthNote.style.color = "#15803d";
       } else {
         monthNote.textContent = "Set the range below to " + range.from + " through " + range.to + tail + ".";
