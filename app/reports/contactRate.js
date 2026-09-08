@@ -694,7 +694,7 @@
         const legs = legsByUcid.get(ucid);
         if (!legs || !legs.length) continue;
         legs.forEach((leg, index) => {
-          const label = index === 0 ? ucid : ucid + "_" + (index + 1);
+          const label = "UCID: " + ucid + " (Call " + (index + 1) + " of " + legs.length + ")";
           const record = textBySmid.get(leg.sourceMediaId);
           let body = "";
           if (!record) {
