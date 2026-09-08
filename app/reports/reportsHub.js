@@ -1,4 +1,4 @@
-//[Last Update: 8/17/26 2:14 PM - reportsHub - custom load + direct grid]
+//[Last Update: 9/8/26 5:14 PM - reportsHub - custom load + direct grid]
 //##> Thin reports host. Loads the catalog, lets the user pick a report, collects
 //##> the date range plus any report-specific config, then calls report.run(ctx).
 //##> The hub owns no search/transcript/export logic; it wires shared services into
@@ -331,6 +331,7 @@
         const toInput = el("input", { type: "date", style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;" });
         toInput.valueAsDate = today; toWrap.appendChild(toInput);
         dateRow.appendChild(fromWrap); dateRow.appendChild(toWrap);
+        card.appendChild(dateRow);
         //##> Lets a report drive the hub's date range instead of the user setting
         //##> it by hand. The hub still owns the inputs and remains the single
         //##> source of truth; reports only write to them.
