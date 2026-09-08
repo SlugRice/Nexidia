@@ -28,6 +28,13 @@
       "id": "nyceDaily",
       "label": "NYCE Daily",
       "file": "app/reports/nyceDaily.js",
-      "description": "Pulls NYCE OGA provider calls by node and date, trims by call length, and takes a random daily sample with batched transcript export." }
+      "description": "Pulls NYCE OGA provider calls by node and date, trims by call length, and takes a random daily sample with batched transcript export." 
+    },
+    { 
+      "id": "contactRate",
+      "label": "Contact Rate Analysis",
+      "file": "app/reports/contactRate.js",
+      "description": "Takes all the Excel files for the Contact Rate Analysis and creates batched transcripts ready for CoPilot." 
+    }
   ]
 }
