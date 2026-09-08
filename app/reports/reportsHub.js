@@ -316,8 +316,10 @@
         card.appendChild(descArea);
         const configArea = el("div", {});
         card.appendChild(configArea);
-        card.appendChild(hr());
-        card.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Date Range"));
+        const dateHr = hr();
+        card.appendChild(dateHr);
+        const dateHeader = el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Date Range");
+        card.appendChild(dateHeader);
         const dateRow = el("div", { style: "display:flex;gap:10px;align-items:flex-end;margin:8px 0;flex-wrap:wrap;" });
         const today = new Date(); const monthAgo = new Date(today); monthAgo.setMonth(today.getMonth() - 1);
         const fromWrap = el("div", { style: "flex:1;min-width:200px;" });
@@ -329,7 +331,22 @@
         const toInput = el("input", { type: "date", style: "width:100%;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;" });
         toInput.valueAsDate = today; toWrap.appendChild(toInput);
         dateRow.appendChild(fromWrap); dateRow.appendChild(toWrap);
-        card.appendChild(dateRow);
+        //##> Lets a report drive the hub's date range instead of the user setting
+        //##> it by hand. The hub still owns the inputs and remains the single
+        //##> source of truth; reports only write to them.
+        const dateControl = {
+          setRange(from, to) {
+            if (from) fromInput.value = from;
+            if (to) toInput.value = to;
+          },
+          getRange() { return { from: fromInput.value, to: toInput.value }; },
+          setVisible(show) {
+            const d = show ? "" : "none";
+            dateHr.style.display = d;
+            dateHeader.style.display = d;
+            dateRow.style.display = d;
+          }
+        };
         const filtersHr = hr(); card.appendChild(filtersHr);
         const filtersHeader = el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Filters");
         card.appendChild(filtersHeader);
@@ -373,8 +390,9 @@
           configGetter = null;
           descArea.textContent = descText || def.description || "";
           setFiltersVisible(!!def.usesStandardFilters, def.defaultFilters);
+          dateControl.setVisible(true);
           if (def.buildConfig) configGetter = def.buildConfig(configArea, {
-            el, metadataFields, makeFieldPicker,
+            el, metadataFields, makeFieldPicker, dateControl,
             resolveStorageByDisplay: (name) => { const f = metadataFields.find((x) => (x.displayName || "").toLowerCase() === String(name).toLowerCase()); return f ? f.storageName : null; },
             getDisplayName: (sn) => { const f = metadataFields.find((x) => x.storageName === sn); return f ? f.displayName : sn; },
             savedConfig: savedConfig || null
