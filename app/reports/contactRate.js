@@ -615,9 +615,9 @@
   }
 
   registry.register({
-    id: "contactRateUcid",
-    label: "Contact Rate UCID Harvester",
-    description: "Reads Contact Rate workbooks, collects UCIDs from every sheet, and downloads one transcript file per topic.",
+    id: "contactRate",
+    label: "Contact Rate Analysis",
+    description: "Takes all the Excel files for the Contact Rate Analysis and creates batched transcripts ready for CoPilot.",
     usesStandardFilters: false,
     buildConfig,
     validateConfig(config) {
