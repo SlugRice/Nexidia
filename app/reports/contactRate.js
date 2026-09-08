@@ -14,6 +14,7 @@
   const SHOW_TIMESTAMPS = false;
   const CHARS_PER_TOKEN = 3.5;
 
+  const MONTH_CHOICES = 12;
   const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
   /* ---------- ZIP reading (xlsx is a zip of xml) ---------- */
@@ -350,26 +351,46 @@
 
   //##> Converts a YYYY-MM month value into the first and last calendar day of
   //##> that month. Day zero of the following month is the last day of this one,
-  //##> which handles leap years without a lookup table.
+  //##> which handles leap years without a lookup table. The current month stops
+  //##> at today rather than running out to a future date.
   function monthToRange(value) {
     const m = String(value || "").match(/^(\d{4})-(\d{2})$/);
     if (!m) return null;
     const year = parseInt(m[1], 10);
     const month = parseInt(m[2], 10);
     if (month < 1 || month > 12) return null;
-    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
     const pad = (n) => String(n).padStart(2, "0");
+    const now = new Date();
+    const isCurrent = year === now.getFullYear() && month === now.getMonth() + 1;
+    const lastDay = isCurrent ? now.getDate() : new Date(year, month, 0).getDate();
     return {
       from: year + "-" + pad(month) + "-01",
       to: year + "-" + pad(month) + "-" + pad(lastDay),
-      label: MONTH_NAMES[month - 1] + " " + year
+      label: MONTH_NAMES[month - 1] + " " + year,
+      partial: isCurrent
     };
   }
 
-  function previousMonthValue() {
+  //##> The month list runs backwards from the current month, so each month name
+  //##> appears once and always resolves to its most recent occurrence.
+  function monthOptions(count) {
     const now = new Date();
-    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1;
+      out.push({
+        value: year + "-" + String(month).padStart(2, "0"),
+        label: MONTH_NAMES[month - 1] + " " + year
+      });
+    }
+    return out;
+  }
+
+  function currentMonthValue() {
+    const now = new Date();
+    return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
   }
 
   /* ---------- Config panel ---------- */
@@ -382,7 +403,7 @@
     let loadedFiles = saved && Array.isArray(saved.loadedFiles) ? saved.loadedFiles.slice() : [];
     let callsPerTopic = saved && saved.callsPerTopic ? saved.callsPerTopic : DEFAULT_CALLS_PER_TOPIC;
     let takeAll = !!(saved && saved.takeAll);
-    let reportMonth = saved && saved.reportMonth ? saved.reportMonth : previousMonthValue();
+    let reportMonth = saved && saved.reportMonth ? saved.reportMonth : currentMonthValue();
     let warnings = [];
     let busy = false;
 
@@ -391,7 +412,11 @@
     container.appendChild(el("div", { style: "font-size:15px;font-weight:600;margin:10px 0;" }, "Report Month"));
 
     const monthRow = el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;" });
-    const monthInput = el("input", { type: "month", value: reportMonth, style: "padding:7px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;" });
+    const monthInput = el("select", { style: "padding:7px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;background:#fff;cursor:pointer;min-width:170px;" });
+    const options = monthOptions(MONTH_CHOICES);
+    if (!options.some((o) => o.value === reportMonth)) reportMonth = options[0].value;
+    for (const o of options) monthInput.appendChild(el("option", { value: o.value }, o.label));
+    monthInput.value = reportMonth;
     const monthNote = el("div", { style: "font-size:11px;color:#6b7280;" }, "");
     monthRow.appendChild(monthInput);
     monthRow.appendChild(monthNote);
@@ -413,18 +438,18 @@
         return;
       }
       reportMonth = monthInput.value;
+      const tail = range.partial ? " (month to date)" : "";
       if (dateControl) {
         dateControl.setRange(range.from, range.to);
-        monthNote.textContent = "Date range set to " + range.from + " through " + range.to + ".";
+        monthNote.textContent = "Date range set to " + range.from + " through " + range.to + tail + ".";
         monthNote.style.color = "#15803d";
       } else {
-        monthNote.textContent = "Set the range below to " + range.from + " through " + range.to + ".";
+        monthNote.textContent = "Set the range below to " + range.from + " through " + range.to + tail + ".";
         monthNote.style.color = "#b45309";
       }
     }
 
     monthInput.onchange = pushMonth;
-    monthInput.oninput = pushMonth;
 
     /* ---- Workbooks ---- */
 
