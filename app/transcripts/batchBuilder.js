@@ -1,4 +1,4 @@
-//[Last Update: 3:01 PM 8/13/2026]
+//[Last Update: 5:01 PM 9/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -276,6 +276,48 @@
     return examples;
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function createEtaTracker(windowSize) {
+  const cap = windowSize || 100;
+  const samples = [];
+  let total = 0;
+  function fmtClock(ms) {
+    const d = new Date(ms);
+    let h = d.getHours();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    const p = (n) => String(n).padStart(2, "0");
+    return h + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + " " + ampm;
+  }
+  function fmtDuration(ms) {
+    if (!isFinite(ms) || ms < 0) return "";
+    let s = Math.round(ms / 1000);
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const m = Math.floor(s / 60); s -= m * 60;
+    if (h > 0) return h + "h " + m + "m";
+    if (m > 0) return m + "m " + s + "s";
+    return s + "s";
+  }
+  return {
+    setTotal(n) { total = n || 0; },
+    mark(completed) {
+      samples.push({ completed: completed, at: Date.now() });
+      if (samples.length > cap) samples.shift();
+    },
+    stamp() { return fmtClock(Date.now()); },
+    remainingText(completed) {
+      if (samples.length < 5 || !total) return "";
+      const first = samples[0];
+      const last = samples[samples.length - 1];
+      const items = last.completed - first.completed;
+      const span = last.at - first.at;
+      if (items <= 0 || span <= 0) return "";
+      const left = total - completed;
+      if (left <= 0) return "";
+      const ms = left * (span / items);
+      return fmtDuration(ms) + " left (done ~" + fmtClock(Date.now() + ms) + ")";
+    }
+  };
+}
   function nowStamp() {
     const d = new Date();
     const p = (n) => String(n).padStart(2, "0");
@@ -1494,6 +1536,7 @@ function openTranscriptBatchBuilder() {
     const jobId = resumeContext?.jobId || generateJobId();
     const alreadyFetched = resumeContext?.alreadyFetched || new Set();
     const resumed = !!resumeContext?.resumed;
+    const eta = createEtaTracker(100);
     UI.appendLog(resumed ? `Resuming job ${jobId}` : `Starting job ${jobId}`);
     UI.appendLog(`Input values: ${values.length}`);
     UI.appendLog(`Field: ${inputDisplayName} (${inputStorageName})`);
@@ -1621,10 +1664,12 @@ function openTranscriptBatchBuilder() {
         if (!res.ok) failed.push(it);
         if (completedDelta % 25 === 0 || (i + 1) === toFetch.length) {
           const totalDone = alreadyFetched.size + completedDelta;
+	  eta.setTotal(toFetch.length); eta.mark(completedDelta);
           try { await updateJob(jobId, { completedCount: totalDone }); } catch (_) {}
           const pct = 58 + Math.floor((completedDelta / Math.max(1, toFetch.length)) * 27);
-          UI.setProgress(Math.min(85, pct), "Fetching transcripts...", `${completedDelta} / ${toFetch.length}\nTotal saved: ${totalDone}\nFailed: ${failed.length}`);
-          UI.appendLog(`Fetched ${completedDelta}/${toFetch.length}`);
+          const etaLine = eta.remainingText(completedDelta);
+          UI.setProgress(Math.min(85, pct), "Fetching transcripts...", `${completedDelta} / ${toFetch.length}\nTotal saved: ${totalDone}\nFailed: ${failed.length}${etaLine ? "\n" + etaLine : ""}`);
+          UI.appendLog(`Fetched ${completedDelta}/${toFetch.length} (${eta.stamp()})${etaLine ? " - " + etaLine : ""}`);
         }
       }
     }
@@ -1740,7 +1785,9 @@ function openTranscriptBatchBuilder() {
             const base = cfg.exportTranscripts ? 86 : 58;
             const span = cfg.exportTranscripts ? 8 : 36;
             const pct = base + Math.floor((done / Math.max(1, out.length)) * span);
-            UI.setProgress(Math.min(94, pct), "Fetching audio files...", `${done} / ${out.length}\nAudio failed: ${audioFailed}\nAudio ZIPs so far: ${zipIndex - 1}`);
+            eta.setTotal(out.length); eta.mark(done);
+            const aEta = eta.remainingText(done);
+            UI.setProgress(Math.min(94, pct), "Fetching audio files...", `${done} / ${out.length}\nAudio failed: ${audioFailed}\nAudio ZIPs so far: ${zipIndex - 1}${aEta ? "\n" + aEta : ""}`);
           }
         }
       }
