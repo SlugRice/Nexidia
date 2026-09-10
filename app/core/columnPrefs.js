@@ -352,7 +352,7 @@
     if (!ctl10) throw new Error("ctl10 not found in SettingsDialog.");
     const fields = [], headers = [], seen = new Set();
     for (const entry of ctl10.split(",")) {
-      const parts = entry.split("\n");
+      const parts = entry.split(/[\n|]/);
       if (parts.length < 2) continue;
       const label = parts[0].trim();
       const rawKey = parts[1].trim();
