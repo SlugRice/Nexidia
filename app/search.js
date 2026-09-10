@@ -1,4 +1,4 @@
-//[Last Update: 3:01 PM 8/13/2026]
+//[Last Update: 5:01 PM 9/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -97,6 +97,48 @@
     const rand = Math.random().toString(36).slice(2, 8);
     return `srchjob_${stamp}_${rand}`;
   }
+function createEtaTracker(windowSize) {
+  const cap = windowSize || 100;
+  const samples = [];
+  let total = 0;
+  function fmtClock(ms) {
+    const d = new Date(ms);
+    let h = d.getHours();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    const p = (n) => String(n).padStart(2, "0");
+    return h + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + " " + ampm;
+  }
+  function fmtDuration(ms) {
+    if (!isFinite(ms) || ms < 0) return "";
+    let s = Math.round(ms / 1000);
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const m = Math.floor(s / 60); s -= m * 60;
+    if (h > 0) return h + "h " + m + "m";
+    if (m > 0) return m + "m " + s + "s";
+    return s + "s";
+  }
+  return {
+    setTotal(n) { total = n || 0; },
+    mark(completed) {
+      samples.push({ completed: completed, at: Date.now() });
+      if (samples.length > cap) samples.shift();
+    },
+    stamp() { return fmtClock(Date.now()); },
+    remainingText(completed) {
+      if (samples.length < 5 || !total) return "";
+      const first = samples[0];
+      const last = samples[samples.length - 1];
+      const items = last.completed - first.completed;
+      const span = last.at - first.at;
+      if (items <= 0 || span <= 0) return "";
+      const left = total - completed;
+      if (left <= 0) return "";
+      const ms = left * (span / items);
+      return fmtDuration(ms) + " left (done ~" + fmtClock(Date.now() + ms) + ")";
+    }
+  };
+}
   function stableStringify(o) {
     if (o === null || typeof o !== "object") return JSON.stringify(o);
     if (Array.isArray(o)) return "[" + o.map(stableStringify).join(",") + "]";
@@ -305,7 +347,7 @@
           barInner.style.cssText = "height:100%;width:0%;background:#3b82f6;transition:width 0.3s;";
           barOuter.appendChild(barInner);
           const metrics = document.createElement("div");
-          metrics.style.cssText = "margin-top:8px;font-size:12px;color:#cbd5e1;";
+          metrics.style.cssText = "margin-top:8px;font-size:12px;color:#cbd5e1;white-space:pre-wrap;";
           const cancelBtn = document.createElement("div");
           cancelBtn.textContent = "Cancel";
           cancelBtn.style.cssText = "margin-top:8px;font-size:11px;color:#f87171;cursor:pointer;text-decoration:underline;";
@@ -1435,8 +1477,11 @@ function buildPaneEl(paneIndex) {
               for (const seg of cachedList) cachedSegments.set(seg.segmentHash, seg);
             } catch (_) {}
           }
+          const eta = createEtaTracker(100);
           function progressMeta() {
-            return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Rows: " + ctx.totalKept;
+            eta.setTotal(Math.max(ctx.estimatedSegments, ctx.segmentsCompleted));
+            const line = eta.remainingText(ctx.segmentsCompleted);
+            return "Segments: " + ctx.segmentsCompleted + " of ~" + Math.max(ctx.estimatedSegments, ctx.segmentsCompleted) + " \u2022 Rows: " + ctx.totalKept + " \u2022 " + eta.stamp() + (line ? "\n" + line : "");
           }
           async function persistSegment(segmentHash, rows, phraseLabel) {
             if (!jobId) return;
@@ -1445,6 +1490,7 @@ function buildPaneEl(paneIndex) {
             } catch (e) { console.warn("[NexidiaSearch] segment write failed:", e); }
           }
           async function bumpJobProgress() {
+            eta.mark(ctx.segmentsCompleted);
             if (!jobId) return;
             try {
               await updateJob(jobId, {
