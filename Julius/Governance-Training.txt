@@ -1,0 +1,128 @@
+Overall verdict
+
+The compliance overview is broadly recognizable, but the provider orientation contains major domain errors. The completion tracker also does not substantiate the training program described in the overview.
+
+Highest-confidence concerns
+
+The two-year physician registration cycle is repeated and incorrect
+ A38_New_Provider_Orientation_Credentialing_101.pptx tells providers twice that New York physicians register every two years. This carries forward the same error from the Credentialing Policy Manual. It would be especially conspicuous in training prepared by Credentialing.
+
+The training tracker covers only 52 people in a stated workforce of approximately 1,800
+ A37_Annual_Compliance_Program_Overview.pptx says every employed, contracted, or credentialed workforce member receives annual training. A34_Annual_Compliance_Training_Completion_Tracker.xlsx contains only 52 people and does not label itself as a sample, management subset, department subset, or exception report. As presented, it cannot plausibly serve as the system-wide completion tracker.
+
+The tracker does not measure the curriculum described in the overview
+ The overview requires fraud, waste and abuse, False Claims Act, reporting and non-retaliation, gifts, role-specific training, and receipt-and-understanding attestations. The tracker records only HIPAA, Code of Conduct, and conflicts-of-interest completion. It therefore cannot establish compliance with the stated annual curriculum.
+
+Providers are being oriented to back-office administrative systems
+ The provider deck says new providers receive access to OpenMRS and Metabase for roster views, cohort counts, and credentialing-status reports. Clinical providers ordinarily would not need broad credentialing, payer-enrollment, privilege, roster, or population-reporting access merely because they joined the medical staff. Role-based access is mentioned, but the deck still presents these systems as standard provider-orientation content.
+
+The “front door” blocks credentialing before HR onboarding
+ The orientation says no credentialing, privilege review, payer enrollment, or system record proceeds until HR creates a spreadsheet row. In real recruiting and medical-staff workflows, credentialing and payer enrollment commonly begin before the employment start date and may run alongside contracting and HR onboarding. A manually maintained HR spreadsheet as an absolute prerequisite is operationally implausible.
+
+A38_New_Provider_Orientation_Credentialing_101.pptx
+
+Additional issues:
+
+The audience is unclear. It addresses physicians, allied health professionals, technologists, employees, contractors, and appointees as though they all follow the same appointment, privileging, registration, access, and payer-enrollment pathway.
+Not every covered person requires medical-staff appointment or privileges. Technologists and some clinical staff would normally follow employment qualification and competency processes rather than the full Credentials Committee, MEC, and governing-body route.
+The roster is called a single authoritative spreadsheet. That is a strong test-data tell for a two-hospital organization with hundreds of providers.
+HR captures credential fields and registration numbers. This conflicts with the deck’s assignment of license and registration ownership to Credentialing.
+NPI changes are presented as a routine identifier-change scenario. A Type 1 NPI ordinarily remains associated with the individual. Treating it alongside license or registration updates suggests weak identifier governance.
+PSV is defined too absolutely. “We ask the issuing authority directly, every time, for every credential” overlooks approved verification organizations and recognized equivalent sources.
+NPDB is characterized as malpractice-history verification. NPDB querying is a significant component, but it is not simply a comprehensive malpractice-history source. The relevant reports, claims history, carrier information, application disclosures, and facility history are distinct.
+Prior appointment and privilege verification is presented as mandatory from every prior facility. That may be an organizational rule, but “each prior facility” can be impractical and depends on the appointment history and applicable standards.
+Quarterly provider attestation is unusually frequent and expansive. It asks about health status, sanctions, malpractice, license, and registration every quarter. Possible as a local control, but it would require carefully limited health questions, confidentiality controls, and alignment with medical-staff bylaws.
+The lapse response is too categorical. Every lapse automatically triggers claims suspension, an MEC suspension recommendation, and a compliance investigation without showing profession, service, supervision, facility, or billing-context analysis.
+“Renew inside the 30-day window and none of the above ever touches you” is too absolute. Renewal processing and primary-source updates may not be complete merely because a practitioner submitted within that window.
+Internal hostnames are disclosed in general orientation materials. This is not necessarily prohibited, but it is unnecessary and inconsistent with minimum-information security practices.
+A34_Annual_Compliance_Training_Completion_Tracker.xlsx
+Raw Excel serial dates are displayed rather than formatted completion dates.
+No assigned due date appears. The workbook classifies learners as overdue or not yet due without showing the date needed to validate either status.
+Blank fields are ambiguous. A blank could mean unassigned, assigned but incomplete, exempt, overdue, or unavailable.
+No training version or course ID appears. The tracker cannot establish which revision of a module was completed.
+No LMS completion record, score, attempt, exemption, assignment date, or evidence reference appears.
+“Not Yet Due” is unsupported. The sheet does not contain hire, transfer, or cycle-start dates.
+The population is heavily curated toward selected leaders and representative departments. This reinforces the appearance of a demonstration dataset rather than an operational export.
+Contractors and credentialed nonemployees are absent as identifiable populations, despite the overview saying they are included.
+The summary arithmetic is internally consistent: 44 compliant, 5 overdue, and 3 not yet due equals 52. The issue is population completeness, not arithmetic.
+A37_Annual_Compliance_Program_Overview.pptx
+
+This is the most plausible file in the set, but several elements would still draw attention:
+
+The Compliance Committee chair remains unusual. The Board Secretary and Medical Staff Governance Coordinator chairs the operational Compliance Committee, while the CCO is described as program owner.
+The committee reports to the Board “through the CCO.” That weakens the apparent independence of committee oversight if the same CCO operates the program being overseen.
+The hotline is still not actionable. It describes a toll-free number and secure portal but provides neither the number nor the portal address.
+The compliance program is disproportionately credentialing-centered. Credentialing attestations, registration monitoring, payer enrollment, directory accuracy, committee implementation, and integration controls occupy much of the auditing program, while broader hospital compliance risks receive limited treatment.
+Every workforce member must train within 30 days of “reappointment.” Reappointment is a medical-staff event rather than a new workforce start. Automatically restarting annual compliance training at each reappointment is an unusual rule.
+The seven-element framework is plausible, but the deck does not identify the governing compliance-plan document, annual risk assessment, work plan, disciplinary policy, investigation protocol, exclusion-screening program, or responsible Board committee.
+Outside counsel and privilege language is too casual. The deck says privilege is asserted when outside counsel is engaged. Attorney involvement alone does not automatically make every investigation privileged.
+Potential self-disclosure is listed generically. A mature training deck would normally emphasize coordination with Legal and the appropriate disclosure authority rather than present self-disclosure as an ordinary corrective-action item.
+Cross-file contradictions
+The overview describes a comprehensive annual curriculum, but the tracker measures only three components.
+The overview covers approximately 1,800 workforce members, while the purported annual tracker contains 52.
+The tracker includes a physician and Winston clinicians, but it does not show how credentialed nonemployees are distinguished from employees.
+The orientation says Credentialing ownership begins after HR creates the roster row, while the process described includes pre-employment and pre-appointment activities that ordinarily begin earlier.
+The orientation teaches that providers access credentialing and reporting systems, while the compliance overview emphasizes role-specific access and provisioning controls.
+Strongest double-take items
+Incorrect two-year registration cycle taught directly to New York physicians.
+A 52-person tracker presented against a workforce of approximately 1,800.
+The tracker omitting much of the mandatory curriculum.
+A manually maintained HR spreadsheet controlling whether credentialing may begin.
+Standard provider orientation offering OpenMRS and Metabase credentialing-report access.
+Technologists and all other clinical personnel being placed into one universal medical-staff pathway.
+Quarterly health-status attestations without privacy or inquiry limitations.
+A 24/7 hotline repeatedly advertised without its number or portal address.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+The single largest domain gap in this directory is that neither deck mentions New York's mandatory compliance program regime — SSL §363-d and 18 NYCRR Subpart 521-1, which apply to any Article 28 provider. That regime requires an annual December certification to OMIG, an annual risk assessment and work plan, a compliance committee charter, an annual effectiveness review, and it names credentialing as an enumerated risk area the program must cover. For a New York hospital compliance deck built around a credentialing corpus, presenting only the federal seven elements and never mentioning Part 521 or OMIG is the thing a NY compliance officer would notice first.
+
+A37's reporting lines are circular
+
+Slide 3: the Compliance Committee "Reports to: Governing Body (through the Chief Compliance Officer)." Slide 7, element 2: a CCO "reporting to the Governing Body through the Compliance Committee". Each routes through the other. Part 521-1 and OIG guidance both require the compliance officer to report directly and periodically to the governing body — which the org chart already denies by giving the CCO a CEO-only line.
+
+The Caster problem compounds here. He chairs the Compliance Committee, is Board Secretary, records governing-body actions, and reports to the CCO. So the committee that oversees the CCO is chaired by the CCO's subordinate. And per A22 he also owns the SLA log tracking his own overdue Renauld item.
+
+A37 has no document control at all
+
+No control number, no revision, no owner, no approval, no effective date — in a corpus where fourteen other artifacts carry them, and where A34 continues the pattern as COM-2026-034. The absence is as conspicuous as the pattern.
+
+The tracker covers 3% of the workforce
+
+A37 slide 6: "Every workforce member — employed, contracted, or credentialed — completes annual compliance training". A34 has 52 rows against ~1,800 workforce members and 249 credentialed providers. Exactly four providers appear — Ramanathan, Templeton, Osei, Marchetti. No vendors, no contractors. And it isn't a management subset either, since it includes staff RNs, a help desk technician, a coder, and a surgical technologist. A36 told the board "completion is on target" off this.
+
+The curriculum doesn't match. A37 lists five core modules; A34 tracks three. The two dropped are fraud, waste and abuse / False Claims Act and reporting and non-retaliation. FWA/FCA training is a statutory obligation under DRA §6032 for entities at the Medicaid threshold, and it's the one module a Medicaid auditor asks for. None of the four role-specific modules is tracked either.
+
+"Overdue" has no due date. The header defines Overdue as past the assigned due date, and no due-date column exists. Same for "Not Yet Due," defined by hire date, with no hire date column. The five overdue rows are all missing only the COI attestation, and the status math is right (44/5/3 = 52) — but nothing in the file lets you verify any of it.
+
+The date generation is uniform. HIPAA_Completed_Date equals Code_of_Conduct_Completed_Date on all 49 completed rows without exception, and the COI attestation always falls 3–7 days later. Real LMS exports don't behave that way.
+
+Also: A37 requires training "within 30 days of hire," while A34's "Not Yet Due" describes a new hire "whose first completion cycle has not yet begun" — a state the 30-day rule doesn't allow.
+
+Three hotline references, no hotline
+
+A28 §4.2(c), A37 slide 5, and A37 slide 10 all direct people to a 24/7 anonymous hotline and none prints a number or URL. A28 gives the Office of Compliance as (518) 417-0140 — which A31 lists as the main switchboard — while A37 gives (518) 417-0102, Hall's direct DID. Slide 5 also opens the hotline to "patients and members of the public" while placing the web portal on the intranet.
+
+A38 contradicts the governance record on the recredentialing interval
+
+Slide 5: "Recredentialing cycle: 36 months". Every reappointment in A12 continues privileges for exactly 24 months — Daniels 04/16/2025→04/16/2027, Chambers 01/21/2026→01/21/2028, Mendez 03/18/2026→03/18/2028. And A02 ran the entire panel through a single 12/2025 cycle. Three documents, three different intervals.
+
+A38 blocks its own new hires
+
+Slide 2: "Nothing downstream — no OpenMRS record, no privilege review, no payer enrollment — proceeds before the roster row exists". Gibbs's A44 email holds four fully-onboarded providers off A01 until the next refresh, and A01 Rev. 04/2026 confirms the exclusion in its cover note. By the deck's own rule those four can't be credentialed, provisioned, or enrolled — HR created a blocking condition for a batch it cleared. Whether that's the intended trap or an accident, it's the sharpest cross-document collision in the set.
+
+What a new provider orientation can't omit
+
+No FPPE. Focused Professional Practice Evaluation applies to every newly granted privilege, for every new provider in the room — it is the single most relevant thing this audience needs to hear, and it appears nowhere. Its only appearance in the corpus is A21, where it's used incorrectly as a restriction. Also absent: OPPE, temporary/locum privileges, medical staff categories, fair hearing and appeal rights, malpractice coverage requirements, on-call obligations, EMTALA, and any EHR/clinical documentation training.
+
+Slide 8 repeats the precautionary-suspension error from A03 §5.2(b) — now taught directly to physicians, telling them a lapsed registration produces an MEC suspension recommendation rather than automatic relinquishment. Slide 3 repeats the three-year NYSED cycle for "licensed technologists," which is wrong twice over: rad techs are licensed and registered by DOH, and MR/sonography aren't NY-licensed categories at all.
+
+Smaller: slide 7 puts "per-payer enrollment NPIs" in OpenMRS (fourth document to do so); slide 2 describes the authoritative provider roster to new physicians as "a single spreadsheet"; slide 8 step 3 routes every renewal confirmation to the Director of Credentialing's personal mailbox; and slide 5's PSV table is otherwise the most accurate content in the corpus — NPDB, LEIE, SAM, state Medicaid exclusions, ABMS, direct facility verification are all correct.
