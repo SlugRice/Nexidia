@@ -1,0 +1,111 @@
+Overall verdict
+
+The charter is structurally plausible, but several governance choices would cause experienced compliance personnel to pause. The biggest concerns are a management committee claiming independence from management, the Board Secretary chairing it, operational holds functioning as de facto privilege restrictions, and provisions unusually tailored to defend prior documents.
+
+Highest-confidence concerns
+
+The Committee claims independence it does not have
+
+Section 6.1 says the Committee does not report through or remain accountable to management. However, nearly all voting seats are held by management representatives, and the CCO owns the charter and administers the program. Direct Board reporting is plausible, but declaring the committee itself independent from management is overstated.
+
+The Board Secretary is an unusual Compliance Committee chair
+
+Kevin Caster, the Board Secretary and Medical Staff Governance Coordinator, chairs the Committee, sets agendas, signs reports, can help call meetings, and can escalate matters directly to the Board. This combines Board administration, medical-staff coordination, and compliance oversight in one role.
+
+“Administrative holds” can operate as de facto restrictions
+
+Section 4.5 permits operational personnel to apply registration, credentialing-evidence, and attestation holds while insisting these do not alter appointment or privileges. Elsewhere in the set, these holds stop scheduling, billing, or claims. If a practitioner cannot be scheduled or provide services, the distinction may be formally true but operationally thin.
+
+The charter is unusually defensive about credentialing authority
+
+Sections 4.2 through 4.5 repeatedly list every action the Committee cannot take, restate the full Credentials Committee to MEC to Board pathway, and preserve specific named hold mechanisms. This is far more detailed than necessary for a general compliance charter and reads like it was written to reconcile or defend the other artifacts.
+
+The charter hard-codes named incumbents
+
+It names Kevin Caster and Kathleen Hall in the governing text rather than assigning seats by office alone. That creates avoidable amendment or interpretation issues whenever personnel change.
+
+Additional plausibility concerns
+Mandatory Chair and CCO attendance makes quorum fragile. A simple majority is insufficient unless both the Chair or Vice-Chair and CCO are present. The CCO can effectively prevent Committee action by being absent.
+Outside counsel may become a voting member. Section 3.3.5 permits outside counsel of record to designate the Legal representative. The membership roster went further and listed outside counsel personally as a voting member. Counsel more commonly advises rather than votes on operational compliance decisions.
+The Committee can engage specialists but has no stated budget authority. Section 4.1.4 allows engagement of counsel, forensic accountants, and specialists without defining spending approval or contracting authority.
+Regulatory referrals are routed through management. Although the Committee supposedly does not report through management, referrals must go through the CCO and General Counsel.
+Self-disclosure language is too generic. The charter treats restitution and self-disclosure as broadly available recommendations without distinguishing Legal’s role, disclosure authority, privilege, payer notice, or government-program protocol.
+Confidentiality is stated too absolutely. Section 8 calls all materials, deliberations, and minutes confidential without distinguishing attorney-client privilege, work product, protected health information, peer-review material, ordinary business records, or discoverable compliance records.
+The Chair can authorize disclosure. A single committee chair is allowed to authorize disclosure of Committee information without an explicit requirement for CCO, Legal, Privacy, or Board review.
+The risk assessment is preloaded around Winston. A standing charter specifically names post-transaction risk from the Winston acquisition. A permanent charter would more naturally refer to merger, acquisition, and integration risk generally.
+Claims accuracy and billing integrity appear, but Revenue Cycle has no designated seat. Privacy, Security, Quality, Nursing, Internal Audit, and Operations are also absent despite the listed compliance-risk scope.
+The Committee approves the annual work plan. Plausible, but the governing body’s role in approving or endorsing the plan is unclear despite receiving the annual report.
+Any “credible allegation of fraud” triggers immediate Board-chair notice. Without materiality or escalation criteria, this could route routine hotline allegations to the Board before investigation establishes significance.
+Approval evidence is incomplete. The document says the governing body approved the revision but provides no approval date, resolution number, meeting reference, or signature. “Effective: 06/2025 revision” is not a precise effective date.
+Cross-file inconsistencies
+The charter requires no more than half of designated seats to turn over in one year, but the membership roster had three of five designated seats ending in 2026.
+The charter permits Legal to designate a representative. The roster instead assigns outside counsel directly as the voting member.
+The charter says the Committee reports directly to the Board and not through management, while the compliance overview previously said reporting occurred “through the CCO.”
+Section 4 denies authority over privileging, but Section 4.5 preserves holds that can stop the practitioner from being scheduled.
+The charter revision became effective in June 2025 and specifically includes Winston Imaging, acquired in March 2025. That chronology is possible, but it reinforces how closely the charter was drafted around the acquisition narrative.
+Strongest double-take items
+A management-heavy committee declaring itself unaccountable to management.
+The Board Secretary and Medical Staff Governance Coordinator serving as chair.
+Operational holds restricting scheduling while being characterized as non-restrictive.
+Outside counsel functioning as a voting committee member.
+A permanent charter naming one acquisition as a standing risk category.
+Named incumbents embedded in the charter text.
+The CCO’s presence being mandatory for any Committee action.
+Extensive language seemingly designed to justify the authority boundaries and holds used elsewhere.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+This is the best-drafted governance instrument in the corpus — §4.2's enumeration, the §9.2 entrenchment clause, and the §4.3 reservation are exactly how a real charter walls off credentialing authority. It's also the first controlled document whose number doesn't match its artifact index: A25 carries GOV-2023-011, and it matches the citation A35 gave it. Whatever produced that exception is worth replicating.
+
+§4.5 is the hole the rest of Section 4 exists to prevent
+
+The carve-out permits "the Compliance Department or authorized operational personnel" to apply the Registration Lapse Administrative Hold, the Credentialing Evidence Search Pending flag, and the Quarterly Attestation Verification Pending flag, and declares all three "informational and operational".
+
+Two of those aren't informational. A03 §2.4 and §5.2(a) define the Registration Lapse hold as suspending scheduling and claims release ; A08 M-005/M-006 and A07 §6.1 say the search-pending flag holds new scheduling . A hold that stops a physician from being scheduled is a de facto practice restriction. Under the Medical Staff Bylaws framework this charter defers to, that's precisely the action §4.2.2 forbids — imposed by Compliance, with no Credentials Committee recommendation, no MEC, no governing body action, and no fair hearing. Section 4 forecloses the front door and §4.5 opens the back one.
+
+The quarterly attestation flag is a separate problem: A46 sources it to the CMO under bylaws §6.1.1 , not to Compliance, so §4.5 claims operational authority over an instrument the CMO owns.
+
+Independence fails on its own terms
+
+§6.1: the Committee "does not report through, and is not accountable to, management". But five of seven voting seats are held by management — CCO, HR, Finance, IT, and the CMO's designee. The Chair is a direct report of the CCO, who sits on the committee. And §3.6 makes the CCO's presence a quorum condition, so the committee cannot lawfully convene to discuss the CCO or the compliance function's own performance.
+
+Three designations are self-designations as implemented: §3.3.3 has the HR rep designated by the HR Director (Gibbs designated Gibbs), §3.3.4 the Finance rep by the Controller (Spindell by Spindell).
+
+§4.1.4's authority to engage outside counsel "in coordination with the Office of the General Counsel" also cuts against §4.1.5's bypass power — an independent committee retains its own counsel without routing through management's lawyer.
+
+New York's mandatory compliance regime is absent again
+
+Nothing here references SSL §363-d or 18 NYCRR Subpart 521-1 . For an Article 28 provider that omission is material in a charter specifically, because Part 521-1 is what requires a compliance committee and a committee charter, and it prescribes obligations this document doesn't carry: the annual December certification to OMIG, the annual effectiveness review (§1.4 and §9.1 set a 24-month charter review instead), and the OMIG self-disclosure protocol — §4.1.3 and §7.1.7 reference self-disclosure generically without naming it .
+
+Also missing for a healthcare compliance charter: the 60-day overpayment rule, which is the operative deadline once an audit identifies an overpayment — and which A29 §4.5's deferral-to-final-determination rule arguably contravenes . No exclusion screening oversight (A28 §3.6 has it for vendors, the charter doesn't for the workforce), no budget or resources provision, and no HIPAA breach-notification timeline despite §6.3 naming material breaches as escalation triggers.
+
+Nothing in the corpus shows the charter being followed
+§6.2 requires a written compliance report at each regular governing body meeting. A21's February 2026 minutes contain no compliance report .
+§6.2.5 requires reporting material payer audit activity. The CRPA post-payment audit landed 01/12/2026 addressed to Hall personally; the February minutes don't mention it, and §6.3's immediate-escalation trigger for a matter requiring the board's awareness went unexercised.
+§5.5 requires written minutes of every meeting. No Compliance Committee minutes exist in any directory, though A21, A12, and A22 exist for the board.
+§6.4's annual report is due by the second regular board meeting of the year — that window has closed for 2026 with no artifact.
+§3.2 requires an elected Vice-Chair. A35 records none.
+§3.5's staggering requirement is satisfied on paper, but Ortiz's seat expired 12/31/2025 and is still listed as filled, leaving the Committee's only clinical voice vacant.
+Drafting tells
+
+Named individuals in the charter body. §3.1 and §3.3.1–3.3.2 hard-code "Kevin Caster" and "Kathleen Hall". Charters name offices; personnel go on a roster, which is what A35 is for. The document even provides the coterminous-with-office machinery that makes the names unnecessary.
+
+Two hedged offices. §3.3.5 "General Counsel or, in the absence of an in-house General Counsel, outside counsel of record" and §3.3.6 "Chief Information Officer or the senior-most IT/Systems officer". Both hedges exist because the corpus can't decide whether those roles exist — A41 names a CIO, the org chart doesn't , and the legal function has four different identities across A10, A23, A30, and A35.
+
+§1.3 disclaims peer-review status, which is correct — but it also means Committee materials get no §6527(3) or §2805-m protection, and §8's confidentiality clause is contractual only. Worth stating explicitly, since A07 and A36 route credentialing-adjacent investigation content through this committee.
+
+Style and document control
+A50 rule	A25§7.1 — Page X of Y on every page	Renders Page of 
+§5.4 — MM/YYYY only in the footer	"Current Revision: 06/2025" and "Effective: 06/2025 revision" in the body
+§5.2 — MM/DD/YYYY	"Effective: 06/2025 revision" isn't a date
+Approval evidence	"Approved by: Governing Body" — no date, no resolution number, no signature, and §1.1's establishing resolution is uncited
+
+No revision history table, and the 06/14/2023 adoption doesn't appear in A12's governing body action log .
