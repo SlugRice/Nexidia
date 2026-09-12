@@ -1,0 +1,122 @@
+Overall verdict
+
+More plausible than most prior files, but still unusually tailored to the later Winston acquisition narrative. The core delegated-credentialing structure is recognizable. The biggest concerns are the agreement’s highly specific future-acquisition provisions, ambiguous decision authority, questionable privacy treatment, and inconsistencies with later Briarcrest records.
+
+Highest-confidence concerns
+
+The 2019 agreement appears engineered for the 2025 acquisition
+
+Articles 4 through 6 contain unusually detailed provisions for a future acquisition: equity purchases, acquisition-close calculations, a 90-day acquired-entity roster, Schedule A treatment, post-acquisition audit reconciliation, and exact roster fields. Such provisions are possible, but their terminology maps almost perfectly to the later Winston transaction and document set. As an excerpt, it reads like retrospective support for that specific scenario.
+
+The agreement blurs verification, recommendation, and final credentialing authority
+
+The recitals describe delegation of “credentialing and re-credentialing verification.” Article 2 then delegates credentialing-committee evaluation and a recommendation, while Section 2.3 says Briarcrest retains final authority to approve, suspend, or terminate network participation. This can be a valid delegated model, but it is unclear whether Coopa Blue makes the delegated credentialing decision or merely verifies and recommends while Briarcrest makes every final decision. NCQA describes full-scope credentialing as including verification, credentialing-committee review, and sanctions monitoring, so the agreement should state the decision allocation more precisely.
+
+Termination supposedly leaves every provider credentialed until the next cycle
+
+Section 8.5 says providers remain credentialed in Briarcrest’s network until their next recredentialing date after termination of the delegation. That is overly categorical. It does not account for termination caused by unreliable files, systemic noncompliance, sanctions, loss of qualifications, patient-safety issues, or a need for accelerated file review.
+
+The acquired-entity roster includes sensitive adverse-history data
+
+Section 5.2 requires “current disciplinary, sanction, and malpractice status” in a roster submission. Those data may be relevant, but a routine roster normally benefits from structured status fields or exception indicators, with detailed evidence exchanged through controlled credentialing-file channels. The agreement does not define transmission security, access limits, or minimum-necessary content for this sensitive information.
+
+The audit exclusion for peer-review material is too broad and legally casual
+
+Section 6.3 categorically excludes any confidential peer-review information “protected under” New York Education Law § 6527. That law covers specified medical and quality-review activities, and the scope of protection is fact-specific rather than automatically applying to anything labeled peer review. New York case law also recognizes exceptions and places evidentiary burdens on the party asserting the privilege.
+
+Agreement-specific concerns
+Schedule A may not identify legal entities accurately. It lists Coopa Blue Regional Medical Center and Coopa Blue North as Covered Entities but does not say whether they are separate corporations, licensed operating units, or assumed facility names. The agreement requires legal names, so that distinction matters.
+The parent is listed as a Covered Entity without a clear provider role. Coopa Blue Health, Inc. is categorized as the delegate parent entity, but the document does not explain whether practitioners render services through that entity.
+Affiliate acquisition notice is extremely broad. Any acquisition by Coopa Blue or any affiliate of any healthcare affiliate triggers notice, even if it has no relationship to Briarcrest participation or delegated credentialing.
+Corporate-change notice comes after closing. A change in control may require advance notice or consent under some payer arrangements. This agreement permits notice up to 30 calendar days afterward.
+A new entity can generate an acquired-provider roster while remaining outside Schedule A. Section 5.6 then says the acquired population joins the ongoing Delegated Roster, even though Sections 2.5 and 3.4 say professionals affiliated with a non-Covered Entity are outside the delegation. That is an internal contradiction.
+Committee approval is used as the recredentialing-cycle anchor. Section 1.18 measures 36 months from Credentials Committee approval, while the committee only makes a recommendation under Section 2.1(f). If Briarcrest retains the final credentialing decision, the operative decision date is unclear.
+Monthly SAM monitoring is presented as a standing practitioner control. The agreement could require this contractually, but it should distinguish contract requirements from the exact scope of external standards.
+“Current disciplinary, sanction, and malpractice status” is undefined. It does not establish lookback periods, pending matters, closed claims, settlements, dismissals, open investigations, or practitioner explanations.
+The Plan may change roster cadence and format unilaterally. It only needs to specify them reasonably “from time to time,” without a change-control mechanism.
+The Plan’s external oversight policy controls compliance thresholds but is not attached. The Plan may revise that policy while the agreement remains in force, materially changing the delegate’s performance requirements.
+The agreement permits partial rescission without transition mechanics. It does not describe file transfer, provider notices, work-in-progress cases, committee scheduling, or responsibility for deadlines during the transition.
+No data-security or privacy article appears in the excerpt. Because credentialing files contain personal and sensitive professional information, an experienced reviewer would expect explicit security, incident-notification, permitted-use, retention, destruction, and subcontractor controls somewhere in the full agreement. The excerpt may simply omit them.
+Cross-file contradictions
+
+The 90-day deadline was calculated incorrectly elsewhere. For a March 3, 2025 close, the agreement says to exclude the close date and count 90 calendar days without weekend extension. The integration plan used June 1, 2025 as the deadline. Counting under the stated provision produces June 1 as day 90, so that date is internally consistent. However, June 1, 2025 was a Sunday and the agreement expressly says it does not extend. The plan should have recognized the operational need to submit before that Sunday rather than treating it like an ordinary business deadline.
+
+Winston could not enter the delegation merely through roster submission. The integration plan focused heavily on the 90-day roster, but this agreement clearly says Winston must also be added to Schedule A by a separately executed written instrument. No reviewed file has shown that amendment.
+
+Later records inaccurately associate rate schedules with this agreement. The payer contract log described Briarcrest’s delegated-credentialing agreement as having annual rate updates. Article 7 expressly removes payer contracting and rate schedules from this agreement’s scope.
+
+The later integration plan did not establish whether all 24 providers belonged in scope. The agreement limits coverage to professionals intended to render Briarcrest Covered Services and affiliated with an amended Covered Entity. The integration materials tended to treat the entire Winston cohort as one delegated population.
+
+The later annual review was framed as broad roster reconciliation. This agreement requires a statistically valid sample of credentialing files, roster reconciliation, monitoring review, and acquired-entity testing. The later review materials do not clearly preserve that distinction.
+
+Strongest double-take items
+A 2019 agreement containing acquisition provisions tailored almost exactly to a 2025 transaction.
+Acquired providers entering the ongoing roster even if their entity has not been added to Schedule A.
+Unclear allocation of credentialing decision authority between Coopa Blue and Briarcrest.
+Automatic continuation of network credentialing after delegation termination.
+Sensitive disciplinary and malpractice information embedded in a routine roster requirement.
+Peer-review material treated as categorically protected.
+Later files attaching reimbursement-rate updates to an agreement that expressly excludes rates.
+No evidence in the reviewed set that Winston was formally added to Schedule A.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+This is the most professionally drafted document in the corpus by a wide margin, and the 90-day math is exact — counted from and excluding 03/03/2025, ninety calendar days lands on 06/01/2025, precisely A15's M-07. Articles 3, 5, and 7 are also doing real work: the Schedule A / roster / enrollment separations are drafted the way a health plan's counsel actually drafts them.
+
+The statutory citation is wrong
+
+§7.1(c) invokes "Section 4803 of the New York Insurance Law" as the directory-accuracy provision. Insurance Law §4803 is Health care professional applications and terminations — it governs the 60-day credentialing decision window, provisional credentialing for newly licensed professionals joining a participating group, and termination notice and hearing rights.
+
+The irony is that §4803 is squarely relevant to this agreement and is cited in the one place it doesn't belong. A delegated credentialing agreement with a NY managed care plan would normally reference it in Article 2 — the delegate's turnaround directly determines whether the Plan meets its 60-day obligation, and provisional credentialing is exactly the mechanism that fills the gap. Directory accuracy sits elsewhere (Insurance Law §3217-a / §4324 and the federal No Surprises Act).
+
+The NCQA references have a structural gap
+
+§1.13 defines NCQA Standards as "CR 1 through CR 8". Delegation itself is governed by CR 12, which is the standard that makes a delegation agreement auditable — and it's excluded from the definition. CR 12 requires the written agreement to specify the delegated activities, both parties' responsibilities, the frequency of reporting, the performance evaluation process, and the remedies including revocation.
+
+§2.1(i) instead leaves the roster cadence to "a submission cadence reasonably specified by the Plan from time to time." That's the one term NCQA requires the agreement to fix, and it's the term A15 needed to plan against. Also excluded: CR 9/10 (notification and practitioner appeal rights) and CR 11 (assessment of organizational providers) — the latter matters because the acquired entity is an imaging facility.
+
+Winston can't be in the credentialed population
+
+Schedule A names exactly three Covered Entities, none of them Winston, and §3.4 states that professionals affiliated with a non-Schedule-A Person "are not Credentialed Professionals under this Agreement" unless Schedule A is amended by written instrument under §3.3. §3.3 and §5.5 both foreclose the roster submission from doing that work.
+
+So M-07 — submitting the Winston roster by 06/01/2025 — is either unnecessary (Winston isn't covered) or insufficient (a Schedule A amendment was also required and appears nowhere). A15 §5.3.1 tasks Contracts with confirming clause text and roster scope but never mentions Schedule A. This is a well-constructed trap if intended; if not, it's the gap a delegation oversight analyst would find first.
+
+Nothing in the corpus shows either obligation was met. §4.1(a) and §4.2 required a Notice of Corporate Change within 30 calendar days of close — by 04/02/2025, addressed to the Plan's VP of Provider Network Management with a copy to General Counsel. A15 §2.1.3 assigns notices to Governance; no milestone, no A22 row, no A12 entry, no artifact. Same for §4.1(d), triggered independently by the organizational NPI change.
+
+No oversight audit has ever happened
+
+Article 6 obligates the Plan to audit annually. Seven years, zero audit reports, corrective action plans, or findings anywhere in the corpus — and §6.6's mandatory post-acquisition reconciliation of the Winston population is likewise absent, thirteen months after close. A36 carries delegated credentialing as an open risk; A22 tracks no audit item.
+
+Related: A16 is the only thing in the corpus resembling an audit, and it audits the wrong thing. §6.2(b) requires reconciling the Delegated Roster against the roster of professionals affiliated with each Covered Entity — which is precisely the A01-versus-roster reconciliation the corpus keeps circling and never performs.
+
+Contradictions with the neighboring files
+
+A33 attaches a rate schedule to this agreement. The Briarcrest row records "Annual rate update — most recent 01/01/2026". §7.1(a) expressly excludes fee schedules and rate schedules from this Agreement's scope, and A33's own legend limits Contract_Type to one value per row.
+
+A11 is now confirmed as a routing error. Briarcrest "Client Relations" sent a rate schedule change to delegate contacts . Under §7.1(a) rate schedules aren't this agreement's business, and §4.4 routes Briarcrest correspondence to the VP of Provider Network Management. A47 ratifies the error by assigning "Rate & Network Correspondence" to Jessica Kaufman, Client Relations.
+
+A19 asserts a Briarcrest commercial network enrollment effective 05/01/2019 with a payer-assigned enrollment ID. §7.1(b) puts enrollment outside this agreement, and A33 records no commercial participation agreement with Briarcrest — so that enrollment has no contract behind it anywhere.
+
+The 36-month cycle is now contractually binding. §1.18 and §2.1(g) fix it, matching A38 and A15 — and making A12's uniform 24-month reappointments and A02's single-cycle panel a contract compliance failure, not just an inconsistency.
+
+§2.1(a) requires five-year work history; A24 Stage B verifies ten-year affiliations. Exceeding the floor is fine, but it's the third different lookback in the set.
+
+§1.8's Credentialed Professional covers physicians, dentists, allied-health, and mid-levels — a definition that arguably sweeps in the eight imaging technologists, whom no payer credentials and who don't bill independently.
+
+Drafting and document problems
+§7.3 is textually broken. "(including without limitation the under any other agreement or under applicable law" — with the orphaned phrase "ProviderLink Directory Exchange database)" stranded at the foot of the page. A parenthetical closes around content that isn't there. In a real executed contract, this is unsignable.
+No governing law or venue clause, in a document whose Article 8 otherwise contains the boilerplate (notices, remedies, survival).
+Missing for a delegation agreement: no confidentiality or Business Associate provisions, no indemnification, no insurance requirements, no assignment or change-of-control consent (striking, given Article 4), no dispute resolution, no compensation terms, no entire-agreement or severability clause.
+Signature pages are blank. Every "By: ___" line is unsigned while the header asserts "Executed 04/15/2019".
+SVP vs. VP. Rothbard signs as Senior Vice President, Provider Network Management; §4.4 and the notice block direct notices to the "Vice President, Provider Network Management." Two different offices, or sloppy drafting.
+Marcus H. Delaney, EVP and General Counsel signs for Coopa Blue. He appears nowhere else in the corpus and isn't on the FY2026 org chart — though he does corroborate the Office of General Counsel that A30 and A23 reference and A39 omits.
+A50 §4.2 says this agreement "has not been amended"; A15 §5.3.1(i) directs Contracts to verify "any subsequent amendments." Given that Winston's inclusion required a Schedule A amendment, whether one exists is load-bearing and the corpus answers it two ways.
+Buffalo plan, Albany delegate. Briarcrest sits at 40 Fountain Plaza, Buffalo, with 716 contacts — consistent with A33's note about the WNY footprint, but an unusual counterparty for a Capital Region system's only delegation arrangement, and unexplained anywhere.
