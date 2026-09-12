@@ -1,0 +1,150 @@
+Overall verdict
+
+The Vendor Code is broadly plausible, though overreaching in places. The Data Governance Policy has serious chronology and ownership problems that would be noticeable to experienced healthcare governance, health-information, payer-enrollment, and IT professionals.
+
+Highest-confidence concerns
+
+The Data Governance Policy predates the systems and documents it governs
+ A30_Data_Governance_Policy.docx is effective September 15, 2024, but describes completed Winston integration structures, a 2025 acquisition, integration-specific Migration Wave fields, the Winston archive, retired Winston identifiers, and the February 2026 integration-review memo. Its next scheduled review was September 2025, yet it still carries the September 2024 revision. This is a decisive chronology failure.
+
+Payer enrollment is assigned to Compliance
+ The policy gives Compliance ownership of payer enrollment records, payer-effective dates, payer confirmations, and corrections in payer systems. Compliance may oversee enrollment risk, but routine enrollment typically belongs to Provider Enrollment, Credentialing, Revenue Cycle, Managed Care, or Network Operations. Making the CCO the operational domain owner is atypical.
+
+Finance owns billing/provider master data
+ Finance is assigned ownership of billing NPIs, TINs, legal entities, addresses, and claim-submission reference tables. Finance may govern financial controls, but Revenue Cycle or provider-master-data operations would more commonly maintain these records. The complete absence of Revenue Cycle from the ownership model is conspicuous.
+
+The local system is more authoritative than the payer for payer enrollment
+ The policy designates OpenMRS as “directly authoritative” for a payer-specific organizational NPI while separately acknowledging that the payer maintains its own enrollment system. For whether a payer actually recognizes an enrollment, the payer-side record and confirmation are operationally decisive. The local system may be the authoritative internal record, but the wording does not make that distinction cleanly.
+
+The Compliance Committee acts as enterprise data-governance authority
+ It resolves ambiguous system-of-record designations, issues binding data-governance decisions, approves ownership changes, and approves policy amendments. A health system might assign this to a Data Governance Council, CIO/CDO structure, Privacy and Security governance body, or executive committee. Giving the Compliance Committee this entire function is another sign that Compliance has absorbed unrelated operational authority.
+
+A30_Data_Governance_Policy.docx
+
+Additional concerns:
+
+The scope is narrow for an enterprise data-governance policy. It focuses heavily on provider credentialing, payer enrollment, HR, billing identifiers, and Winston migration records. It barely addresses patient clinical data, health-information management, quality data, research, interoperability, master patient identity, consent, analytics, cybersecurity, or financial reporting.
+No Privacy, Security, HIM, Legal, Clinical Informatics, Revenue Cycle, or Quality ownership appears. Those omissions would be striking in healthcare data governance.
+NPPES is described inconsistently. The table lists “NPPES; OpenMRS mirror” as the system of record, then separately identifies OpenMRS as the operational copy. A mirror cannot simultaneously be part of the authoritative source and merely a copy without additional rules.
+The governing-body record is treated as a data system. It may be the authoritative legal record of approval, but the detailed privilege delineation may live in an approved attachment or credentialing repository rather than in general Board minutes.
+Append-only semantics remain underspecified. “Most recent value is authoritative” does not explain voiding, correction dates, future-effective entries, approval status, multiple payer relationships, or competing active values.
+The policy authorizes scheduling restrictions during ordinary data disputes. A generic data owner may apply a flag that holds scheduling, without an explicit clinical review, patient-continuity process, emergency override, or severity threshold.
+The old value remains effective during disputes. Section 5.6 keeps the last agreed value operational while simultaneously permitting a hold. That may be unsafe if the dispute concerns expired credentials or an incorrect billing entity.
+Retention rules are asserted without cited authority. The affiliation-plus-ten-years schedule for disciplinary matters is presented as though specifically required by New York law or OPMC guidance, but no legal citation or referenced retention schedule is given.
+“Until superseded” is poor archive logic. Pre-acquisition records should be retained according to record class and legal requirements, not merely until later records supersede them.
+One retention rule ties records to last claim adjudication. Claims can be reopened or audited later, and enrollment records may support more than one provider, payer, location, or agreement. The trigger is too simplistic.
+Revision governance is internally weak. The CCO and IT Director jointly initiate every policy change, including changes primarily affecting HR, Credentialing, Finance, or Board records.
+A28_Vendor_Code_of_Conduct.docx
+
+This document is more realistic than most prior artifacts. Its structure, coverage of fraud and abuse, privacy, security, conflicts, gifts, exclusion screening, reporting, and enforcement are recognizable for a healthcare vendor code.
+
+Areas that may cause a double take:
+
+Contractual acceptance is assumed too broadly. The Code says accepting a purchase order or beginning work constitutes acceptance, and that subsequent revisions bind vendors through continued business. That may not amend an existing negotiated agreement unless the contract incorporates the Code and its amendment mechanism.
+The conflict rule is very expansive. Vendors must disclose interests in competitors and every close personal relationship involving people who might influence the engagement. Plausible as an expectation, but difficult to administer without definitions, materiality thresholds, and a disclosure form.
+Monthly exclusion screening applies to every vendor’s personnel and subcontractors. Monthly screening is plausible for healthcare workers and entities involved in federal program services, but applying it to all personnel of every vendor, regardless of function, is unusually broad.
+The gifts section creates uncertain exceptions. Sections 3.3.2 and 3.3.3 permit some gifts while making other gifts permissible with Compliance approval. Certain benefits may remain impermissible regardless of internal approval.
+Security requirements apply uniformly. Multifactor authentication, encryption at rest, annual risk assessments, and penetration or vulnerability testing apply to all vendors handling any Coopa Blue information, with limited risk-tiering.
+Incident notification defaults to 72 hours. That is plausible, but many healthcare organizations require materially faster notice for suspected incidents so they can investigate contractual and regulatory deadlines.
+Return or destruction is too absolute. Vendors may need to retain records for legal, regulatory, insurance, backup, audit, or professional-obligation reasons. A standard exception for legally required retention would normally appear.
+PHI confidentiality “in perpetuity” is imprecise. BAA and HIPAA obligations should govern rather than a generalized lifetime formulation.
+Audit rights are extensive but underspecified. The right applies broadly and survives six years, with no protections for other customers’ data, privileged material, security-sensitive information, audit frequency, independent reports, or cost allocation.
+Section 5.5 is logically unstable. It says the contract controls in a conflict unless the Code is stricter, in which case the Code controls. That effectively allows the Code to override negotiated contracts unilaterally.
+The document is marked internal and confidential despite being directed to vendors. A vendor code ordinarily must be distributed externally. The classification conflicts with its intended audience and acceptance mechanism.
+The hotline has no actual number or web address. It says the hotline operates continuously but provides no direct way to reach it.
+Cross-document concerns
+The 2024 Data Governance Policy incorporates a 2026 kickoff memo and 2025 acquisition facts without a revised issue.
+Compliance owns payer enrollment here, while earlier documents alternately involved Credentialing, Finance, IT, and unspecified payer-enrollment teams.
+The Compliance Committee’s expanding role now includes corporate compliance, data governance, ownership disputes, systems-of-record decisions, policy changes, and acquisition oversight.
+The policy identifies the Board Secretary as owner of the action and follow-up logs, but the previously reviewed action log was materially incomplete.
+The Vendor Code expects external acceptance while labeling itself confidential and providing no distribution mechanism.
+Strongest double-take items
+A September 2024 policy citing and incorporating February 2026 material.
+Compliance acting as payer-enrollment owner.
+Finance controlling operational billing-provider master data with Revenue Cycle absent.
+OpenMRS being called authoritative for payer-recognized enrollment.
+Compliance Committee functioning as the enterprise Data Governance Council.
+A vendor-facing Code marked internal and confidential.
+The Code purporting to override negotiated contracts whenever it imposes a stricter rule.
+A continuously available hotline with no hotline number or reporting link.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+The control-number pattern is now unmistakable: A28 → GOV-2024-028, A30 → GOV-2024-030, alongside A29/FIN-2024-029, A31/FIN-2026-031, A36/COM-2026-036, A39/HR-2026-039, A41/STR-2026-041, A22/GOV-2026-022, A08/INT-2025-008, A09/INT-2025-009, A03/CRE-2024-003, A06/CRE-2024-006, A01/HR-2026-001. Fourteen of seventeen controlled documents encode their artifact index in the control number. Real document-control systems number sequentially by issuing office and year; the odds of that alignment are nil. Combined with the A-numbers in email prose, this is the corpus's signature.
+
+A30's anachronism is the worst in the set
+
+Effective 09/15/2024, Rev. 09/2024, signed and endorsed that month. It then:
+
+assigns HR ownership of "the Winston-origin flag and Migration Wave tag introduced during the Winston Imaging integration" — a March 2025 event
+designates systems of record by cross-reference to A08 (Rev. 05/2025)
+cites the Credentialing Reconciliation SOP CRE-2024-006 (Rev. 11/2024)
+and at §3.6 states a principle "stated in the Integration Review Kickoff Memo and reproduced here" — a memo dated 02/02/2026
+
+A September 2024 policy citing a February 2026 memorandum is the single clearest impossibility in anything you've shown me.
+
+Compounding it: §6.6 sets the next review at 09/2025 and names "a corporate transaction that alters the domain-ownership landscape" as an interim-revision trigger. The acquisition happened, the review date passed seven months ago, and no revision was issued.
+
+A07 points at a hold A30 doesn't define
+
+A07 §6.1 authorizes Sawyer to apply "the appropriate informational hold defined under the Data Governance Policy (A30)". A30 defines no holds — it defers to A08 ("the appropriate informational flag defined in A08"). The reference is circular and lands nowhere.
+
+Worse, three documents now assert different authority over the same flags:
+
+Flag	Authority claimed byQuarterly Attestation Verification Pending	CMO, per bylaws §6.1.1 (A46)
+Credentialing Evidence Search Pending	CCO memo §6.1 (A07)
+Both	Credentialing domain owner (A30 §2.3) and "the Data Owner for the affected domain" (§5.6)
+A30 contradicts A08 outright
+
+§3.2 lists Legacy_Billing_Group_NPI system of record as the billing master-data system, OpenMRS as operational copy. A08 row M-004 says OpenMRS directly. A30 §3.1 says the Crosswalk governs "where more granular" — so the policy defers to a document it disagrees with.
+
+Same table renders Individual NPI as system of record "NPPES; OpenMRS mirror" with operational copy "OpenMRS" — OpenMRS in both columns of a two-column authority distinction.
+
+And §4.4 refers to "the Winston Imaging legacy organizational (Type 2) NPI retired in the course of the systems migration", against A31, A03 §2.2, and A36 slide 3 all stating Winston retains its organizational NPI. That contradiction has now appeared in six documents without resolution.
+
+Compliance owning payer enrollment is a real governance problem
+
+§2.6 makes the CCO the Data Owner for payer enrollment records, and §3.2 makes OpenMRS "directly authoritative" for Payer_Enrollment_Org_NPI. Two issues stack:
+
+Payer enrollment is an operational revenue-cycle or credentialing function. Compliance owning it means Compliance audits its own data — and A07/A36 have the CCO leading the review of exactly that workstream.
+Enrollment data does not live in the EMR. This is the third document to assert it, after A08 M-003 and A03 §6.2(e).
+
+ProviderLink appears in §2.6 and §3.2 as an authoritative external system, and in A03 §1.2(d), with no definition anywhere in the corpus. If it's meant to be CAQH ProView, say so.
+
+Retention section has a fabricated regulatory hook
+
+§4.2 retains OPMC-related records "in accordance with New York State law and the applicable OPMC guidance". OPMC investigates physician misconduct; it does not publish record-retention guidance to hospitals. The "affiliation plus ten years" schedule isn't traceable to any NY requirement either. §4.2(b) also carries forward the precautionary-suspension misuse I flagged in A03.
+
+§4.7 conflicts with A06 §7.2, which requires voided rows be retained indefinitely and never archived off-system — against A30's seven-year floor and approved destruction schedules.
+
+The Office of the General Counsel (§4.6, §6.5) and a Legal function appear nowhere on the org chart.
+
+What a data governance policy can't omit
+
+No data classification scheme — no public/internal/confidential/restricted tiers, no handling rules per tier. That's the first section of essentially every real one, and the corpus stamps "INTERNAL — CONFIDENTIAL" on every artifact without a policy defining what that means.
+
+For a health system, the two largest data domains are simply absent: Health Information Management / the clinical record, and the Master Patient Index. §1.1 scopes the policy to credentialing, enrollment, HR, and revenue cycle — but §1.3 claims coverage of OpenMRS, which is an EMR. No designated record set, no minimum necessary, no accounting of disclosures, no patient access or amendment rights, no medical-record retention under 10 NYCRR 405.10. No data dictionary, no quality metrics, no MPI duplicate-resolution standard.
+
+§2.3 also carries the NYSED error forward, assigning Credentialing ownership of "NYSED registration numbers" for a population that includes eight DOH-licensed technologists.
+
+Minor: A30 §1.2 calls it the "Medical Staff Privileging Bylaws" (matching A46) while A03, A21, and A41 call it the "Medical Staff Bylaws." Toohey signs as "Director of Information Technology**(acting)**," a qualifier absent from the org chart and every other document.
+
+A28 is clean, with three healthcare-specific gaps
+
+Structurally this is the most professional document in the corpus — exclusion screening monthly against LEIE and SAM is exactly right, the 72-hour incident notification is well-calibrated, and §3.6.4's prohibition on using Coopa Blue data to train AI/ML models is a genuinely current provision that reads like someone updated the policy recently.
+
+What's missing is what makes it healthcare:
+
+No Open Payments / Sunshine Act. A vendor code governing device and pharma reps that never mentions §6002 reporting, or the vendor's obligation to reconcile reported transfers of value with the recipient, would be flagged in any hospital compliance review. The §3.3 gift limits are written without reference to it.
+No vendor credentialing platform. §3.7.3 mentions badging and site access, but every hospital runs rep access through Vendormate, IntelliCentrics, or Reptrax, with immunization and training verification as a precondition. Its absence is conspicuous in a document otherwise this thorough.
+The hotline has no number. §4.2(c) directs vendors to a 24/7 hotline and prints neither a phone number nor a URL. §4.2(b) gives (518) 417-0140 — which A31 lists as the organization's main switchboard, not a compliance line.
+
+Smaller: §3.6.1 gestures at "applicable New York State information-security requirements" where a real NY policy would cite the SHIELD Act by name; the document has no Supersedes field while A30 does; and Compliance-office documents split across two control prefixes (GOV- for A28/A30, COM- for A07/A36) with no apparent rule.
