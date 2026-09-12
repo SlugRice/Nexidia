@@ -1,0 +1,134 @@
+Overall verdict
+
+Internally consistent in several headline numbers, but the governance structure and strategic-plan content would cause experienced healthcare executives to pause. The strongest tells are an incomplete organization chart, unusual responsibility assignments, financial timing errors, and a strategic plan that reads more like a narrative evidence package than an actual board-level plan.
+
+Highest-confidence concerns
+
+FY2025 revenue timing is wrong
+ A41_Strategic_Plan_FY2026_2028_Excerpt.docx says FY2025 runs through June 30, 2025 and that Winston’s March 3, 2025 acquisition contributed ten months of FY2025 revenue. March 3 through June 30 is approximately four months, not ten. This is the clearest factual error in the set.
+
+The organization chart omits essential hospital leadership
+ A39_Organization_Chart_FY2026.pdf shows the CEO, CCO, CMO, Controller, HR Director, IT Director, three Compliance staff, and facilities. It does not show a CFO, COO, CIO, CNO, hospital presidents or administrators, Revenue Cycle, Legal, Quality, Nursing, Medical Staff Services, or clinical-service leadership. Yet the strategic plan assigns initiatives to several of those missing executives. For a two-hospital, 215-bed system with approximately 1,800 employees, this would look materially incomplete unless explicitly labeled a selected governance chart.
+
+Facilities have no visible management relationship
+ The chart says facilities report to the CEO through an SVP of Operations, but that SVP does not appear anywhere in the chart. The facilities are displayed as boxes without named leaders or clear reporting lines.
+
+Compliance owns too much credentialing operations
+ The Director of Credentialing, Senior Ops Analyst handling credentialing and payer-enrollment discrepancies, and medical-staff governance coordinator all report under the Chief Compliance Officer. Compliance can oversee these functions, but placing routine credentialing, medical-staff governance, administrative holds, payer-enrollment reconciliation, and implementation of privilege decisions inside Compliance is atypical and raises independence and role-separation questions.
+
+The Board Secretary chairs the Compliance Committee
+ Kevin Caster is simultaneously Board Secretary, Medical Staff Governance Coordinator, and chair of the Compliance Committee, while reporting within the Office of Compliance and having a dotted line to the Board. That concentration of recordkeeping, governance coordination, and compliance-program leadership would invite conflict-of-interest and independence questions.
+
+A41_Strategic_Plan_FY2026_2028_Excerpt.docx
+Plausibility concerns
+Adoption occurs midway through FY2026. The plan begins July 1, 2025, but was adopted in January 2026 after the Board vision was adopted December 17, 2025. A retroactively adopted FY2026 plan is possible, but experienced governance readers would expect an explanation.
+Integration sponsorship is unusual. The CCO and Controller jointly sponsor systems migration, payer enrollment, credentialing harmonization, contracts, and governance. An integration this broad would more naturally involve operations, IT, finance, clinical leadership, and executive integration management.
+The CIO sponsors digital health but is absent from the organization chart. The same is true of the CFO, CNO, CHRO, and SVP of Operations mentioned elsewhere.
+Financial targets are not measurable. Terms such as “low-single-digit,” “materially higher,” “narrow band,” and “within the Board’s target range” avoid stating actual targets. A confidential strategic plan would normally contain enough metrics to measure performance.
+Community-partnership targets count agreements rather than impact. The plan targets six partnerships but gives no access, utilization, quality, equity, or community-health outcome measures.
+Value-based-care milestones lack baseline and target percentages. The document says the revenue share will become materially higher without identifying either value.
+The plan says the March 3, 2026 systems deadline is firm while allowing later payer-enrollment and contracting workstreams. That is possible, but “full systems migration” and continued reliance on legacy billing identifiers need clearer boundaries.
+OpenMRS remains implausibly central. It is described as the consolidated operational environment supporting hospitals, imaging, portal deployment, reporting, scheduling, credentialing, and billing-related data. That breadth would require extensive explanation of interfaced systems.
+The risk register is generic. It omits recognizable hospital risks such as patient safety, quality performance, capacity, malpractice, revenue-cycle degradation, workforce agency dependence, supply chain, capital infrastructure, and emergency preparedness.
+No owners or metrics appear for most milestones below the executive-sponsor level. It reads as high-level board prose rather than an executable strategic plan.
+A31_FY2026_Organizational_Fact_Sheet.xlsx
+Plausibility concerns
+“Credentialed Providers: 249” conflicts conceptually with the underlying roster. The provider population includes imaging technologists whose credentialing and NPI treatment was previously questionable. The fact sheet does not define whether “credentialed” means employed, privileged, enrolled, rostered, or verified.
+The organizational NPI is presented at the parent-system level. A not-for-profit health-system parent does not necessarily furnish healthcare or bill under one consolidated Type 2 NPI. Hospitals, provider groups, facilities, and organizational subparts may have separate identifiers. The fact sheet gives no entity-to-NPI structure.
+Subsidiary identifiers are incomplete. It lists Winston’s EIN but omits the organizational NPI that the strategic plan repeatedly says Winston retains.
+Facility descriptions are too thin. Licensed-bed counts are plausible fact-sheet content, but facility type, operating-certificate identity, service profile, and legal ownership are absent.
+Revenue and integration costs lack source attribution. The fact sheet gives headline values without audited/unaudited status, consolidation basis, or reporting-period notes.
+The document is classified confidential despite containing mostly standard public-facing organizational facts. Not impossible, but it adds to the pattern of every artifact carrying the same formal classification.
+A39_Organization_Chart_FY2026.pdf
+Plausibility concerns
+It mixes hierarchy with policy statements. Assertions about sole privilege authority, committee functions, analyst authority, and compliance-program scope occupy substantial space. Normal organization charts generally show reporting relationships, while charters and bylaws establish authority.
+The CEO and several executives are unnamed. Direct reports beneath them are named. That selective detail feels constructed around the individuals needed by the document scenario.
+The Credentials Committee is shown through the CMO’s executive box rather than as a formal medical-staff governance body.
+The MEC is mentioned only in notes. It does not appear in the visual governance structure despite being essential to the stated privileging pathway.
+The Compliance Committee does not appear as a box. Its chair is identified, but its reporting relationship to executive leadership or the Board is not shown.
+Medical Staff Services is not represented. Credentialing, privileging, committee support, and governing-body implementation appear split among Compliance personnel without a recognizable Medical Staff Office structure.
+Facility boxes imply organizational reporting but provide no leaders. They function more like a facility inventory than an organization chart.
+The chart includes direct email addresses and phone numbers for selected leaders. That is possible internally, but inconsistent with its purported purpose as a governance hierarchy.
+Cross-file issues
+A41_Strategic_Plan_FY2026_2028_Excerpt.docx names executive roles missing from A39_Organization_Chart_FY2026.pdf, including the CFO, CIO, CNO, CHRO, and SVP of Operations.
+The plan reports 249 credentialed providers, matching the roster’s distinct-provider count exactly, suggesting “credentialed providers” may simply mean unique rostered individuals rather than a separately validated credentialing population.
+The strategic plan calls the CCO and Controller joint integration sponsors, while the organization chart gives neither visible operational authority over IT, facilities, or payer contracting.
+The strategic plan describes the Winston acquisition as contributing ten months to FY2025 even though its own fiscal dates and acquisition date support only about four months.
+The fact sheet identifies 215 licensed beds, while the organization chart provides no operational or nursing leadership overseeing those hospital facilities.
+Strongest double-take items
+Ten months of acquisition revenue claimed for a March-to-June period.
+A two-hospital health system organization chart with no CFO, COO, CIO, CNO, Legal, Quality, Revenue Cycle, or hospital executives.
+An absent SVP of Operations identified as the facilities’ reporting path.
+Routine credentialing and medical-staff governance concentrated under Compliance.
+The Board Secretary also chairing the Compliance Committee.
+A strategic plan with few measurable financial, quality, access, or workforce targets.
+An organization chart used to restate privileging policy rather than clearly show governance bodies and reporting lines.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+CRPA resolves here — Capital Region Payers Alliance, named in A41 §2.4.1 — so withdraw that objection from my A45 review. The org chart is also the first document that cleanly ratifies the Senior Ops Analyst role A03 and A06 keep invoking. But the fiscal calendar and the executive structure both come apart in this directory.
+
+The fiscal year breaks three documents
+
+A41 §1.4 fixes FY2026 as 07/01/2025 – 06/30/2026. Consequences:
+
+The Winston revenue math is wrong by a factor of two and a half. §3.1 says the FY2025 baseline "includes ten months of Winston Imaging subsidiary revenue (03/03/2025 close through 06/30/2025 fiscal year-end)". That span is under four months. The parenthetical contradicts the number in the same sentence.
+
+A29's quarter-end list is now provably wrong. It extends close at March, June, and September. On a July–June year the quarter ends are September, December, March, and June — December is missing, and June is the annual close, which cannot be a two-day extension.
+
+A45 is labeled the wrong quarter. The Controller calls the period through 3/31/2026 "Q1 2026". On this fiscal calendar that's Q3 FY2026. A controller reporting to a CCO would never use calendar-quarter labels against a June year-end.
+
+The plan was adopted mid-cycle. Board resolution 01/2026 for a plan that started 07/01/2025, and §6.1.3 commits the Board to annual review "at its first-quarter meeting of each fiscal year" — July through September, not January.
+
+A41 cites its own future. Rev. 01/2026, citing A31 (Rev. 04/2026) and an integration cost "through 3/31/2026". Fifth controlled document with a forward reference. The $2.4M also lands exactly on A45's reported actual — a January projection matching an April actual to the dollar.
+
+Four executives exist in prose and nowhere on the chart
+
+A41 assigns initiatives and risks to a Chief Financial Officer, Chief Information Officer, Chief Nursing Officer, and Chief Human Resources Officer. A29 routes sign-off to the CFO five times. The org chart's entire C-suite is CCO, CMO, Controller, HR Director, IT/Systems Director. Spindell reports to the CEO as Controller — so the CFO he releases the reporting package to doesn't exist, and the Controller is simultaneously joint Executive Sponsor of I-01 alongside the CCO while the CFO co-sponsors I-04.
+
+The chart also references an "SVP / Operations" with no box, and the CEO is never named anywhere in the corpus.
+
+Below the C-suite, A29 names an Assistant Controller, Accounting Manager, AP Manager, Treasury, Property Accounting, Consolidations, and Revenue Cycle; A04 is prepared by a "Medical Staff Office / Scheduling". None appear.
+
+Medical staff governance is missing its apparatus
+
+The chart's notes describe the Credentials Committee, MEC, and governing body, but none is drawn, and neither is a Chief of Staff / President of the Medical Staff, a Chief Nursing Officer, or a Quality/Risk function. For an Article 28 hospital the MEC is a real governance body with an elected physician leader; here it exists only as a routing step in a footnote.
+
+Two structural oddities a surveyor would question:
+
+The CMO chairs the Credentials Committee. That chair is normally an elected member of the organized medical staff. An employed executive chairing it blurs the self-governance line the bylaws framework in §4.4 depends on.
+The CCO reports solely to the CEO, with no dotted line to the board or an audit committee. OIG compliance-program guidance treats direct board access as the core independence control. Meanwhile Kevin Caster — a CCO direct report — chairs the Compliance Committee, while also serving as Board Secretary and recording governing-body actions. That's the person who documents privileging decisions also chairing the committee that would investigate them.
+
+Also: Credentialing reports into Compliance, not to the CMO or a Medical Staff Office. Internally consistent with A03's ownership, but unusual enough in practice to draw a second look.
+
+None of A41's four board committees — Finance & Audit, Community & Mission, Quality, People & Culture — appear under the Board box.
+
+Numbers that won't survive scrutiny
+
+$412M on 215 licensed beds is roughly $1.9M per bed, against a typical community-hospital range closer to $1.0–1.5M. With ~1,800 employees that's ~$229K revenue per employee, also high. Not impossible with heavy outpatient volume, but the imaging subsidiary is only $18M, so the outpatient story doesn't carry it.
+
+"249 credentialed providers" counts the eight imaging technologists as credentialed providers. A41 §4.1 compounds it: the Winston workforce "comprised 24 providers together with the operational, technologist, and administrative staff" — but a third of that 24 are the technologists.
+
+§3.4's payer mix describes "approximately balanced shares of Medicare, Medicaid, commercial, and self-pay-and-other". That puts self-pay near 25%. Real hospital self-pay runs low single digits. No CFO would write that sentence.
+
+The Winston NPI contradiction gets a patch, not a fix
+
+A41's milestone language — retirement of the legacy billing identifier "for internal billing purposes" — is the corpus's attempt to reconcile the conflict I flagged earlier. It almost works. But A31 states flatly that Winston retains its "legal entity, TIN, and organizational NPI", as does A03 §2.2, while A09 treats records carrying that NPI as remediation exceptions. A subsidiary that keeps its own TIN and NPI bills under them; there is no coherent state where the identifier is both retained and retired.
+
+Separately, A31 uses "TIN" and A41 uses "EIN" for the same thing in parallel sentences.
+
+Nonprofit-specific gaps
+
+A three-year strategic plan for a New York 501(c)(3) hospital system with a whole initiative on community partnerships, and no mention of the Community Health Needs Assessment or the §501(r) implementation strategy, no charity care / financial assistance policy, no community benefit reporting, no 340B, and no Article 28 or DOH CON considerations. The CHNA is the single most conspicuous omission — it's a triennial federal requirement and it's what a community-partnership initiative would normally be anchored to.
+
+Small things
+
+The A39 PDF has encoding damage — bullet characters rendering as �� throughout. And the sequential-DID problem I flagged in the first batch is now fully exposed: 0101 through 0108 assigned in org-chart order, with a main line at 0140.
