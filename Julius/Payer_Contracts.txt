@@ -1,0 +1,115 @@
+Overall verdict
+
+This set has substantial payer-domain credibility issues. The strongest tells are one organizational NPI being assigned across two separate legal entities and TINs, government-program enrollments being treated as contracts, and inconsistent payer populations across the three files.
+
+Highest-confidence concerns
+
+One Type 2 NPI is assigned to two distinct legal entities and TINs
+ A19_Coopa_Blue_Enrollment_Reference_Sheet.xlsx assigns NPI 1384970293 to both Coopa Blue Health, Inc. under TIN 14-1893052 and Winston Imaging under TIN 14-2214679. The sheet explicitly says the TINs remain separate while “only the organizational NPI is” consolidated. This is the most significant domain problem. A Type 2 NPI identifies the enumerated organization or subpart. Parent ownership does not make it a freely shared billing identifier for a separately surviving legal entity.
+
+A systems deadline is treated as changing payer and Medicare enrollment
+ The sheet says Winston’s Medicare PECOS record was converted from its legacy NPI to Coopa Blue’s NPI on the March 3, 2026 systems cutover. Internal system migration does not itself amend PECOS or payer enrollment. Those changes require the applicable external enrollment action and effective date.
+
+The contract log is not actually a contract log
+ A33_Payer_Contract_Summary_Log.xlsx combines negotiated commercial agreements, a delegated-credentialing agreement, Medicare and Medicaid enrollments, and an MSSP participation arrangement. These have different legal structures, owners, renewal mechanisms, rates, and source records. Calling them all active payer contracts makes the artifact structurally weak.
+
+The payer populations do not reconcile
+ The enrollment sheet contains Briarcrest, CRPA, NGS, Empire Community Health Plan, Hudson BlueCross BlueShield, and Adirondack Regional ACO. The contract log and contact directory instead include many other payers, including Empire BCBS, Excellus, Fidelis, Aetna, UHC, Humana, MVP, CDPHP, Independent Health, and EmblemHealth. Codes and names also differ. This could reflect different scopes, but the files do not explain the dramatic mismatch.
+
+The enrollment reference contradicts the contract log’s Winston exclusion
+ The contract log excludes Winston agreements that continue under its legacy NPI. The enrollment sheet says Winston’s legacy NPI was retired across several enrollments by March 3, 2026. The documents therefore leave it unclear which Winston agreements still use the legacy identifier and which have migrated.
+
+A19_Coopa_Blue_Enrollment_Reference_Sheet.xlsx
+The payer × legal entity model is too coarse. Real enrollment records often require provider or supplier type, facility or service location, individual practitioner, organizational subpart, product, network, taxonomy, billing/rendering relationship, participation status, and effective dates.
+Hospital and professional claims are collapsed together. Briarcrest’s row says one enrollment covers two hospitals’ facility and professional claims. Experienced enrollment staff would expect separate entities, provider records, locations, and billing arrangements to be represented.
+Medicare Part A and Part B are merged into one corporate row. The notes identify one NGS enrollment as “Part A / Part B” without distinguishing institutional and professional supplier enrollment structures.
+The Medicare entry carries a payer-assigned ID such as NGS-CBH-8842. That looks like a convenient synthetic identifier rather than a recognizable CMS or MAC enrollment reference.
+Legacy effective dates are preserved after an alleged NPI conversion. Winston’s Medicare row keeps an enrollment effective date of 06/15/2011 while saying the NPI changed in 2026, without a separate conversion effective date or historical identifier record.
+ACO participation is modeled as NPI enrollment. The notes say TIN attribution was filed to the consolidated NPI, but the sheet’s central design is still organizational-NPI enrollment. ACO participation and beneficiary alignment are not ordinary payer-enrollment rows.
+Several commercial entries lack matching contract records. Empire Community Health Plan, Hudson BlueCross BlueShield, and Adirondack Regional ACO do not appear in the contract log.
+Row 10 is missing. Not inherently wrong, but unexplained sequence gaps in a short controlled reference look like deletion or construction residue.
+Compliance remains the source-record owner. That continues the prior unusual assignment of operational payer enrollment to Compliance.
+A33_Payer_Contract_Summary_Log.xlsx
+The Briarcrest row appears mislabeled. It is classified only as Delegated Credentialing, but the rate-schedule field says there is an annual rate update. Credentialing delegation itself does not ordinarily establish reimbursement rates. This suggests a participation agreement and delegation agreement have been compressed into one record.
+Government fee schedules are treated like loaded contract rate schedules. Medicare and Medicaid published payment schedules are not equivalent to negotiated commercial contract exhibits.
+Medicare is assigned a “revalidation last completed” date without an evidence reference. The row lacks enrollment record identifiers, reassignment structure, locations, and entity-specific details.
+The stated Medicaid five-year revalidation rule is presented as universal. The file provides no program-specific authority or provider-category qualification.
+The MSSP row is described as a five-year agreement ending in 2026. The source file gives no supporting agreement identifier or CMS participation reference.
+Contract owner is too generic. “Contracts” does not identify an accountable person, renewal-calendar owner, legal reviewer, rate-loading owner, or operational business owner.
+No contract identifiers appear. A functioning contract inventory would normally include executed agreement or repository IDs, legal contracting entity, payer legal entity, products, network, amendment history, and document location.
+No Winston contracts are listed despite calling the log comprehensive. The introduction calls it a summary of all active payer contracts held by Coopa Blue, then the notes exclude contracts held by the wholly owned subsidiary. The scope statement should distinguish parent-only from consolidated-system contracts.
+The notes are unusually curated around earlier evidence. Briarcrest references A10 and CRPA references A18, which reinforces the designed-document-set appearance.
+A47_Active_Payer_Contact_Directory_Export.csv
+The directory mixes contacts for contracts, enrollment, audits, ACO participation, rates, and directory maintenance without identifying the agreement, market, product, legal entity, escalation level, or secure submission channel.
+CRPA uses an audit-specific domain for its contracting manager. Both the program-integrity auditor and contracting contact use crpa-audits.org. That may be intentional, but it is unusual for ordinary network contracting.
+Named federal and state enrollment contacts look overly direct. The directory presents individual analyst names and direct emails for the Medicare MAC and eMedNY. Possible, but an experienced enrollment employee may expect portal, call-center, case, or territory-channel references rather than stable assigned contacts.
+No verification status appears. last_updated does not show who verified the contact, source, effective period, active/inactive status, or whether the address supports PHI or sensitive submissions.
+No secure-transmission guidance appears. A payer contact directory used for audits, rosters, or enrollment should distinguish ordinary correspondence from approved secure exchange.
+The directory includes payer names absent from the enrollment reference, while the enrollment reference includes organizations absent from this directory.
+The ACO is treated like a payer contact. It may belong in a broader external-partner directory, but it is not a payer in the same sense as the commercial carriers and government programs listed.
+Strongest double-take items
+The same Type 2 NPI assigned to two surviving legal entities with separate TINs.
+A March 2026 internal cutover portrayed as converting Medicare PECOS enrollment.
+Medicare, Medicaid, delegated credentialing, commercial contracts, and ACO participation combined in one contract log.
+Briarcrest’s delegated-credentialing entry carrying a reimbursement rate schedule.
+One enrollment row covering hospital facility and professional claims across multiple sites.
+Major payer-name and population mismatches among the three files.
+A log claiming all active payer contracts while excluding the subsidiary’s contracts.
+Compliance acting as the authoritative owner of operational payer-enrollment records.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+One organizational NPI cannot serve two legal entities with two TINs, and A19 states that it does — explicitly, in its own legend: "Coopa Blue Health, Inc. (14-1893052) and Winston Imaging (14-2214679) retain their separate Employer Identification Numbers. TIN is not consolidated; only the organizational NPI is". Every row assigns 1384970293 to both entities. A Type 2 NPI is issued to a specific legal entity; PECOS and every commercial enrollment system validate NPI against the TIN on file. Rows 3, 5, 7, 9, and 12 would reject at submission, and the claims would deny. This is the most consequential domain error in the entire corpus, because it isn't an inconsistency between documents — it's a single document asserting something the identifier system does not permit.
+
+Row 5 compounds it: a PECOS record "converted from legacy 1342281247 to consolidated organizational NPI". Medicare enrollments aren't converted to a different entity's NPI; an ownership change is an 855 CHOW filing, and Winston — which A15 and A40 insist survives as a distinct legal person with its own EIN — must enroll under its own NPI.
+
+A19 contradicts A15 on the central design decision
+
+A15 §3.3.1 is explicit that retirement is internal-only: "Winston Imaging remains the enrolled organizational entity for those specific external arrangements which are addressed under Section 4". A19 converts all five Winston external enrollments to the consolidated NPI. A15 §4.2.2 also requires per-provider, per-payer migration on individual payer timelines; A19 shows a uniform bulk cutover on 03/03/2026.
+
+And the completion claim is falsified by the neighboring directory. A19 row 3 says the legacy NPI was "retired effective 03/03/2026," confirmed 04/01/2026. A16's extract on that exact date found five providers still carrying it, and A17 corrected one on 04/02/2026.
+
+The two logs describe different companies
+
+A33 claims to be "all active payer contracts" — 15 rows. A19 covers 6 payers, and three of them appear nowhere in A33: Empire Community Health Plan, Hudson BlueCross BlueShield, and Adirondack Regional ACO. Conversely, A19 omits ten A33 payers including NY Medicaid FFS.
+
+The ACO conflict is the sharpest: A33 has Coopa Blue in Coopa Blue ACO Partners, LLC for MSSP, 01/01/2022–12/31/2026; A19 has the same TIN in Adirondack Regional ACO, MSSP-aligned, effective 01/01/2022. A TIN can participate in only one MSSP ACO. Separately, A19 row 12 adds Winston to the ACO on 07/01/2025 — MSSP participant lists change effective January 1 through a defined annual window, not mid-year.
+
+Two more direct conflicts: NGS enrollment is 01/01/2005 in A33 and 01/01/2015 in A19; CRPA enrollment (09/12/2018) predates the CRPA contract (07/01/2020) by two years.
+
+A33's carve-out note — "Contracts held by Winston Imaging... that continue to adjudicate under its legacy organizational identifier are not enumerated" — describes an empty set, since A19 says none do.
+
+Real companies, invented employees
+
+A33 and A47 name Empire BlueCross BlueShield (Anthem NY), Excellus, Fidelis, Aetna, UnitedHealthcare, Humana, MVP, CDPHP, Independent Health, EmblemHealth, and NGS — all real entities. A47 then attaches fabricated named individuals with plausible corporate addresses at their real domains: empireblue.com, aetna.com, uhc.com, humana.com, cdphp.com, excellusbcbs.com, emblemhealth.com, ngsmedicare.com, emedny.org. For synthetic test data that's the same liability as the live NPIs, and arguably worse. A19 meanwhile uses invented payers for the same market. Pick one convention.
+
+The area codes are otherwise well-chosen — 952 Minnetonka for UHC, 860 Hartford for Aetna, 502 Louisville for Humana, 585 Rochester for Excellus, 315 Syracuse for NGS, and NGS genuinely is the Jurisdiction K MAC. That research shows, which makes the next item stand out more.
+
+Five external organizations share Coopa Blue's phone exchange. MVP 417-0356, CDPHP 417-0492, CRPA 417-0671/0698, eMedNY 417-0806, and the ACO 417-0287 all sit in the 518-417 block — as did Winston's 417-02xx. Briarcrest and Independent Health likewise share 716-283.
+
+Smaller A47 issues: the CRPA contracting manager has an @crpa-audits.org address; the file has no control number or footer, which under A50 §7.5 places it outside the controlled set; and "Rate & Network Correspondence" is an invented role taxonomy.
+
+What a payer contract log can't omit
+
+A33 has no contract identifier, no reimbursement methodology (DRG, APC, percent-of-Medicare, case rate), no rate escalator, no timely filing limit, no claims appeal or dispute window, no termination-without-cause notice period, no material-amendment provision, no risk or value-based terms, no silent-PPO/network-leasing clause, and no volume or revenue figures. Timely filing and the amendment window are the two things a contract summary exists to answer, and neither is present. For New York specifically, the material-amendment column matters — plan/provider amendments run through DOH review , which is the gap I flagged in A11 and which this log would normally close.
+
+Missing payer categories: no-fault auto and workers' compensation, both standard and high-volume for imaging in New York, plus Tricare and any Medicare Advantage beyond Humana.
+
+Two classification oddities: Fidelis Care is typed "Commercial" when it's predominantly a Medicaid/Essential Plan carrier, and Independent Health (Buffalo) and EmblemHealth (downstate) are unusual contracts for an Albany system to hold.
+
+Smaller items
+A19 skips Row_ID 10 — 9 jumps to 11.
+A19 narrates its own filesystem location — "File key: A19," "Location: /Payer Contracts/," "Workbook tab: Enrollment Reference".
+Payer enrollment now has four owners across the corpus: Compliance–Payer Enrollment (A19), Hoyt/Credentialing (A15 §2.4), the CCO as Data Owner (A30 §2.6), and Contracts/Revenue Cycle (A33) .
+A33 cites A10 and A18, neither of which has appeared in any directory so far.
+A19's Briarcrest row asserts a commercial network participation enrollment for which A33 records only a delegated credentialing agreement — A33's own legend limits Contract_Type to five values and Briarcrest holds just the one.
+Control numbers continue the alignment: CTR-2026-033 for A33, PE-2025-019 for A19.
+A47 ratifies the A11 error — Jessica Kaufman, "Client Relations Contact," owns "Rate & Network Correspondence". Consistent with the email, still the wrong function for distributing a fee schedule.
