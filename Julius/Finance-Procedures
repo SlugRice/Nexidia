@@ -1,0 +1,88 @@
+Overall verdict
+
+The core month-end procedures are recognizable and mostly plausible, but the integration section contains a decisive chronology failure and several accounting statements that would make an experienced controller or healthcare accountant pause. A29_Finance_Month_End_Close_Procedures_Excerpt.docx reads like a later integration-specific supplement inserted into an older policy without updating its revision history.
+
+Highest-confidence concerns
+
+Impossible document chronology
+ The procedure is revised and approved in July 2024, but Section 5 says project code INT-WI-2025 was established on the March 3, 2025 acquisition close date. It also governs a subsidiary that was not acquired until that date. A July 2024 document cannot describe those later events as completed facts without a subsequent revision or separately dated supplement.
+
+“Off-balance-sheet accruals” is contradictory terminology
+ Section 1.2 places “off-balance-sheet accruals” within the consolidated close. An accrual recognized in the general ledger normally affects financial-statement accounts. Off-balance-sheet commitments or contingencies are a different concept. Finance personnel would likely flag this phrase immediately.
+
+Quarter-end deadlines conflict with later sign-off language
+ Section 1.4 extends March, June, and September closes to BD+7. Section 6.3 still requires final Controller sign-off on BD+5 without preserving the quarter-end exception. The earlier Q1 cost email used BD+7, so the document set resolves this inconsistently.
+
+Acquisition accounting is largely absent
+ The integration-cost section places systems work, data migration, software, legal, valuation, retention, severance, equipment, facility, and advisory costs into one project code, but does not distinguish expenses from capitalizable implementation costs, acquired assets, transaction costs, restructuring costs, or other purchase-accounting treatment. A project code can collect all costs, but eligibility for the code is not the same as accounting classification.
+
+Closing the project code cannot create a “residual balance” to reclassify
+ A project code is described as a cost-collection segment, not an account holding a balance. Closing or archiving it should prevent future use, not require reclassification of all accumulated historical expense. Section 5.6 sounds as though the project code itself is a balance-sheet account.
+
+Healthcare-finance plausibility issues
+Patient accounting freeze is too absolute. The document freezes patient accounting at 23:59 on the final calendar day. Healthcare charge capture commonly continues after service dates, requiring late-charge, discharged-not-final-billed, unbilled revenue, coding, and cutoff processes. The procedure mentions accruals generally but does not explain how services rendered before month-end but coded or billed afterward are recognized.
+Patient revenue reconciliation is underspecified. Gross charges, contractual allowances, reserves, denials, takebacks, and net-revenue-rate analysis are credible components, but the procedure omits unbilled accounts, discharged-not-final-billed activity, late charges, medical-necessity or coding holds, charity-care classification, and revenue-estimation methodology. This makes the section feel like a summary rather than a controllable procedure.
+Post-payment audit recognition is too categorical. The document requires all takebacks, recoupments, or refunds to be recorded when the payer’s final determination is issued. Depending on the facts, an organization may need to recognize an estimate or contingency earlier. The policy leaves no room for probability, estimability, appeal posture, or accounting review.
+The AR allowance terminology is muddled. It combines aged AR, allowance for uncollectible accounts, contractual allowances, payer classes, charity care, bad debt, denials, and refunds without clearly separating valuation allowances, contractual adjustments, implicit price concessions, credit balances, and administrative write-offs.
+The Chief Compliance Officer has unusual control over project-code closure. Compliance may confirm completion of compliance workstreams, but requiring the CCO to confirm completion of the entire integration before Finance closes the code is unusual. Integration governance, the CFO, or an executive steering committee would more naturally own overall completion.
+General finance-control issues
+Approval limits use the “absolute value of the entry,” but do not specify whether that means total debits, total credits, largest line, or net impact. For a balanced journal, “net value” would always be zero.
+The Controller has unlimited approval authority, yet CFO approval is required above $2.5 million. That makes “unlimited” misleading.
+Recurring entries inherit the original approver’s authority indefinitely. A mature control would usually require periodic template recertification and review of continued appropriateness.
+Every late item below a threshold is pushed into the following period. That is too mechanical because aggregate misstatement, account-specific risk, recurring cutoff problems, and qualitative materiality can matter even below fixed thresholds.
+The 15 percent accrual-variance rule applies the same way to utilities, professional fees, supplies, and contracted services despite their different estimation bases.
+Requiring advance approval for every deviation is unrealistic when unexpected close issues arise after the fact. The document does not distinguish prospective exceptions from emergency exceptions and retrospective ratification.
+Seven-year retention is plausible as a baseline, but the document does not identify the governing retention schedule or distinguish permanent financial records from supporting close workpapers.
+Strongest double-take items
+A July 2024-approved procedure describing a March 2025 acquisition and project code as completed events.
+“Off-balance-sheet accruals.”
+BD+7 quarter-end close conflicting with mandatory BD+5 Controller sign-off.
+One integration code covering costs with materially different accounting treatment.
+Reclassifying a project code’s “residual balance” when the code closes.
+Freezing patient accounting at month-end without a credible late-charge and unbilled-revenue process.
+Recognition of every payer audit adjustment only upon final determination.
+Compliance effectively determining when the overall integration accounting code may close.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+This is the strongest document in the corpus — the close cadence, cutoff table, approval ladder, and sub-ledger packages all read like someone who has actually run a month-end. The A45 email also reconciles against it correctly: §5.5 is genuinely the reporting section, and 04/09/2026 is exactly BD+7 off the March 2026 close. So the problems here are narrower, but two of them are load-bearing.
+
+The revision date breaks again
+
+Rev. 07/2024, superseding FIN-2023-014 — yet all of Section 5 governs a project code "established at the direction of the Controller on the acquisition close date (03/03/2025)". An entire section about a 2025 acquisition sits in a document revised eight months earlier. Third controlled document with this defect; at this point it's systematic rather than incidental.
+
+Two smaller governance contradictions: §6.5 says amendments are approved by the CFO and that revision history is maintained on the cover page, but the approval block carries only Spindell's signature and the cover page has no revision history. The CFO is referenced five times and never named anywhere in the corpus.
+
+The approval ladder contradicts itself
+
+Controller is "Unlimited," and the row below it says CFO approval is "Required for entries above $2,500,000". Those can't both be true. Real matrices cap the Controller (e.g., $2.5M) and escalate above it.
+
+The charges in A45 aren't eligible under this SOP
+
+§5.2's in-scope list covers systems labor, data migration, transitional licenses, legal/valuation/advisory, change management, retention/severance, and facility buildout. §5.3 expressly excludes routine payroll for continuing staff.
+
+A45's Compliance / Credentialing surge — $0.31M, the line running furthest over plan, is internal staff effort on a compliance-initiated review and a payer audit response. Neither appears in §5.2. A post-payment payer audit is an operating matter, not an integration cost, and §4.5 already assigns audit adjustments to patient revenue. Under the Controller's own §5.4 sampling, that line is what would get reclassified — and the Controller booked it himself.
+
+§4.5 is the planted rule, and it's questionable GAAP
+
+"Post-payment audit adjustments — including any takeback, recoupment, or refund arising from a payer audit — are recorded in the period in which the payer's final determination is issued, not the period of the original service".
+
+Under ASC 606, recoupment exposure is a change in estimate of variable consideration, and under ASC 450 a probable and estimable loss is accrued when known — not deferred to final determination. A hospital controller writing this into an SOP would get it flagged by external audit, because it lets a known exposure sit unrecognized. It also conveniently governs the open CRPA audit. It reads as a rule authored to create a downstream reasoning trap rather than as accounting policy.
+
+Domain gaps a healthcare NFP close can't have
+No third-party payor settlements. Estimated settlements with Medicare/Medicaid — cost report filings, IME/GME, DSH, interim rate adjustments, reopenings — are a standard hospital balance-sheet line and a monthly close estimate. Nothing in §4 touches them.
+No net asset accounting. For a New York not-for-profit, ASC 958 net assets with and without donor restrictions, and the release-from-restriction entry, belong in the close. §1.2 defers grants and restricted funds to a separate procedure, which covers some of it, but net asset roll-forward isn't grant accounting.
+No December year-end. §1.4 is headed "Quarter-End and Year-End" and then extends only March, June, and September. The hard close is the one that's missing.
+No late-charge window. §2.2 freezes patient accounting at 23:59 on the last calendar day. Every hospital holds charge entry open several days past month-end for late charges and coding completion; that lag is precisely why patient revenue accruals exist.
+No self-insurance or malpractice reserve (IBNR), no workers' comp actuarial accrual beyond a vendor liability line, no operating lease or ASC 842 mention, no external audit PBC coordination.
+Minor
+
+"Supplementary A29" is printed in the running header, so the artifact index is now inside the document furniture rather than just in email prose. The coincidence of A29 and FIN-2024-029 makes it more conspicuous. §3.4's "daily close status email" is referenced once and defined nowhere. And §5.6 has the Controller closing the project code on the Chief Compliance Officer's written confirmation that integration workstreams are complete — that confirmation would come from the integration PMO or the CFO; compliance doesn't own workstream completion.
