@@ -1,0 +1,144 @@
+Overall verdict
+
+This set has several strong internal contradictions that would likely trigger scrutiny from experienced board-governance, medical-staff, compliance, or credentialing personnel. The most significant problems are an incomplete governing-body action log, conflicting descriptions of the integration review, and operational privileging entries left overdue while the practitioner remains scheduled.
+
+Highest-confidence concerns
+
+The governing-body action log is plainly incomplete
+ A21_Governing_Body_Meeting_Minutes_Feb_2026.docx records 2 initial appointments, 7 reappointments, and 3 clean status changes at the February meeting, plus Carol Renauld’s privilege restoration. However, A12_Governing_Body_Credentialing_Action_Log.xlsx contains only the Renauld action for February. A log presented as the governing body’s credentialing action record should contain the other 12 actions or clearly state that it is only a selected-action log.
+
+Five motion numbers are used to approve 12 unidentified actions
+ The minutes label the routine block “Motion 2026-02-03 through 2026-02-07,” which is five motion numbers, while collectively approving 12 actions without identifying which actions belong to which motion. The underlying provider roster is not reproduced in the minutes, and the action log does not preserve the actions. That leaves a poor permanent record of precisely what the Board approved.
+
+The review has five workstreams in one document and ten in another
+ A07_Integration_Review_Kickoff_Memo.docx defines five workstreams. The February minutes say the review is proceeding across ten discrete workstreams. Neither document explains the expansion or identifies the additional five.
+
+A CCO action is mislabeled as a “Board Directive”
+ Slide 7 of A36_Board_Pre_Read_Q1_2026.pptx labels the review’s initiation as a “BOARD DIRECTIVE,” but the same slide and the kickoff memo say the Chief Compliance Officer opened it under the Office of Compliance’s standing authority. The Board later received reports, but the supplied records do not show the Board directing the initial review.
+
+The Renauld implementation failure creates an operational concern
+ The Board approved restoration effective February 25, 2026. As of April 6, the operational implementation was 33 calendar days overdue and still open. Meanwhile, the previously reviewed scheduling file assigns Carol Renauld to diagnostic reading shifts with only “see credentialing note.” The documents do not establish whether those assignments fall within her prior narrowed privileges. The combination would receive immediate attention even if the scheduling were ultimately permissible.
+
+A21_Governing_Body_Meeting_Minutes_Feb_2026.docx
+Overly detailed for routine corporate minutes: The Renauld section reproduces clinical scope, NPI, registration number, registration expiration, DEA and NPDB checks, malpractice evidence, FPPE outcome, specific discussion, and operational implementation directions. Some hospitals maintain detailed confidential credentialing minutes, but including this much provider-specific material in the general governing-body minutes expands the sensitive governance record considerably.
+“Privileges migrated with the roster” is questionable: Privileges are facility-specific grants. An acquisition roster does not itself transfer or grant privileges. A formal appointment, temporary-privilege, board ratification, or successor-governance process would ordinarily need to support the transition.
+Scope wording is unusually broad: “Full diagnostic radiology privileges” includes mammography and interventional procedures by reference to a departmental delineation. Mammography and interventional work commonly require more specific qualification and privilege delineation than a broad umbrella statement.
+Future effective date is unexplained: The Board acts on February 18 but makes restoration effective February 25. That is possible, but there is no stated reason for the delay.
+Implementation deadline occurs after effective date: The action becomes effective February 25, but the 10-business-day implementation SLA permits the operational record to remain outdated beyond that date.
+Implementation ownership remains atypical: A Senior Ops Analyst in Compliance implements privilege actions in OpenMRS under Credentialing rather than Medical Staff Services or a credentialing-system administrator.
+Information-only resignation handling is too categorical: The minutes say a voluntary resignation requires no Board action because it is unrelated to quality or compliance. Whether acknowledgment or acceptance is required would depend on the bylaws and appointment structure.
+A22_Committee_Action_Follow_Up_Log.xlsx
+Title is too broad: It tracks governing-body credentialing implementation, not general committee follow-up.
+Almost every closed action was implemented the next day. That is possible, but the extreme consistency looks constructed, particularly across a year of different appointment and privilege actions.
+OpenMRS is treated as the primary implementation destination. The log does not separately confirm updates to scheduling, medical-staff directories, clinical access, privileging repositories, payer systems, or department rosters.
+No escalation fields exist: The Renauld item is 33 days overdue, but there is no escalation date, responsible named individual, reason, risk assessment, interim control, or remediation owner.
+Status definitions are incomplete: The legend defines closed on time, closed late, and overdue, but the sheet also uses OPEN.
+The log is dated April 13 but last updated April 6. That is not necessarily wrong, but the April 5 action and other open items should have been refreshed before issuing an April 13 governance artifact.
+The April 5 Board action occurred on a Sunday. A special meeting is possible, but the reference merely says “Board Meeting Minutes, Apr 2026” and does not explain the unusual meeting date.
+A12_Governing_Body_Credentialing_Action_Log.xlsx
+It cannot support its stated function because it omits the February routine-action block.
+It has no motion numbers for most entries. The meeting reference alone is weaker than the motion-level references used in the follow-up log.
+The action population looks selectively curated. Only one or two actions appear per monthly meeting, despite the February minutes demonstrating a substantially larger routine volume.
+Implementation references are free text. Entries such as “OpenMRS entry 04/17/2025” do not provide a transaction ID, audit event, responsible user, or source-record identifier.
+Appointment and privileges are compressed into one note. Reappointment and continuation of clinical privileges may be related Board actions, but the data model does not clearly represent them separately.
+No facility-specific appointment field appears. This is material in a system with two hospitals and an imaging subsidiary.
+No action status, expiration control, or superseding-action link appears.
+A07_Integration_Review_Kickoff_Memo.docx
+The evidence hierarchy is conceptually reasonable, but naming the Board record as proof of every privilege decision is too simple if the approved detailed delineation resides in a confidential attachment or credentialing system.
+The review starts from an unexplained identifier assumption. A payer identifies a discrepancy between its organizational identifier and what it understands to be current for the parent system, even though other documents say Winston remains a separate legal entity retaining its TIN and organizational NPI.
+A broad enterprise review arises from one payer identifier discrepancy. That can happen, but the memo does not document the initial risk assessment supporting expansion into credentialing verification, delegated credentialing, systems migration, and governance implementation.
+“Informational hold” remains contradictory: It holds new scheduling and therefore has a direct operational effect.
+The hold lacks clinical-operational safeguards: There is no urgent-care exception, existing-patient continuity process, accountable medical review, or mechanism for distinguishing incomplete evidence from an actual credentialing defect.
+Correspondence control is overly centralized: Requiring the CCO to countersign every response touching the payer audit may be an internal choice, but Legal, Finance, Revenue Cycle, Contracting, and the designated audit-response owner are not meaningfully incorporated.
+The reconciliation compares incompatible populations: A December recredentialing workflow log is compared to the current HR master roster. Differences can arise legitimately from cycle scope, hires, terminations, leave, contractors, and timing.
+A36_Board_Pre_Read_Q1_2026.pptx
+Quarter designation is ambiguous: The deck discusses results through March 31, 2026, but Coopa Blue’s previously stated fiscal year begins July 1. “Q1 2026” therefore reads like calendar Q1, while the financial material also references FY2026.
+The CCO presents broad financial, integration, credentialing, risk, and operating objectives. That scope reinforces the earlier concern that Compliance has absorbed functions normally distributed among executive leadership.
+$2.4 million is called a “residual” cost: The associated text defines it as cumulative integration cost through March 31. Cumulative cost and residual cost are different concepts.
+The systems migration is “substantially complete” despite missing the firm deadline. The deck does not clearly identify the milestone as missed, quantify remaining records, or present a recovery date.
+Claims of stable payer mix, above-baseline imaging volume, on-target training, no reportable breaches, and normal case aging contain no measures.
+The risk summary mixes active risks with routine monitoring topics. Registration warning cycles and zero reported breaches are not framed as specific risk events with thresholds, likelihood, impact, or trajectory.
+Board requests are unusually operational. Asking the Board to approve the compliance program’s quarterly operating objectives risks blurring oversight and management responsibilities.
+No explicit decision materials accompany the requests: There are no proposed resolutions, alternatives, management recommendation, financial impact, or risk consequence if the Board declines.
+Strongest double-take items
+February minutes approving 13 provider actions while the official action log records only one.
+Five motion numbers covering 12 unidentified routine actions.
+Five integration-review workstreams becoming ten without documentation.
+A CCO-initiated review labeled a Board directive.
+An approved privilege restoration remaining unimplemented for 33 days while the provider appears on the schedule.
+Privileges described as having “migrated with the roster.”
+Near-universal next-day implementation across the historical follow-up log.
+Cumulative integration spending mislabeled as residual cost.
+Board materials asking directors to approve management-level quarterly operating objectives.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+The Renauld thread is the best-constructed trap in the corpus: board restores privileges effective 02/25/2026, A22 shows implementation 33 days overdue with nothing written to OpenMRS, and A04 schedules her for full reads anyway — which A03 §7.2 says is correct, because the grant exists from the board action regardless of the operational record. That also resolves A04's dangling "see credentialing note." The SLA math on that row checks out exactly (due 03/04/2026, 33 days to the 04/06 update).
+
+But the governance layer has four contradictions that a board secretary or MSO director would catch immediately.
+
+A board meeting on Easter Sunday
+
+Every board approval date in A12 is the third Wednesday of the month — 04/16/2025 through 03/18/2026, twelve consecutive meetings, perfectly regular. Then row 18 puts the Thornbury reinstatement at a board meeting on 04/05/2026, a Sunday — and Easter Sunday at that. Its committee cadence breaks too: CC 03/25 → MEC 03/30 (a Monday) → Board 04/05, against the invariable Wed/Wed/Wed, 7-day/7-day pattern of every other row.
+
+Five workstreams or ten?
+
+A07 §3 defines the review scope as five workstreams, and A36 slide 7 says "SCOPE — FIVE WORKSTREAMS". The February minutes have Hall briefing the board that "the reconciliation work is proceeding across ten discrete workstreams". Both describe the same review opened by the same memo on the same date.
+
+The action log isn't an action log
+
+A21 records the board approving, in one meeting, 2 initial appointments, 7 reappointments, and 3 status changes, plus Renauld. A12 records one action for 02/18/2026. Across twelve months A12 holds 18 rows total — against a 249-provider panel on a 36-month cycle, which should generate ~80 reappointments a year, and against A02's 237 completed December recredentialing files, none of which appear as board approvals anywhere.
+
+So A07 §4.1 — "the minutes and action log of the governing body prove the final appointment or privilege decision, nothing else does" — points at a log that contains a small fraction of the decisions. Any agent applying that evidence rule correctly will conclude most of the panel has no privileges.
+
+Same gap in the other direction: neither Renauld's original narrowing nor Thornbury's original loss of appointment has a governing-body record. Under A03 §1.5 only the governing body can restrict an appointment or privilege, so both restrictions were imposed by an authority the corpus says doesn't exist.
+
+Minor: A21 numbers "MOTION 2026-02-03 through 2026-02-07" — five motion numbers for twelve en bloc actions.
+
+SLA due dates ignore holidays — except once
+
+Every Implementation_Due_Date in A22 is exactly approval + 14 calendar days, which only equals 10 business days when no holiday falls in the window. Row 13 correctly adds two days for Christmas and New Year's and even documents it in the Notes. Four other rows sit on holiday windows and don't:
+
+Row	Approval	Holiday in window	Stated due	Correct due3	05/21/2025	Memorial Day	06/04	06/05
+5	06/18/2025	Juneteenth	07/02	07/03
+8	08/20/2025	Labor Day	09/03	09/04
+12	11/19/2025	Thanksgiving	12/03	12/04
+
+The legend explicitly promises holiday exclusion. Also: every closed row completed on approval + 1 day, without exception — sixteen consecutive same-next-day implementations is not how this work behaves.
+
+The FPPE framing is wrong
+
+A21 says Renauld's "privileges had been narrowed on an interim basis pending completion of a focused professional practice evaluation (FPPE)". FPPE is the time-limited evaluation applied to newly granted privileges — it's a monitoring period, not a restriction, and it doesn't narrow scope. A narrowing pending review would be a precautionary or focused restriction, with FPPE potentially attached to the restoration. As written it inverts the instrument. Given she joined at the 03/03/2025 acquisition, a straightforward FPPE on migrated privileges is what you'd expect — and that wouldn't require board restoration at all.
+
+Two smaller things in the same passage: the minutes call 235112 a "registration number" while A01 calls it a license number (the conflation I flagged in A03), and a diagnostic radiologist carrying a current DEA is unusual enough to be worth reconsidering.
+
+Peer-review content in open-session minutes
+
+The entire credentialing block sits in general session — named providers, NPIs, FPPE history, department chair concurrence, all of it. Credentialing and peer review actions are taken in executive session, and in New York the underlying materials are confidential under Education Law §6527(3) and PHL §2805-m. Minutes drafted this way waive the protection. There's no executive-session motion anywhere in the document.
+
+Two risk registers with the same IDs
+
+A41 §5 runs R-01 through R-06 (integration slippage, payer environment, workforce, cyber, regulatory, reputational). A36 slide 9 runs R-01 through R-08 with an entirely different set (CRPA audit, delegated credentialing, legacy identifiers, SLA, registration currency, directory accuracy, HIPAA, cyber). Same numbering scheme, same "enterprise risk register" label, no relationship between them.
+
+The missed deadline isn't disclosed
+
+The 03/03/2026 systems-migration deadline is described in A41 as a firm contractual commitment with mandatory escalation to the Board Chair "at the time it becomes reasonably foreseeable". A43 confirms records still carried the legacy NPI on 04/06/2026. A36 reports the workstream as "Substantially complete; residual records under active reconciliation," with no slippage disclosure and no mention that the deadline passed. Likewise A07's 15-business-day reconciliation (due ~02/24/2026) is still "underway" in April with no exception noted. Both may be intentional — but if not, they're the kind of omission that reads as a cover-up rather than a data error.
+
+Smaller items
+A42 overreaches A07. Hall's email tells Sawyer to apply the informational hold "for any providers surfaced by that reconciliation"; A07 §6.1 authorizes it only while a documented higher-tier search is in progress.
+"Holds new scheduling" again. A07 §6.1 and A36 slide 8 both say the informational attribute holds scheduling, directly against Gould's definition in A46.
+The CCO is presenting the financials. A36 is authored by Compliance and carries revenue, integration cost, and payer-mix slides, while admitting the Controller's package is separate.
+Q1 2026 is fiscal Q3. Same calendar/fiscal collision as A45.
+Control number mirrors artifact number again — COM-2026-036 for A36, as with FIN-2024-029/A29.
+A07 carries "Rev. 02/2026." Memoranda aren't revision-controlled.
+Implementer is a role, not a person, on all 18 A22 rows. A log used for SLA accountability names the individual.
+Every vote is 9–0–0 with no abstentions anywhere, including on a physician privilege matter with two physician directors seated.
+A22's Renauld row cites "A21" directly in the Action_Reference field — the artifact index now inside structured data rather than prose.
