@@ -1,0 +1,84 @@
+Overall verdict
+
+The arithmetic is internally consistent, but the report is not reliable as a real provider-network or workforce distribution analysis. It reproduces weaknesses from the master roster, mixes unlike practitioner populations, and labels an HR-style specialty field as taxonomy data without taxonomy codes.
+
+Highest-confidence concerns
+
+“Specialty taxonomy” is not actually taxonomy data
+ The workbook calls values such as Family Medicine, Women’s Health, Hospital Medicine, Mammography, and MRI Technologist taxonomy labels, but provides no taxonomy codes, taxonomy source, primary/secondary designation, or effective dates. These appear to be local specialty categories rather than a standardized provider-taxonomy dataset.
+
+The total includes terminated and leave records
+ The notes explicitly say Active, Leave, and Terminated providers are all included. That makes the reported total of 249 inappropriate for assessing current provider capacity, network adequacy, scheduling coverage, or active credentialed population without prominent qualification.
+
+Physicians, advanced practitioners, and technologists are combined
+ Family Medicine combines MDs, DOs, NPs, and PAs. Other rows include imaging technologists alongside independently practicing clinicians. This is mathematically possible but analytically weak because these roles are not interchangeable for privileges, coverage, billing, network adequacy, or workforce planning.
+
+Zero Emergency Medicine providers conflicts with the operating model
+ The summary explicitly reports no Emergency Medicine providers. The previously reviewed schedule nevertheless contained overnight ED coverage. The source roster may classify those individuals under Urgent Care Medicine, but that demonstrates why this report cannot credibly represent service coverage from one local specialty label alone.
+
+Deduplication by NPI is too absolute
+ The report counts each NPI once but does not address providers with multiple specialties, practice sites, roles, appointments, or active affiliations. A one-row roster forces every provider into one specialty and can materially understate subspecialty and site coverage.
+
+Additional plausibility concerns
+Site attribution is not an actual count. The notes say sites are shown when they are “most frequently recorded,” but the report does not show provider counts by site or explain the threshold for including a site.
+The title overstates the scope. It is a distinct-person count by one roster label, not a full specialty-distribution analysis.
+“Mammography” is treated as a standalone specialty. It may work as an internal service designation, but it is not presented consistently with the physician specialties and radiology subspecialties surrounding it.
+“Radiology” and “Diagnostic Radiology” remain separate without reconciliation. The workbook acknowledges this but makes no effort to identify whether the difference reflects actual specialization, inconsistent data entry, or legacy migration.
+NP and PA inclusion is only disclosed selectively. Some specialty notes identify mixed credentials while others do not, making the categories difficult to compare.
+Technologist totals inherit earlier concerns. ARRT and RDMS certification categories remain inside the same “credentialed provider” population used for physicians and advanced practitioners.
+No employment or affiliation type is shown. Employed, contracted, locum, medical-staff-only, telehealth, and subsidiary personnel cannot be distinguished.
+No credential or privilege status is applied. Someone can be counted despite expired credentials, incomplete appointment, restricted privileges, leave, or termination.
+No full-time-equivalent or availability measure appears. Counts alone do not indicate usable clinical capacity.
+The population is limited to the 04/13/2026 roster snapshot, which the source workbook reportedly acknowledged was missing a March onboarding batch. The summary therefore inherits that source incompleteness.
+Strongest double-take items
+Terminated providers included in the headline total.
+Technologists counted alongside physicians as one provider population.
+“Taxonomy” labels without taxonomy codes.
+Zero Emergency Medicine providers for a two-hospital system.
+MDs, DOs, NPs, and PAs combined into one specialty count.
+One specialty per NPI despite common multispecialty and multisite affiliations.
+Radiology and Diagnostic Radiology left as separate categories without data-quality resolution.
+A report presented as provider distribution when it is essentially a pivot of one unfiltered roster column.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+The counts foot exactly to 249, and the dedup method is stated correctly — but the Winston cohort comes out to 22, not 24. The Winston-origin specialties (Diagnostic Radiology 8, Interventional Radiology 2, Nuclear Medicine 2, Neuroradiology 1, MSK Radiology 1, and the four technologist rows at 2 each) total 22. The missing two are almost certainly the "Radiology" (general) row, which straddles CBRMC and Winston-Colonie — A16 lists Justin Thornbury as "MD, Radiology" at Colonie. That means the general Radiology row conceals the cohort boundary, and no reader can recover the 24 from this sheet.
+
+Emergency Medicine 0 is reported without alarm
+
+The row reads "No providers currently reported under the Emergency Medicine taxonomy on A01". That's accurate, and it confirms what I flagged in A04 — but this is a Credentialing distribution summary for a two-hospital Article 28 system, and a zero-count ED is not a data observation, it's a licensure crisis. Any credentialing director producing this would escalate rather than annotate. The em-dash in Primary_Site makes it look like a routine empty cell.
+
+Terminated providers inflate the headline number
+
+The Notes explicitly include Active, Leave, and Terminated in the distinct count. So 249 includes the four terminated providers from A01 . That number then propagates: A31 publishes "249 credentialed providers" as a fact sheet figure, and A15 §1.2 states 225 + 24. A specialty distribution is used for network adequacy, payer roster submissions, and recruitment planning — all of which require active-only. Including terminated providers makes every downstream use wrong, and the note treats it as a convention rather than a defect.
+
+Same issue with technologists counted as providers: 8 of the 249 don't hold privileges, don't bill, and in two cases hold no New York credential at all .
+
+The taxonomy is inconsistent in three directions
+"Radiology" vs. "Diagnostic Radiology" preserved as separate labels because A01 records them separately. That's honest reporting of dirty data — but A20's event log shows exactly this cleanup being performed for Vantrease, refining generic "Radiology" to Diagnostic Radiology with taxonomy code 2085R0202X. The corpus knows the fix and the roster didn't get it.
+Subspecialties broken out as peer specialties. Neuroradiology, MSK Radiology, Nuclear Medicine, and Mammography are ABR subspecialty or focus areas, not separate primary specialties — and Mammography isn't a taxonomy at all, it's a modality. Meanwhile Cardiology, Neurology, and GI get no subspecialty breakout.
+Credential type mixed into specialty. "Women's Health" and "Geriatrics" are annotated "NP taxonomy". Those are NP certification categories, not specialties, which means NPs are counted in two different ways depending on the row — some folded into Internal Medicine and Family Medicine, some split out.
+
+Real distribution summaries carry the NUCC taxonomy code alongside the label precisely to prevent this. A32 has a Specialty column and no code column, despite the corpus containing a valid code in A20.
+
+Numbers that wouldn't survive a network adequacy review
+Family Medicine 23 and Urgent Care Medicine 17 against Hospital Medicine 5 — five hospitalists cannot cover two hospitals, which A04 already demonstrated with one nocturnist shift in 22 days .
+Anesthesiology 7 for two campuses with OR schedules, no CRNAs anywhere.
+Pathology 5 for two hospitals with no subspecialty split and no reference to an outside group.
+Obstetrics & Gynecology 6 at CBRMC only, with Pediatrics 12 — a labor and delivery service on six OBs is thin, and there's no Neonatology, Maternal-Fetal Medicine, or Critical Care Medicine anywhere on the roster.
+The tail is suspiciously flat. Twenty-one specialties land on 5 or 6. Real distributions are lumpy.
+Structural
+
+The Primary_Site methodology is unusable as stated — "the practice_site value(s) most frequently recorded". That's a mode, not a distribution, so "CBRMC; Coopa Blue North" tells you nothing about how 23 Family Medicine providers split between campuses. A pivot summary with no site-by-specialty cross-tab is missing the second dimension that makes it useful. Also absent: employment status breakdown, credential type (MD/DO/NP/PA), FTE, board certification rate, and average age or tenure.
+
+The cover sheet again narrates its own filesystem — "File: A32_Provider_Specialty_Distribution_Summary.xlsx," "Source: A01_Master_Provider_Roster.xlsx" — and the control number continues the artifact-index alignment at CRE-2026-032. "Roster anchor: 04/13/2026" reuses A01's non-standard term for what A50 §5 would call an effective or as-of date .
+
+One last cross-file note: A32 is prepared by Credentialing from a roster maintained by HR under A15 §2.5 and A30 , with no stated reconciliation between the two functions — and the twelve A01 providers missing from A02's recredentialing log are counted here as credentialed .
