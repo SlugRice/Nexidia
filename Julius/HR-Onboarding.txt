@@ -1,0 +1,100 @@
+Overall verdict
+
+This file has major timeline, workflow, and credentialing realism problems. The clearest issue is that the provider’s requested start date precedes completion of background checks, credentialing, training, orientation, system access, committee review, and governing-body action.
+
+Highest-confidence concerns
+
+The onboarding timeline is operationally impossible
+ A24_Provider_Onboarding_Checklist.docx lists a requested start date of 09/01/2024. The background check was not reviewed until 09/09, drug screening until 09/11, PSV continued through October, orientation finished 10/23, and the file was not sent to committee until 10/28. The provider therefore either started before required clearance or waited nearly two months beyond the stated start date, but the document never explains which occurred.
+
+The committee and notification dates are inconsistent
+ The file lists a Credentials Committee cycle date of 11/19/2024, but the provider was notified on 11/20 that the file “has been forwarded to the Credentials Committee.” That notice comes after the stated committee date. The file also contains no MEC date, governing-body date, final appointment decision, privilege scope, or effective date.
+
+System and prescribing access were granted before approval
+ OpenMRS, Metabase, prescribing systems, dictation, and other access were provisioned on 10/24, while the file was still awaiting the November Credentials Committee cycle. Some nonclinical access might be appropriate, but prescribing and clinical access would usually require a more explicit pre-activation control.
+
+The physician registration cycle is again incorrect
+ Item 21 uses a two-year cycle for physicians. This repeats the erroneous rule in the policy manual and provider-orientation deck.
+
+The standard instrument predates the subsidiary it covers
+ The checklist says it applies to Winston Imaging sites and carries revision 08/2024, before the stated 03/03/2025 acquisition. A later completed form could use an older template, but an August 2024 template could not logically define post-acquisition Winston coverage without a later revision.
+
+Workflow and domain concerns
+The document combines incompatible populations. Physicians, PAs, specialist assistants, NPs, nurses, technologists, employees, and contractors do not normally follow one identical HR, medical-staff appointment, privileging, payer-enrollment, prescribing, and committee workflow.
+Contractors are included, but employment-only items are mandatory. Offer countersignature, I-9, W-4, direct deposit, benefits orientation, payroll, and employee ID would not apply uniformly to independent contractors.
+I-9 timing is misstated in context. It says completed within three business days of the start date, but the recorded completion is 08/29 for a 09/01 requested start. Early completion can occur after acceptance, but the checklist’s wording and stage label do not accurately capture the applicable timing control.
+Supporting identity documents are copied and attached. Retaining copies may be a local practice, but attaching sensitive I-9 documentation to a broad onboarding or credentialing package creates access and minimum-necessary concerns.
+HR performs medical-staff reference checks. Professional references, department-chair references, exclusion checks, fitness questions, and drug-screen review are all assigned to HR. Some organizations divide these duties, but credentialing-specific references would more naturally reside with Medical Staff Services or Credentialing.
+Every stage must close before system access. This delays even basic email and network access until credentialing, coursework, and orientation are complete, yet the document then provisions clinical systems before committee approval. The gating logic is simultaneously too restrictive and insufficiently restrictive.
+One-person initials dominate entire functions. Tina Gibbs, Alexis Hoyt, and Randy Toohey personally initial virtually every HR, credentialing, and IT task. For a system with approximately 1,800 employees, that looks constructed rather than operational.
+Credentialing-content concerns
+“Highest degree” verification is overly broad. Medical-staff credentialing generally focuses on the professional education and training relevant to the requested appointment and privileges.
+Credentialing sources are blended together. ABMS, AOA, AANP, ARRT, ARDMS, and ANCC represent different certification structures and provider populations, yet the checklist treats them as one universal board-certification control.
+Prior affiliations are universally fixed at ten years. That could be an internal standard, but the form does not distinguish application history, work gaps, claims history, peer references, or verification requirements by practitioner category.
+Malpractice history and NPDB are compressed into one item. These are related but separate evidence sources and may produce different findings.
+No application or attestation is present. The checklist does not explicitly track a completed credentialing application, release and authorization, disclosure questions, health-status attestation, malpractice explanations, sanctions disclosures, or accuracy certification.
+No privilege request or delineation appears. For a hospitalist, the package should distinguish requested privileges from verified qualifications and final granted privileges.
+No licensure history beyond New York appears. There is no tracking of other current or former state licenses, adverse licensure actions, or explanations.
+No payer-enrollment stage exists, despite prior documents presenting onboarding as the gateway for payer enrollment.
+No peer-review or competency evidence is shown beyond professional references.
+No final approval state exists. The checklist ends when the file is routed, not when onboarding is authorized for clinical practice.
+Specific provider inconsistency
+
+Jason E. Rios is assigned to Coopa Blue North here, but the previously reviewed roster places him at CBRMC and the scheduling file uses him for CBRMC hospital coverage. A transfer could explain this, but no transfer or site-change documentation appears in this form.
+
+Strongest double-take items
+Start date before background clearance and most credentialing work.
+Clinical and prescribing access before committee or governing-body approval.
+Provider notification dated after the listed committee cycle.
+No MEC, Board, appointment, privilege, or clinical-start approval recorded.
+August 2024 template covering a subsidiary acquired in March 2025.
+One workflow applied to employees, contractors, nurses, technologists, and medical-staff physicians.
+Incorrect two-year physician-registration rule.
+A provider assigned to one facility during onboarding but another in the master roster.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+The checklist's sequencing is the problem: Rios started 09/01/2024 and nothing was actually cleared before he started. Background check returned 09/09, exclusion screens 09/09, drug screen 09/11 — and item 5 requires reportable findings escalated "before start date". Stage E coursework, which the instruction says must be complete "before the provider's first patient-contact shift," finished 10/14–10/18. Badge and system access came 10/23–10/24. So a hospitalist was employed for eight weeks before OSHA, HIPAA, and infection-control training, and before he had an OpenMRS login.
+
+The worse version of that: item 50 tells the provider clinical activity "must not begin until the governing body has acted," and it's initialed 11/20/2024 — the day after the Credentials Committee cycle date at item 49, and eleven weeks after his start date. Either he practiced unprivileged or the start date means something the form doesn't capture. Also note the provider signed the sign-off block on 10/23/2024, attesting to items dated 10/24, 10/25, 10/28, and 11/20.
+
+Missing items a real onboarding packet can't skip
+No privilege request. The file goes to the Credentials Committee with no privilege delineation form, no requested scope, no department chair recommendation on scope. The Committee has nothing to act on — and this is the corpus's own recurring theme.
+No FPPE enrollment. Same gap as A38.
+No current malpractice coverage. Item 15 gets claims history; nobody verifies a certificate of insurance or that limits meet medical staff requirements.
+No employee health / immunization clearance. A "fitness-for-duty attestation" and drug screen only. New York Article 28 facilities require documented TB screening, MMR and rubella proof, and annual influenza masking attestation — this is a hard prerequisite for patient contact, and it's the most conspicuous omission in Stage A.
+No payer enrollment or Medicare/Medicaid provider enrollment — no PECOS, no Medicaid MMIS, no CAQH profile, no delegated-credentialing roster add. In a corpus whose entire crisis is payer enrollment, the onboarding instrument never touches it.
+No out-of-state license check, no ECFMG verification, no state Medicaid exclusion (OMIG) screen despite A38 listing state Medicaid exclusions as a PSV source.
+Contradictions with the rest of the corpus
+
+PSV ownership is now stated two ways. A24 Stage B correctly assigns degree, training, board, affiliation, NPDB, and DEA verification to Credentialing under Hoyt. A44 had Gibbs's HR team performing license and DEA PSV for the four new providers . A24 is right; A44 is the error — but they can't both stand.
+
+Item 21 repeats the 2-year/3-year NYSED split, which A02's data contradicts (every credential, including NPs, PAs, and technologists, runs exactly 730 days) and which is wrong for rad techs regardless, since they're DOH-licensed .
+
+Item 42 initializes an OpenMRS "Person record" and populates NPI and site attributes — the Person/Provider conflation from A06, and A08 maps those as provider attributes .
+
+Stage D is one of the strongest things in the corpus — routing physicians, PAs, and specialist assistants to OPMC and everyone else to NYSED matches how New York actually splits professional discipline . Minor: "specialist assistants (RPA/SA)" conflates two distinct NY titles; RPA is the registered physician assistant designation.
+
+Style Guide violations
+
+Now testable against A50:
+
+A50 rule	A24§1.2 — legal name and "a New York not-for-profit corporation" inseparable	Corporate-form line absent
+§3.1 — decimal numbering at all levels	Lettered stages A–H with flat 1–50 items
+§5.2 — MM/DD/YYYY	Item 49 and all three signature blocks use spaced11 / 20 / 2024
+§7.1 — Page X of Y required	RendersPage of 
+§6.2 — RESTRICTED for individual personnel files	Stamped INTERNAL — CONFIDENTIAL
+
+And the control number is HR-2024-024, continuing the artifact-index alignment.
+
+Template versus instance
+
+This is a blank template (Rev. 08/2024, control number, "mark N/A with a brief reason") that has been filled in for a specific person and retained as though the completed record inherits the template's document control. Real systems keep the instance in the credentialing file as a record — no control number, no revision — because the instance doesn't get revised when the template does. The instruction block also promises a "notes column" that doesn't exist, and every one of the 50 boxes is checked with zero N/A entries, including item 43's explicitly conditional Metabase access and item 44's conditional prescribing module.
