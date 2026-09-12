@@ -1,0 +1,102 @@
+Overall verdict
+
+The structure is recognizable, but several governance details would cause a double take. The strongest concerns are inconsistent treatment of ex officio membership, an expired Compliance Committee seat, duplicate departmental representation, and an unusually powerful operational role for the Board Secretary.
+
+Highest-confidence concerns
+
+An expired member remains on the current roster
+ The roster is dated April 13, 2026, but Bethany S. Ortiz, MD’s Compliance Committee term ended December 31, 2025. She should not appear as a current voting member unless reappointed or identified as a vacancy/holdover.
+
+Ex officio status is treated as automatically voting
+ The workbook is explicitly a voting-member roster, and all listed ex officio members appear as voting members. Ex officio describes how the seat is held, not whether it votes. Voting rights should come from the applicable bylaws or charter. The roster’s definition blurs those concepts.
+
+The Credentials Committee has duplicate Anesthesiology representation
+ Both Karl A. Wolfe, MD and Stephen R. Savage, MD are physician representatives for Anesthesiology. Meanwhile, several major departments have no representative. This could be intentional, but it looks more like population construction unless the charter authorizes multiple seats from one department.
+
+The CMO chairs the Credentials Committee by virtue of office
+ Daniel Gould, MD is CMO, voting chair of the Credentials Committee, and an ex officio voting MEC member. This is possible, but many organizations separate administrative medical leadership from the peer-led credentialing committee chair to support independent review and avoid concentrating recommendation authority.
+
+The Board Secretary’s role remains unusually broad
+ Kevin Caster is Board Secretary, Medical Staff Governance Coordinator, ex officio Board member, voting chair of the Compliance Committee, and a non-voting participant in the Credentials Committee. This combines corporate governance, operational committee support, Board membership, and compliance oversight in one position.
+
+Additional plausibility concerns
+The Governing Body “reports to” itself. The first row effectively lists Governing Body under both Committee Name and Reports To. A Board normally reports to corporate members where applicable, or the field would be listed as not applicable. The notes say directors are elected by corporate members, making the self-reporting entry especially awkward.
+The Board Secretary is automatically a director. The notes say the Secretary sits on the Board by virtue of office. That is possible under governing documents, but corporate officer and director status are ordinarily distinct and should not be assumed merely from the title.
+Nearly every MEC member is marked ex officio. Department chairs may hold MEC seats by office, but the elected medical-staff officers also have fixed three-year end dates despite being described as coterminous with office. The roster does not clearly distinguish the term of the underlying office from the committee seat.
+Outside counsel is a voting Compliance Committee member. Adrienne R. McNulty, Esq. is identified as outside counsel of record and a designated voting member. Counsel commonly advises or attends, but formal voting membership may complicate counsel’s role and expectations around privilege.
+No Privacy Officer, Security Officer, Internal Audit, Revenue Cycle, Quality, Nursing, or Operations representative appears on the Compliance Committee. For a hospital system, those omissions make the committee unusually narrow.
+The Compliance Committee reports directly to the Governing Body, but its chair is also an ex officio Board member. This weakens separation between the committee preparing oversight information and the body receiving it.
+Credentials Committee representation is highly specialty-specific but not facility-specific. The organization has two hospitals and an imaging subsidiary, yet there is no visible seat structure for campus or subsidiary representation.
+Radiology has no Credentials Committee voting representative, despite the broader document set concentrating heavily on radiology credentialing and Winston integration.
+The reservation-of-authority language is excessive for a membership roster. Restating the entire Credentials Committee to MEC to Board pathway and citing three controlling documents makes the spreadsheet read like a legal-position artifact rather than a normal committee roster.
+Raw Excel serial dates are exposed. Values such as 45658 and 46752 represent dates but appear unformatted. This repeats the production-quality problem seen in other workbooks.
+Internal inconsistencies
+The notes say no more than half of designated Compliance Committee seats turn over in one year, but three of the five non-ex-officio seats end December 31, 2026. That exceeds half.
+Bethany S. Ortiz, MD has an expired term but remains included in the April 2026 roster.
+“Ex officio” is defined through tenure while the sheet uses it within a voting-member population, without separately documenting voting rights.
+Governing Body reporting is listed inconsistently across rows, including self-reporting and “Members / Community.”
+The roster says non-voting participants are intentionally omitted, yet spends substantial space defining them. That information would normally belong in the governing charter or a separate attendee section.
+Strongest double-take items
+An expired Compliance Committee member on a current roster.
+Two Anesthesiology representatives and no Radiology representative on Credentials.
+Ex officio status implicitly equated with voting status.
+Outside counsel acting as a voting committee member.
+The Board Secretary simultaneously serving as Board member and Compliance Committee chair.
+The Governing Body shown as reporting to itself.
+Compliance Committee staggering that does not match the stated rule.
+Raw serial dates in a controlled governance roster.
+
+
+
+
+=====
+2nd model
+=====
+
+
+
+
+This directory fixes several of my earlier objections and creates one flat contradiction with the rest of the corpus.
+
+Fixed: the MEC now exists with an elected President of the Medical Staff (Wintergreen), a full slate of department chairs, and a stated Credentials Committee → MEC → Governing Body routing. Board terms are clean three-year staggers (01/01/2024, 2025, 2026 cohorts, 1094–1095 days each), designated committee seats are exactly two-year, and the staggering convention holds. That's the most competent structural work in the set.
+
+An Emergency Medicine chair with no department
+
+Nathan R. Osborne, MD chairs the Department of Emergency Medicine. A32 reports zero providers under the Emergency Medicine taxonomy , and A01 contains no EM-boarded physician . A department chair is by definition a member of the medical staff in that department. Either the chair isn't on the roster — which would mean the roster is incomplete in a way that invalidates A32, A19, and the network-adequacy story — or the department has a chair and no physicians.
+
+The same problem runs through the whole MEC. None of the nine department chairs appears on A01. Neither does Wintergreen, Kellerman, Reddy, or Donnelly. Fourteen physicians hold the most senior medical staff offices in the organization and none is on the credentialed provider roster, in A02's recredentialing log, or in A12's board approvals. Under A03 §1.5 and this roster's own Reservation note, none of them has privileges.
+
+Two people collide with the provider roster
+
+Elaine C. Marchetti, MD, Chair of Anesthesiology — A01 and A09 carry a Marchetti as an RDMS ultrasound technologist at a Winston site, and one of the six A09 exception providers . Different first names, but in a corpus whose central problem is name-based record linkage and 16 alias rows, putting a duplicate surname on a department chair is the one collision you'd least want.
+
+Nathan R. Osborne likewise shares a surname with the "Osborne R." I flagged as one of the twelve A01 providers missing from A02 .
+
+Gould chairs, and the corpus disagrees about whether he may
+
+The roster seats the CMO as Credentials Committee chair, ex officio, term start 06/01/2022 — consistent with A46 and A03. But it also now establishes an elected medical staff leadership, which makes the arrangement harder to defend: Wintergreen, as President of the Medical Staff, attends Credentials as a non-voting ex-officio participant while an employed executive chairs and votes. That inverts the self-governance premise the Reservation note depends on.
+
+Caster's position is worse than I flagged in the Governance directory. He is simultaneously Board Secretary (voting director, ex officio), Chair of the Compliance Committee, a non-voting ex-officio participant of the Credentials Committee, the Medical Staff Governance Coordinator who records privileging actions, the implementer of record on the A22 SLA log, and — per the org chart — a direct report of the CCO, who sits on his committee. He is present at every stage of the credentialing chain and accountable at none.
+
+And the Compliance Committee has no independent or physician-majority character at all: five of seven voting members are management (HR, Finance, IT, plus the CCO), with outside counsel and one CMO-designated physician. No board member on it except Caster. Against Part 521-1's committee requirements , and against OIG guidance on compliance committee composition, that's a structure a Medicaid auditor would question.
+
+Ortiz's term expired and wasn't renewed
+
+Bethany S. Ortiz, MD — Medical Staff Representative — ran 01/01/2024 to 12/31/2025. The roster is as of 04/13/2026 and lists her as a current voting member. She's the Compliance Committee's only clinical voice, and her seat has been vacant for three and a half months. Her term is also the only 730-day designated term in a file whose convention is 729.
+
+The two-year terms don't stagger the way the note claims
+
+The Credentials Committee has two cohorts — six seats at 07/01/2024–06/30/2026 and five at 07/01/2025–06/30/2027. That satisfies "no more than half turn over," but both cohorts turn on a fiscal-year boundary while the Board turns on a calendar-year boundary, and the Compliance Committee's designated seats use calendar years. Three different term calendars in one roster, with no explanation — and the fiscal year here is July–June , so the board is the one that's misaligned with the organization's own year.
+
+Missing committees
+
+For an Article 28 hospital this roster is missing the Quality/Performance Improvement Committee, Peer Review, Infection Control, Pharmacy & Therapeutics, Utilization Review, and Institutional Review Board — several of which are regulatorily required and all of which have credentialing-adjacent functions. A41's four board committees (Finance & Audit, Community & Mission, Quality, People & Culture) also appear nowhere , so the board has committees in the strategic plan and none in the governance roster.
+
+Smaller items
+Dates are raw Excel serials, unformatted, as in A01/A02 — and "Coterminous with office" is a text string in the same column, so the column is mixed-type and won't sort or filter.
+Two Savages on the Credentials Committee (Xavier C., Stephen R.) and two Anesthesiology representatives (Wolfe, Stephen Savage) while Radiology, Emergency Medicine, OB/GYN, Orthopedics, Psychiatry, and Pathology have none — odd composition for the committee that credentials a radiology-heavy acquisition.
+"Reports To: Members / Community" for the Governing Body is a novel construction; boards report to the membership, but a roster column would normally say "Corporate Members" or leave it blank.
+Adrienne R. McNulty, Esq., "Outside Counsel of Record" — a fourth legal identity, after A30's "Office of the General Counsel," A23's "Legal Department," and A10's signatory Marcus H. Delaney, EVP and General Counsel . The conventions note references "General Counsel or outside counsel," which reads as papering over the inconsistency.
+The Reservation note cites GOV-2023-011 and GOV-2023-012, neither of which is in any directory — and MED-2022-001, the bylaws, likewise absent. Three of the four instruments the corpus's core authority rule depends on are referenced-only.
+No CEO on any committee, and still unnamed anywhere in the corpus.
+Control No. GOV-2026-035 continues the artifact-index alignment, and the cover again narrates its own workbook tab.
