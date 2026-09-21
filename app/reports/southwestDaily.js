@@ -12,9 +12,11 @@
   const OPEN_MAX_MS = 24 * 60 * 60 * 1000;
   const WARN_MAX_MS = 3 * 60 * 1000;
   const WARN_MIN_MS = 60 * 60 * 1000;
+  const FALLBACK_MIN_MS = 2 * 60 * 1000;
+  const FALLBACK_STEP_MS = 2 * 60 * 1000;
 
-  const G1_NODE = "VQ_UHC_EI_UMR_SAN_SWA_PlanAdvisor_PG_Domestic, pqUHC_EI_UMR_Central_SouthwestAirlines_Prv_DOM";
-  const G2_NODE = "VQ_UHC_EI_UMR_SAN_SWA_Provider_Domestic, pqUHC_EI_UMR_Central_SouthwestAirlines_Mbr_DOM";
+  const G1_NODE = "VQ_UHC_EI_UMR_SAN_SWA_PlanAdvisor_PG_Domestic";
+  const G2_NODE = "VQ_UHC_EI_UMR_SAN_SWA_Provider_Domestic";
   const DEFAULT_GROUP_ID = "76417701";
 
   const SEARCH_FIELDS = [
@@ -317,7 +319,8 @@
 
         const kwFilters = g.fields.map((f) => B.buildKeywordFilter(f.storageName, f.values, "IN"));
         if (g.durMinMs != null || g.durMaxMs != null) {
-          const low = g.durMinMs != null ? g.durMinMs : 0;
+          const configuredLow = g.durMinMs != null ? g.durMinMs : 0;
+          const low = configuredLow > FALLBACK_MIN_MS ? FALLBACK_MIN_MS : configuredLow;
           const high = g.durMaxMs != null ? g.durMaxMs : OPEN_MAX_MS;
           kwFilters.push(B.buildDecimalFilter(DURATION, low, high));
         }
@@ -340,17 +343,36 @@
       const used = new Set();
       const selectedRows = [];
       const shortfalls = [];
+      const adjustments = [];
 
       for (const day of days) {
+        let dayAdjustedMinMs = null;
         for (let gi = 0; gi < groups.length; gi++) {
           const g = groups[gi];
           const n = g.callsToSelect == null ? 0 : g.callsToSelect;
           if (n <= 0 || !groupPools[gi] || !groupPools[gi].length) continue;
-          const dayRows = groupPools[gi].filter((r) => dayKey(r.row) === day && (() => { const t = H.getFieldValue(r.row, TRANS); return !t || !used.has(t); })());
+          const configuredMinMs = g.durMinMs != null ? g.durMinMs : 0;
+          let activeMinMs = configuredMinMs;
+          let dayRows = [];
+          while (true) {
+            dayRows = groupPools[gi].filter((r) => {
+              if (dayKey(r.row) !== day) return false;
+              const t = H.getFieldValue(r.row, TRANS);
+              if (t && used.has(t)) return false;
+              const duration = Number(H.getFieldValue(r.row, DURATION)) || 0;
+              return duration >= activeMinMs;
+            });
+            if (dayRows.length >= n || activeMinMs <= FALLBACK_MIN_MS || configuredMinMs <= FALLBACK_MIN_MS) break;
+            activeMinMs = Math.max(FALLBACK_MIN_MS, activeMinMs - FALLBACK_STEP_MS);
+          }
+          if (activeMinMs < configuredMinMs) {
+            dayAdjustedMinMs = dayAdjustedMinMs == null ? activeMinMs : Math.min(dayAdjustedMinMs, activeMinMs);
+          }
           if (dayRows.length < n) shortfalls.push({ group: gi + 1, day, requested: n, got: dayRows.length });
           const picks = pickRandom(dayRows, n);
           for (const p of picks) { selectedRows.push(p); const t = H.getFieldValue(p.row, TRANS); if (t) used.add(t); }
         }
+        if (dayAdjustedMinMs != null) adjustments.push({ day, minMs: dayAdjustedMinMs });
       }
 
       //##> All Calls: full deduped union of all groups, sorted by node.
@@ -383,9 +405,17 @@
       try { api.setShared("gridSession", gridSession); } catch (_) {}
 
       const msgs = [];
+      if (adjustments.length) {
+        const lines = adjustments.map((a) => {
+          const p = a.day.split("-");
+          const displayDay = p.length === 3 ? Number(p[1]) + "/" + Number(p[2]) + "/" + p[0] : a.day;
+          return "-For " + displayDay + ", Duration Minimum adjusted to " + Math.round(a.minMs / 60000) + " mins.";
+        });
+        msgs.push("Insufficient calls were under default filters. The following adjustments were made:\n" + lines.join("\n"));
+      }
       if (shortfalls.length) {
-        const lines = shortfalls.map((s) => s.requested + " calls requested from Group " + s.group + " for " + s.day + ", but only " + s.got + " qualifying calls were found. All of them were placed on top.");
-        msgs.push(lines.join("\n") + "\n\nIf more are required, try broadening the filters or the date range.");
+        const lines = shortfalls.map((s) => s.requested + " calls requested from Group " + s.group + " for " + s.day + ", but only " + s.got + " qualifying calls were found after lowering Duration Minimum to 2 mins. All available calls were selected.");
+        msgs.push(lines.join("\n") + "\n\nIf more are required, try broadening the other filters or the date range.");
       }
       if (skipped.length) {
         msgs.push("Group" + (skipped.length > 1 ? "s " : " ") + skipped.join(", ") + " had no field filters and " + (skipped.length > 1 ? "were" : "was") + " skipped.");
