@@ -12,6 +12,7 @@
     { kind: "field", label: "Group ID (Policy ID)", display: "Group ID (Policy ID)", fallback: "UDFVarchar10" },
     { kind: "field", label: "Provider Flag", display: "Provider Flag" },
     { kind: "field", label: "Caller Type", display: "Caller Type" },
+    { kind: "field", label: "Member ID", display: "Member ID", fallback: "UDFVarchar50" },
     { kind: "field", label: "Date/Time", display: "Date/Time", fallback: "recordedDateTime" },
     { kind: "duration", label: "Duration" },
     { kind: "field", label: "Hold Time", display: "Hold Time", fallback: "UDFInt4" },
@@ -27,13 +28,12 @@
     { kind: "field", label: "DNIS", display: "DNIS", fallback: "DNIS" },
     { kind: "field", label: "Actual Site", display: "Actual Site" },
     { kind: "field", label: "Node", display: "Node", fallback: "UDFVarchar120" },
-    { kind: "field", label: "Member ID", display: "Member ID", fallback: "UDFVarchar50" },
     { kind: "field", label: "Trans_Id", display: "Trans_Id", fallback: "UDFVarchar110" },
-    { kind: "blank", label: "Tags" },
-    { kind: "blank", label: "Notes" },
-    { kind: "field", label: "Orig ANI", display: "Orig ANI", fallback: "UDFVarchar115" },
+    { kind: "field", label: "Provider Tax ID", display: "Provider Tax ID", fallback: "UDFVarchar136" },
     { kind: "field", label: "NPI", display: "NPI", fallback: "UDFVarchar41" },
-    { kind: "field", label: "TIN", display: "Provider Tax ID", fallback: "UDFVarchar136" },
+    { kind: "field", label: "Orig ANI", display: "Orig ANI", fallback: "UDFVarchar115" },
+    { kind: "field", label: "User to User", display: "User to User", fallback: "UDFVarchar1" },
+    { kind: "blank", label: "Notes" },
     { kind: "blank", label: "Repeat Caller" },
     { kind: "blank", label: "Caller Name" },
     { kind: "blank", label: "DOS" },
@@ -42,7 +42,6 @@
     { kind: "blank", label: "Received" },
     { kind: "blank", label: "Status" },
     { kind: "blank", label: "Reference Number" },
-    { kind: "field", label: "User to User", display: "User to User", fallback: "UDFVarchar1" },
     { kind: "blank", label: "Special Notes" }
   ];
 
