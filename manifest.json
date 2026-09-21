@@ -1,5 +1,5 @@
 {
-  "version": "0.1.930",
+  "version": "0.1.931",
   "entry": [
     "app/core/registry.js",
     "app/core/columnPrefs.js",
