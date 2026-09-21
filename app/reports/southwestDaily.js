@@ -15,8 +15,8 @@
   const FALLBACK_MIN_MS = 2 * 60 * 1000;
   const FALLBACK_STEP_MS = 2 * 60 * 1000;
 
-  const G1_NODE = "VQ_UHC_EI_UMR_SAN_SWA_PlanAdvisor_PG_Domestic";
-  const G2_NODE = "VQ_UHC_EI_UMR_SAN_SWA_Provider_Domestic";
+  const G1_NODE = "VQ_UHC_EI_UMR_SAN_SWA_PlanAdvisor_PG_Domestic, pqUHC_EI_UMR_Central_SouthwestAirlines_Mbr_DOM";
+  const G2_NODE = "VQ_UHC_EI_UMR_SAN_SWA_Provider_Domestic, pqUHC_EI_UMR_Central_SouthwestAirlines_Prv_DOM";
   const DEFAULT_GROUP_ID = "76417701";
 
   const SEARCH_FIELDS = [
