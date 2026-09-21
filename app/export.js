@@ -1,11 +1,12 @@
-//[Last Update: 6:03 PM 8/17/2026 + multi-sheet builder]
 (() => {
   const api = window.NEXIDIA_TOOLS;
   if (!api) return;
+
   const FORCE_TEXT_FIELDS = new Set([
     "UDFVarchar1","UDFVarchar122","UDFVarchar110","UDFVarchar41",
     "UDFVarchar115","UDFVarchar136","UDFVarchar50","UDFVarchar104","UDFVarchar105"
   ]);
+
   // ── Field value lookup ───────────────────────────────────────────────────
   function getFieldValue(rowObj, key) {
     if (!rowObj) return "";
@@ -29,6 +30,7 @@
     }
     return "";
   }
+
   // ── Normalization helpers ────────────────────────────────────────────────
   function normalizeCellText(raw) {
     let s = (raw === null || raw === undefined) ? "" : String(raw);
@@ -38,28 +40,54 @@
     if (/^0+$/.test(s)) return "0";
     return s;
   }
+
   function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+
   function toNumberOrNull(raw) {
     const s = String(raw == null ? "" : raw).trim();
     if (!s || s === "0") return null;
     const n = Number(s);
     return isFinite(n) ? n : null;
   }
-  function excelSerialFromDate(d) {
-    if (!(d instanceof Date) || isNaN(d.getTime())) return null;
-    return (d.getTime() / 86400000) + 25569;
-  }
-  function secondsFromMillisish(raw) {
+
+  //##> mediaFileDuration is always milliseconds. The old platform rounded to whole
+  //##> seconds so values landed on multiples of 1000; the new one reports true media
+  //##> length so they do not. The unit never changed, so this converts unconditionally.
+  //##> Do not reintroduce a unit sniff here - it silently misreads the newer values.
+  function secondsFromMs(raw) {
     const n = toNumberOrNull(raw);
-    if (n === null) return null;
-    if (n >= 1000 && n % 1000 === 0) return n / 1000;
-    if (n > 86400 * 1000) return Math.round(n / 1000);
-    return n;
+    return n === null ? null : n / 1000;
   }
+
+  //##> recordedDateTime carries local call-center time with a "Z" appended, so it is
+  //##> not really UTC. Parsing it with Date() shifts every call by the browser offset.
+  //##> These read the clock components literally and never convert.
+  function parseLiteralStamp(raw) {
+    const s = String(raw == null ? "" : raw).trim();
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return null;
+    return {
+      year: Number(m[1]),
+      month: Number(m[2]),
+      day: Number(m[3]),
+      hour: Number(m[4]),
+      minute: Number(m[5]),
+      second: m[6] ? Number(m[6]) : 0
+    };
+  }
+
+  function excelSerialFromStamp(p) {
+    if (!p) return null;
+    const ms = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    if (!isFinite(ms)) return null;
+    return (ms / 86400000) + 25569;
+  }
+
   function excelSerialFromSeconds(sec) {
     const n = Number(sec);
     return isFinite(n) ? n / 86400 : null;
   }
+
   function estimateDisplayLen(fieldKey, rawText) {
     const lk = String(fieldKey || "").toLowerCase();
     if (lk === "recordeddatetime") return 18;
@@ -68,6 +96,7 @@
     if (lk === "sentimentscore" || lk === "overallsentimentscore") return 6;
     return clamp(String(rawText == null ? "" : rawText).length, 1, 60);
   }
+
   function isDateTimeField(k) { return String(k || "").toLowerCase() === "recordeddatetime"; }
   function isDurationField(k) { return String(k || "").toLowerCase() === "mediafileduration"; }
   function isHoldField(k) { return String(k || "").toLowerCase() === "udfint4"; }
@@ -77,42 +106,34 @@
   }
   function isForceTextField(k) { return FORCE_TEXT_FIELDS.has(String(k || "")); }
   function isVirtualBlankField(k) { const s = String(k || ""); return s.indexOf("_blank_") === 0 || s.indexOf("_report_") === 0; }
+
   // ── Display formatters (for grid use) ────────────────────────────────────
   //##> DISPLAY FORMATTERS: Used by resultsGrid.js to render human-readable values
   //##> without Excel serial conversion. Keep in sync with Excel cell builders below.
   //##> formatDisplayValue is exposed via shared state as part of the xlsBuilder API.
+  //##> Duration is the only numeric field converted here. Every other numeric field,
+  //##> including Hold Time, passes through as the raw platform value.
   function formatDisplayValue(fieldKey, raw) {
     if (!raw || raw === "0") return raw;
     if (isDateTimeField(fieldKey)) {
-      const d = new Date(raw);
-      if (isNaN(d.getTime())) return raw;
-      const mo = d.getMonth() + 1;
-      const dy = d.getDate();
-      const yr = d.getFullYear();
-      const hr = d.getHours();
-      const mn = String(d.getMinutes()).padStart(2, "0");
-      const ampm = hr >= 12 ? "PM" : "AM";
-      const hr12 = hr % 12 || 12;
-      return `${mo}/${dy}/${yr} ${hr12}:${mn} ${ampm}`;
+      const p = parseLiteralStamp(raw);
+      if (!p) return raw;
+      const mn = String(p.minute).padStart(2, "0");
+      const ampm = p.hour >= 12 ? "PM" : "AM";
+      const hr12 = p.hour % 12 || 12;
+      return `${p.month}/${p.day}/${p.year} ${hr12}:${mn} ${ampm}`;
     }
     if (isDurationField(fieldKey)) {
-      const sec = secondsFromMillisish(raw);
+      const sec = secondsFromMs(raw);
       if (sec === null) return raw;
       const h = Math.floor(sec / 3600);
       const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
       const s = String(Math.floor(sec % 60)).padStart(2, "0");
       return `${h}:${m}:${s}`;
     }
-    if (isHoldField(fieldKey)) {
-      const sec = secondsFromMillisish(raw);
-      if (sec === null) return raw;
-      const h = Math.floor(sec / 3600);
-      const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
-      const s = String(Math.floor(sec % 60)).padStart(2, "0");
-      return h > 0 ? `${h}:${m}:${s}` : `${Math.floor(sec / 60)}:${s}`;
-    }
     return raw;
   }
+
   // ── HTML escape ──────────────────────────────────────────────────────────
   function escapeHtml(s) {
     return String(s == null ? "" : s)
@@ -121,6 +142,7 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+
   // ── Column group sizing ──────────────────────────────────────────────────
   function buildColGroup(headers, rows, exportFields) {
     const maxLens = headers.map((h) => String(h == null ? "" : h).length);
@@ -141,11 +163,12 @@
       '<col style="width:' + clamp(Math.round(len * 6.5 + 16), 50, 520) + 'px">'
     ).join("") + "</colgroup>";
   }
+
   // ── Excel cell builder ───────────────────────────────────────────────────
   //##> EXCEL EXPORT: HTML-table XLS format.
   //##> Date/Time: Excel serial + mso-number-format m/d/yyyy h:mm
   //##> Duration: serial (seconds/86400) + mso-number-format h:mm:ss (no brackets - calls never exceed 24h)
-  //##> Hold Time: integer seconds displayed as h:mm:ss
+  //##> Hold Time: raw platform integer, no conversion
   //##> Sentiment: decimal 2dp
   //##> Force-text fields: x:str prevents scientific notation on long digit strings
   //##> normalizeCellText: blank/asterisk/all-zeros -> "0", no empty cells
@@ -159,23 +182,22 @@
     }
     if (isDateTimeField(k)) {
       if (raw === "0") return '<td class="dt" x:num="0">0</td>';
-      const serial = excelSerialFromDate(new Date(raw));
+      const serial = excelSerialFromStamp(parseLiteralStamp(raw));
       if (serial === null) return '<td class="dt" x:str="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</td>";
       return '<td class="dt" x:num="' + serial + '">' + serial + "</td>";
     }
     if (isDurationField(k)) {
       if (raw === "0") return '<td class="dur" x:num="0">0</td>';
-      const sec = secondsFromMillisish(raw);
+      const sec = secondsFromMs(raw);
       const serial = sec === null ? null : excelSerialFromSeconds(sec);
       if (serial === null) return '<td class="dur" x:str="' + escapeHtml(raw) + '">' + escapeHtml(raw) + "</td>";
       return '<td class="dur" x:num="' + serial + '">' + serial + "</td>";
     }
     if (isHoldField(k)) {
       if (raw === "0") return '<td class="int" x:num="0">0</td>';
-      const sec = secondsFromMillisish(raw);
-      if (sec === null) return '<td class="int" x:num="0">0</td>';
-      const n = String(Math.round(sec));
-      return '<td class="int" x:num="' + n + '">' + n + "</td>";
+      const n0 = toNumberOrNull(raw);
+      if (n0 === null) return '<td class="int" x:num="0">0</td>';
+      return '<td class="int" x:num="' + n0 + '">' + n0 + "</td>";
     }
     if (isSentimentField(k)) {
       if (raw === "0") return '<td class="dec2" x:num="0">0</td>';
@@ -188,6 +210,7 @@
     }
     return "<td>" + escapeHtml(raw) + "</td>";
   }
+
   // ── Excel HTML builder ───────────────────────────────────────────────────
   function buildExcelHtml(exportHeaders, exportFields, finalRows, phraseKeys) {
     const css = [
@@ -219,14 +242,16 @@
       "</x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>" +
       "</head><body><table>" + colGroup + "<tr>" + headerCells + "</tr>" + bodyRows + "</table></body></html>";
   }
+
   // ── SpreadsheetML (2003 XML) multi-sheet builder ─────────────────────────
   //##> MULTI-SHEET EXPORT: separate path used only when a caller supplies more than
   //##> one populated sheet (e.g. a report defining a population sheet and a selected
   //##> sheet). The default single-sheet export still uses buildExcelHtml above. This
   //##> format is the only one that renders multiple fully populated tabs in one file.
-  //##> Cell typing mirrors the HTML builder: date/duration/hold/sentiment formatted,
-  //##> force-text and virtual (_blank_/_report_) columns as text; virtual columns are
-  //##> emitted empty for manual entry rather than the "0" placeholder used elsewhere.
+  //##> Cell typing mirrors the HTML builder: date/duration/sentiment formatted, hold
+  //##> time as a raw integer, force-text and virtual (_blank_/_report_) columns as
+  //##> text; virtual columns are emitted empty for manual entry rather than the "0"
+  //##> placeholder used elsewhere.
   function xmlEsc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -235,14 +260,18 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&apos;");
   }
-  function isoLocalFromRaw(raw) {
-    const d = new Date(raw);
-    if (isNaN(d.getTime())) return null;
-    const p = (n) => String(n).padStart(2, "0");
-    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + ".000";
+
+  function isoLiteralFromRaw(raw) {
+    const p = parseLiteralStamp(raw);
+    if (!p) return null;
+    const pad = (n) => String(n).padStart(2, "0");
+    return p.year + "-" + pad(p.month) + "-" + pad(p.day) + "T" +
+      pad(p.hour) + ":" + pad(p.minute) + ":" + pad(p.second) + ".000";
   }
+
   function smlStrCell(v) { return '<Cell><Data ss:Type="String">' + xmlEsc(v) + "</Data></Cell>"; }
   function smlTxtCell(v) { return '<Cell ss:StyleID="txt"><Data ss:Type="String">' + xmlEsc(v) + "</Data></Cell>"; }
+
   function buildSmlCell(k, item) {
     if (k.startsWith("__PHRASE_")) {
       const idx = parseInt(k.replace(/\D/g, ""), 10) - 1;
@@ -256,19 +285,19 @@
     const raw = normalizeCellText(getFieldValue(item.row, k));
     if (isDateTimeField(k)) {
       if (raw === "0") return smlStrCell("");
-      const iso = isoLocalFromRaw(raw);
+      const iso = isoLiteralFromRaw(raw);
       if (!iso) return smlStrCell(raw);
       return '<Cell ss:StyleID="dt"><Data ss:Type="DateTime">' + iso + "</Data></Cell>";
     }
     if (isDurationField(k)) {
       if (raw === "0") return smlStrCell("");
-      const sec = secondsFromMillisish(raw);
+      const sec = secondsFromMs(raw);
       if (sec === null) return smlStrCell(raw);
       return '<Cell ss:StyleID="dur"><Data ss:Type="Number">' + (sec / 86400) + "</Data></Cell>";
     }
     if (isHoldField(k)) {
-      const sec = raw === "0" ? 0 : secondsFromMillisish(raw);
-      const n = (sec === null) ? 0 : Math.round(sec);
+      const n0 = raw === "0" ? 0 : toNumberOrNull(raw);
+      const n = (n0 === null) ? 0 : n0;
       return '<Cell ss:StyleID="int"><Data ss:Type="Number">' + n + "</Data></Cell>";
     }
     if (isSentimentField(k)) {
@@ -280,6 +309,7 @@
     if (isForceTextField(k)) return smlTxtCell(raw === "0" ? "" : raw);
     return smlStrCell(raw);
   }
+
   function sanitizeSheetName(name, usedNames) {
     let n = String(name == null ? "" : name).replace(/[:\\\/\?\*\[\]]/g, " ").trim().slice(0, 31);
     if (!n) n = "Sheet";
@@ -288,6 +318,7 @@
     usedNames.add(n.toLowerCase());
     return n;
   }
+
   function buildMultiSheetExcelHtml(sheetDefs) {
     const styles =
       "<Styles>" +
@@ -317,6 +348,7 @@
       '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
       styles + worksheets + "</Workbook>";
   }
+
   // ── Download trigger ─────────────────────────────────────────────────────
   function downloadExcelFile(filename, html) {
     const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
@@ -329,6 +361,7 @@
     a.remove();
     URL.revokeObjectURL(url);
   }
+
   //##> SHARED XLS BUILDER: Exposed via api.setShared so resultsGrid.js can call
   //##> buildExcelHtml and downloadExcelFile directly without duplicating cell
   //##> formatting logic. Also exposes formatDisplayValue for human-readable grid
@@ -344,6 +377,7 @@
     normalizeCellText,
     getFieldValue
   });
+
   // ── Open metadata export ─────────────────────────────────────────────────
   function openMetadataExport() {
     try {
@@ -380,5 +414,6 @@
       alert("Export failed. Check console for details.");
     }
   }
+
   api.registerTool({ id: "metadataExport", label: "Metadata Export", hidden: true, open: openMetadataExport });
 })();
