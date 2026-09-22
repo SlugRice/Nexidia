@@ -4,425 +4,351 @@
   const registry = api.getShared("reportRegistry");
   if (!registry) return;
 
-  const NODE = "UDFVarchar120";
-  const GROUP_ID = "UDFVarchar10";
-  const DURATION = "mediaFileDuration";
-  const TRANS = "UDFVarchar110";
-  const RECORDED = "recordedDateTime";
-  const OPEN_MAX_MS = 24 * 60 * 60 * 1000;
-  const WARN_MAX_MS = 3 * 60 * 1000;
-  const WARN_MIN_MS = 60 * 60 * 1000;
-  const FALLBACK_MIN_MS = 2 * 60 * 1000;
-  const FALLBACK_STEP_MS = 2 * 60 * 1000;
+  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA, pqUHC_EI_UMR_NYCE_Prv_GLO";
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
-  const G1_NODE = "VQ_UHC_EI_UMR_SAN_SWA_PlanAdvisor_PG_Domestic, pqUHC_EI_UMR_Central_SouthwestAirlines_Mbr_DOM";
-  const G2_NODE = "VQ_UHC_EI_UMR_SAN_SWA_Provider_Domestic, pqUHC_EI_UMR_Central_SouthwestAirlines_Prv_DOM";
-  const DEFAULT_GROUP_ID = "76417701";
-
-  const SEARCH_FIELDS = [
-    "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
-    "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
-    "experienceId", "UDFVarchar122", "UDFVarchar104", "UDFVarchar105", "siteName",
-    "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110", "sourceMediaId"
+  const COLUMN_DEFS = [
+    { kind: "field", label: "Agent", display: "Agent", fallback: "agentName" },
+    { kind: "field", label: "Group ID (Policy ID)", display: "Group ID (Policy ID)", fallback: "UDFVarchar10" },
+    { kind: "field", label: "Provider Flag", display: "Provider Flag" },
+    { kind: "field", label: "Caller Type", display: "Caller Type" },
+    { kind: "field", label: "Member ID", display: "Member ID", fallback: "UDFVarchar50" },
+    { kind: "field", label: "Date/Time", display: "Date/Time", fallback: "recordedDateTime" },
+    { kind: "duration", label: "Duration" },
+    { kind: "field", label: "Hold Time", display: "Hold Time", fallback: "UDFInt4" },
+    { kind: "field", label: "Supervisor", display: "Supervisor", fallback: "supervisorName" },
+    { kind: "field", label: "Sentiment", display: "Sentiment", fallback: "sentimentScore" },
+    { kind: "blank", label: "Score" },
+    { kind: "field", label: "Experience Id", display: "Experience Id", fallback: "experienceId" },
+    { kind: "field", label: "Calluuid", display: "Calluuid", fallback: "UDFVarchar122" },
+    { kind: "field", label: "Member First Name", display: "Member First Name" },
+    { kind: "field", label: "Member Last Name", display: "Member Last Name" },
+    { kind: "field", label: "Site", display: "Site" },
+    { kind: "field", label: "Employee ID", display: "Employee ID" },
+    { kind: "field", label: "DNIS", display: "DNIS", fallback: "DNIS" },
+    { kind: "field", label: "Actual Site", display: "Actual Site" },
+    { kind: "field", label: "Node", display: "Node", fallback: "UDFVarchar120" },
+    { kind: "field", label: "Trans_Id", display: "Trans_Id", fallback: "UDFVarchar110" },
+    { kind: "field", label: "Provider Tax ID", display: "Provider Tax ID", fallback: "UDFVarchar136" },
+    { kind: "field", label: "NPI", display: "NPI", fallback: "UDFVarchar41" },
+    { kind: "field", label: "Orig ANI", display: "Orig ANI", fallback: "UDFVarchar115" },
+    { kind: "field", label: "User to User", display: "User to User", fallback: "UDFVarchar1" },
+    { kind: "blank", label: "Notes" },
+    { kind: "blank", label: "Repeat Caller" },
+    { kind: "blank", label: "Caller Name" },
+    { kind: "blank", label: "DOS" },
+    { kind: "blank", label: "Billed Amount" },
+    { kind: "blank", label: "Claim Number" },
+    { kind: "blank", label: "Received" },
+    { kind: "blank", label: "Status" },
+    { kind: "blank", label: "Reference Number" },
+    { kind: "blank", label: "Special Notes" }
   ];
 
-  //##> All Calls sheet: standard metadata only, no workup/manual columns.
-  const POP_FIELDS = [
-    "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
-    "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
-    "experienceId", "UDFVarchar122", "UDFVarchar104", "UDFVarchar105", "siteName",
-    "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110"
-  ];
-  const POP_HEADERS = [
-    "Agent", "Group ID (Policy ID)", "Provider Flag", "Caller Type", "Member ID",
-    "Date/Time", "Duration", "Hold Time", "Supervisor", "Sentiment",
-    "Experience Id", "Calluuid", "Member First Name", "Member Last Name", "Site",
-    "Employee ID", "DNIS", "Actual Site", "Node", "Trans_Id"
-  ];
-
-  //##> SWA Daily sheet: full workup layout including the blank manual columns.
-  const SEL_FIELDS = [
-    "agentName", "UDFVarchar10", "UDFVarchar111", "UDFVarchar47", "UDFVarchar50",
-    "recordedDateTime", "mediaFileDuration", "UDFInt4", "supervisorName", "sentimentScore",
-    "_blank_Score", "experienceId", "UDFVarchar122", "UDFVarchar104", "UDFVarchar105",
-    "siteName", "UDFVarchar126", "DNIS", "UDFVarchar141", "UDFVarchar120", "UDFVarchar110",
-    "_blank_Tags", "_blank_SubTags", "_blank_Notes", "_blank_BA", "_blank_Date_Completed"
-  ];
-  const SEL_HEADERS = [
-    "Agent", "Group ID (Policy ID)", "Provider Flag", "Caller Type", "Member ID",
-    "Date/Time", "Duration", "Hold Time", "Supervisor", "Sentiment",
-    "Score", "Experience Id", "Calluuid", "Member First Name", "Member Last Name",
-    "Site", "Employee ID", "DNIS", "Actual Site", "Node", "Trans_Id",
-    "Tags", "SubTags", "Notes", "BA", "Date Completed"
-  ];
-
-  const SPECIAL_LABEL = { calls: "Calls per day to select", durmin: "Duration Minimum", durmax: "Duration Maximum" };
-  const SPECIAL_KINDS = ["calls", "durmin", "durmax"];
+  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 
   function splitValues(raw) {
-    return [...new Set(String(raw || "").replace(/\r\n/g, "\n").replace(/\t/g, "\n").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean))];
+    return [...new Set(
+      String(raw || "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\t/g, "\n")
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
+    )];
   }
 
-  function friendlyDuration(ms) {
-    const min = ms / 60000;
-    if (min >= 60 && min % 60 === 0) { const h = min / 60; return h + " " + (h === 1 ? "hour" : "hours"); }
-    const m = Number.isInteger(min) ? String(min) : String(Math.round(min * 10) / 10);
-    return m + " " + (min === 1 ? "minute" : "minutes");
+  function formatDuration(ms) {
+    const total = Math.round((Number(ms) || 0) / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return pad2(m) + ":" + pad2(s);
   }
 
-  function pickRandom(arr, n) {
-    const copy = arr.slice();
-    const count = Math.max(0, Math.min(n, copy.length));
-    for (let i = 0; i < count; i++) {
-      const j = i + Math.floor(Math.random() * (copy.length - i));
-      const tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp;
+  function formatMdy(ymd) {
+    const p = String(ymd || "").split("-");
+    if (p.length !== 3) return String(ymd || "");
+    return p[1] + "-" + p[2] + "-" + p[0];
+  }
+
+  function cleanFileName(name) {
+    return String(name || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\.+$/, "").trim();
+  }
+
+  function toYmd(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+
+  function previousWeekRange() {
+    const now = new Date();
+    const sinceMon = (now.getDay() + 6) % 7;
+    const thisMon = new Date(now);
+    thisMon.setDate(now.getDate() - sinceMon);
+    const prevMon = new Date(thisMon);
+    prevMon.setDate(thisMon.getDate() - 7);
+    const prevFri = new Date(prevMon);
+    prevFri.setDate(prevMon.getDate() + 4);
+    return { from: toYmd(prevMon), to: toYmd(prevFri) };
+  }
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
     }
-    return copy.slice(0, count);
+    return a;
   }
 
   registry.register({
-    id: "southwestDaily",
-    label: "Southwest Daily",
-    description: "Pulls SWA Plan Advisor and Provider calls by node, group, and duration. The full population and the random per-day sample export as two tabs of one workbook.",
+    id: "nyceDaily",
+    label: "NYCE Daily",
+    description: "Pulls NYCE OGA provider calls by node and date, trims by call length, and takes a random daily sample with batched transcript export.",
+
+    defaultDateRange() { return previousWeekRange(); },
 
     buildConfig(container, helpers) {
       const el = helpers.el;
-      const metadataFields = helpers.metadataFields;
-      const makeFieldPicker = helpers.makeFieldPicker;
-      const savedGroups = helpers && helpers.savedConfig && Array.isArray(helpers.savedConfig.groups) ? helpers.savedConfig.groups : null;
+      const saved = helpers.savedConfig || null;
+      const nodeStorage = helpers.resolveStorageByDisplay("Node") || "UDFVarchar120";
 
-      const groupsWrap = el("div", {});
-      container.appendChild(groupsWrap);
-      const groupObjs = [];
+      const rows = [];
+      const rowsWrap = el("div", {});
 
-      function specialPresent(group, kind) {
-        for (const r of group.rows) if (r.kind === kind) return true;
-        return false;
-      }
-
-      function makeRow(group, kind, opts) {
-        opts = opts || {};
-        const row = { kind, rowEl: null, picker: null, valueInput: null, input: null };
-        const removeBtn = el("button", { style: "width:22px;height:22px;border-radius:50%;border:1px solid #e5e7eb;background:#fff;color:#aaa;cursor:pointer;font-size:12px;flex-shrink:0;", title: "Remove" }, "\u00d7");
-        const rowEl = el("div", { style: "display:flex;gap:8px;align-items:center;margin:6px 0;" });
-        rowEl.appendChild(removeBtn);
-
-        if (kind === "field") {
-          const picker = makeFieldPicker(metadataFields, opts.storageName || "");
-          const valueInput = el("input", { type: "text", value: opts.value || "", placeholder: "Values (comma or line separated)", style: "flex:1;min-width:0;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
-          row.picker = picker; row.valueInput = valueInput;
-          rowEl.appendChild(picker.wrapper);
-          rowEl.appendChild(valueInput);
-        } else if (kind === "calls") {
-          const label = el("div", { style: "display:flex;align-items:center;gap:6px;flex:0 0 220px;font-size:13px;color:#374151;" });
-          label.appendChild(el("span", {}, "Calls per day to select:"));
-          label.appendChild(el("span", { title: "Amount of qualifying calls to set aside per day for the report.", style: "display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e5e7eb;color:#374151;font-size:11px;font-style:italic;cursor:help;" }, "i"));
-          const input = el("input", { type: "number", min: "0", value: opts.value != null ? String(opts.value) : "0", style: "width:90px;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
-          row.input = input;
-          rowEl.appendChild(label);
-          rowEl.appendChild(input);
-        } else {
-          const label = el("div", { style: "flex:0 0 220px;font-size:13px;color:#374151;" }, SPECIAL_LABEL[kind]);
-          const input = el("input", { type: "number", min: "0", step: "0.5", value: opts.value != null ? String(opts.value) : "0", style: "width:90px;padding:7px 8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px;" });
-          row.input = input;
-          rowEl.appendChild(label);
-          rowEl.appendChild(input);
-          rowEl.appendChild(el("span", { style: "font-size:12px;color:#6b7280;" }, "minutes"));
-        }
-
-        row.rowEl = rowEl;
+      function addFilterRow(preset) {
+        const picker = helpers.makeFieldPicker(helpers.metadataFields, (preset && preset.storageName) || "");
+        const presetValue = preset
+          ? (Array.isArray(preset.values) ? preset.values.join(", ") : (preset.value || ""))
+          : "";
+        const valueInput = el("input", {
+          type: "text",
+          value: presetValue,
+          placeholder: "Values (comma or line separated)",
+          style: "margin-left:8px;min-width:220px;"
+        });
+        const removeBtn = el("button", { type: "button", style: "margin-left:8px;" }, "Remove");
+        const row = el("div", { style: "display:flex;align-items:center;margin-bottom:6px;" },
+          picker.wrapper, valueInput, removeBtn);
+        const entry = { picker, valueInput, row };
         removeBtn.onclick = () => {
-          const idx = group.rows.indexOf(row);
-          if (idx !== -1) group.rows.splice(idx, 1);
-          rowEl.remove();
+          const i = rows.indexOf(entry);
+          if (i >= 0) rows.splice(i, 1);
+          row.remove();
         };
-        return row;
+        rows.push(entry);
+        rowsWrap.appendChild(row);
+        return entry;
       }
 
-      function addRow(group, kind, opts) {
-        const row = makeRow(group, kind, opts);
-        group.rows.push(row);
-        group.rowsContainer.appendChild(row.rowEl);
-        return row;
-      }
+      const infoStyle = "margin-left:6px;cursor:help;color:#666;font-weight:bold;";
+      const numStyle = "width:120px;";
 
-      function openAddMenu(group, anchorBtn) {
-        const wrap = el("div", { style: "position:relative;display:inline-block;" });
-        anchorBtn.parentNode.insertBefore(wrap, anchorBtn.nextSibling);
-        const menu = el("div", { style: "position:absolute;top:4px;left:0;z-index:30;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);padding:4px;min-width:190px;" });
-        const options = [{ kind: "field", label: "Nexidia field" }];
-        for (const s of SPECIAL_KINDS) if (!specialPresent(group, s)) options.push({ kind: s, label: SPECIAL_LABEL[s] });
-        function cleanup() { document.removeEventListener("mousedown", onDoc, true); try { wrap.remove(); } catch (_) {} }
-        function onDoc(e) { if (!wrap.contains(e.target) && e.target !== anchorBtn) cleanup(); }
-        for (const o of options) {
-          const item = el("div", { style: "padding:7px 10px;font-size:13px;cursor:pointer;border-radius:6px;" }, o.label);
-          item.onmouseenter = () => { item.style.background = "#eff6ff"; };
-          item.onmouseleave = () => { item.style.background = ""; };
-          item.onclick = () => {
-            if (o.kind === "field") addRow(group, "field", {});
-            else if (o.kind === "calls") addRow(group, "calls", { value: 0 });
-            else if (o.kind === "durmin") addRow(group, "durmin", { value: 10 });
-            else if (o.kind === "durmax") addRow(group, "durmax", { value: 60 });
-            cleanup();
-          };
-          menu.appendChild(item);
-        }
-        wrap.appendChild(menu);
-        setTimeout(() => document.addEventListener("mousedown", onDoc, true), 0);
-      }
+      const minInput = el("input", { type: "number", min: "0", step: "1", style: numStyle,
+        value: saved && saved.durationMin != null ? String(saved.durationMin) : "120" });
+      const maxInput = el("input", { type: "number", min: "0", step: "1", style: numStyle,
+        value: saved && saved.durationMax != null ? String(saved.durationMax) : "0" });
+      const perDayInput = el("input", { type: "number", min: "1", step: "1", style: numStyle,
+        placeholder: "All", title: "Leave blank to pull all calls.",
+        value: saved && saved.callsPerDay != null ? String(saved.callsPerDay) : "20" });
 
-      function renumberGroups() {
-        for (let i = 0; i < groupObjs.length; i++) groupObjs[i].titleEl.textContent = "Group " + (i + 1);
-      }
+      const addBtn = el("button", { type: "button", style: "margin-top:4px;" }, "Add field");
+      addBtn.onclick = () => addFilterRow(null);
 
-      function makeGroupShell() {
-        const group = { rows: [], rowsContainer: null, el: null, titleEl: null };
-        const groupEl = el("div", { style: "border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;" });
-        const header = el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;" });
-        const title = el("div", { style: "font-size:14px;font-weight:700;color:#111827;" }, "Group");
-        const removeGroupBtn = el("button", { style: "padding:4px 10px;border-radius:7px;border:1px solid #ef4444;background:#fff;color:#ef4444;font-size:11px;cursor:pointer;" }, "Remove group");
-        header.appendChild(title);
-        header.appendChild(removeGroupBtn);
-        groupEl.appendChild(header);
-        const rowsContainer = el("div", {});
-        groupEl.appendChild(rowsContainer);
-        const addBtn = el("button", { style: "margin-top:8px;padding:6px 12px;border-radius:8px;border:1px solid #3b82f6;background:#fff;color:#3b82f6;cursor:pointer;font-size:12px;" }, "+ Add field");
-        addBtn.onclick = () => openAddMenu(group, addBtn);
-        groupEl.appendChild(addBtn);
-        group.rowsContainer = rowsContainer;
-        group.el = groupEl;
-        group.titleEl = title;
-        removeGroupBtn.onclick = () => {
-          if (groupObjs.length <= 1) { alert("At least one group is required."); return; }
-          const idx = groupObjs.indexOf(group);
-          if (idx !== -1) groupObjs.splice(idx, 1);
-          groupEl.remove();
-          renumberGroups();
-        };
-        return group;
-      }
+      container.appendChild(el("div", { style: "font-weight:bold;margin-bottom:6px;" }, "Filters"));
+      container.appendChild(rowsWrap);
+      container.appendChild(addBtn);
 
-      function mountGroup(group) {
-        groupObjs.push(group);
-        groupsWrap.appendChild(group.el);
-        renumberGroups();
-        return group;
-      }
+      container.appendChild(el("div", { style: "margin-top:14px;font-weight:bold;" }, "Call length (seconds)"));
+      container.appendChild(el("div", { style: "display:flex;align-items:center;margin-top:6px;" },
+        el("label", { style: "margin-right:6px;" }, "Min"), minInput,
+        el("span", { style: infoStyle, title: "Set to 0 to disable max/min" }, "\u24D8"),
+        el("label", { style: "margin-left:16px;margin-right:6px;" }, "Max"), maxInput,
+        el("span", { style: infoStyle, title: "Set to 0 to disable max/min" }, "\u24D8")
+      ));
 
-      function addDefaultGroup(prefill) {
-        const group = makeGroupShell();
-        addRow(group, "field", { storageName: NODE, value: prefill.node });
-        addRow(group, "field", { storageName: GROUP_ID, value: DEFAULT_GROUP_ID });
-        addRow(group, "calls", { value: prefill.calls });
-        addRow(group, "durmin", { value: 10 });
-        addRow(group, "durmax", { value: 60 });
-        return mountGroup(group);
-      }
+      container.appendChild(el("div", { style: "margin-top:14px;font-weight:bold;" }, "Calls Per Day"));
+      container.appendChild(el("div", { style: "display:flex;align-items:center;margin-top:6px;" },
+        perDayInput,
+        el("span", { style: infoStyle, title: "Leave blank to pull all calls." }, "\u24D8")
+      ));
 
-      function addGroupFromSpec(spec) {
-        const group = makeGroupShell();
-        const fields = Array.isArray(spec.fields) ? spec.fields : [];
-        for (const f of fields) addRow(group, "field", { storageName: f.storageName, value: (f.values || []).join(", ") });
-        if (spec.callsToSelect != null) addRow(group, "calls", { value: spec.callsToSelect });
-        if (spec.durMinMs != null) addRow(group, "durmin", { value: spec.durMinMs / 60000 });
-        if (spec.durMaxMs != null) addRow(group, "durmax", { value: spec.durMaxMs / 60000 });
-        return mountGroup(group);
-      }
-
-      if (savedGroups && savedGroups.length) {
-        for (const spec of savedGroups) addGroupFromSpec(spec);
+      if (saved && Array.isArray(saved.filters) && saved.filters.length) {
+        saved.filters.forEach(f => addFilterRow(f));
       } else {
-        addDefaultGroup({ node: G1_NODE, calls: 18 });
-        addDefaultGroup({ node: G2_NODE, calls: 8 });
+        addFilterRow({ storageName: nodeStorage, value: DEFAULT_NODE_VALUE });
       }
-
-      const addGroupBtn = el("button", { style: "padding:6px 14px;border-radius:8px;border:1px dashed #6b7280;background:#fff;color:#374151;cursor:pointer;font-size:12px;" }, "+ Add group");
-      addGroupBtn.onclick = () => addDefaultGroup({ node: "", calls: 0 });
-      container.appendChild(addGroupBtn);
 
       return {
         getConfig() {
-          const groups = groupObjs.map((g) => {
-            const fields = [];
-            let callsToSelect = null, durMinMs = null, durMaxMs = null;
-            for (const row of g.rows) {
-              if (row.kind === "field") {
-                const storageName = row.picker.getStorageName();
-                const values = splitValues(row.valueInput.value);
-                if (storageName && values.length) fields.push({ storageName, values });
-              } else if (row.kind === "calls") {
-                const n = parseInt(row.input.value, 10);
-                callsToSelect = isNaN(n) ? null : Math.max(0, n);
-              } else if (row.kind === "durmin") {
-                const mins = parseFloat(row.input.value);
-                durMinMs = (isNaN(mins) || mins <= 0) ? null : Math.round(mins * 60000);
-              } else if (row.kind === "durmax") {
-                const mins = parseFloat(row.input.value);
-                durMaxMs = (isNaN(mins) || mins <= 0) ? null : Math.round(mins * 60000);
-              }
-            }
-            return { fields, callsToSelect, durMinMs, durMaxMs };
+          const filters = [];
+          rows.forEach(r => {
+            const values = splitValues(r.valueInput.value);
+            if (!values.length) return;
+            filters.push({
+              storageName: r.picker.getStorageName(),
+              display: r.picker.getDisplayName(),
+              values
+            });
           });
-          return { groups };
+          const min = parseInt(minInput.value, 10);
+          const max = parseInt(maxInput.value, 10);
+          const perDayRaw = perDayInput.value.trim();
+          const perDay = perDayRaw === "" ? null : parseInt(perDayRaw, 10);
+          return {
+            filters,
+            durationMin: isNaN(min) ? 0 : min,
+            durationMax: isNaN(max) ? 0 : max,
+            callsPerDay: perDay == null || isNaN(perDay) ? null : perDay
+          };
         }
       };
     },
 
     validateConfig(config) {
-      const groups = (config && config.groups) || [];
-      let anyFilter = false;
-      for (const g of groups) if (g.fields && g.fields.length) anyFilter = true;
-      if (!anyFilter) { alert("All search parameters have been removed. Please go back and enter some search parameters."); return false; }
-      for (const g of groups) {
-        if (g.durMinMs != null && g.durMaxMs != null && g.durMinMs > g.durMaxMs) {
-          alert("Joe. What are you doing? You set the minimum higher than the maximum! Go get some coffee and try it again.");
-          return false;
-        }
+      const min = config && config.durationMin ? config.durationMin : 0;
+      const max = config && config.durationMax ? config.durationMax : 0;
+      if (min > 0 && max > 0 && min > max) {
+        alert("Minimum call length cannot be higher than the maximum.");
+        return false;
       }
-      for (const g of groups) {
-        if (g.durMaxMs != null && g.durMaxMs < WARN_MAX_MS) {
-          if (!confirm("This will only show you calls that are under " + friendlyDuration(g.durMaxMs) + ". Did you want to proceed?")) return false;
-        }
-        if (g.durMinMs != null && g.durMinMs > WARN_MIN_MS) {
-          const mins = Math.round(g.durMinMs / 60000);
-          if (!confirm("This will only show you calls that are over " + mins + " minutes long. Did you want to proceed?")) return false;
-        }
+      const active = (config && Array.isArray(config.filters)) ? config.filters.length : 0;
+      if (active === 0) {
+        alert("Add at least one filter before running.");
+        return false;
+      }
+      if (config.callsPerDay != null && config.callsPerDay < 1) {
+        alert("Calls Per Day must be blank or a number of at least 1.");
+        return false;
       }
       return true;
     },
 
     async run(ctx) {
-      const B = ctx.builders;
-      const H = ctx.helpers;
-      const groups = (ctx.config && ctx.config.groups) || [];
+      const h = ctx.helpers;
+      const b = ctx.builders;
+      const config = ctx.config || { filters: [], durationMin: 0, durationMax: 0, callsPerDay: null };
 
-      //##> Save the launch state so the grid's Back to Report can restore the form.
-      try { api.setShared("reportReturnState", { reportId: "southwestDaily", config: ctx.config, fromVal: ctx.fromVal, toVal: ctx.toVal }); } catch (_) {}
+      api.setShared("reportReturnState", {
+        reportId: "nyceDaily",
+        config: config,
+        fromVal: ctx.fromVal,
+        toVal: ctx.toVal
+      });
 
-      function dayKey(row) {
-        const s = String(H.getFieldValue(row, RECORDED) || "");
-        const m = s.match(/^\d{4}-\d{2}-\d{2}/);
-        if (m) return m[0];
-        const d = new Date(s);
-        return isNaN(d) ? "unknown" : d.toISOString().slice(0, 10);
-      }
-      function nodeVal(item) { return H.getFieldValue(item.row, NODE).toLowerCase(); }
+      const durSn = h.resolveStorageByDisplay("Duration") || "mediaFileDuration";
+      const dtSn = h.resolveStorageByDisplay("Date/Time") || "recordedDateTime";
+      const transSn = h.resolveStorageByDisplay("Trans_Id") || "UDFVarchar110";
 
-      const groupPools = [];
-      const skipped = [];
-      let searchedAny = false;
-
-      for (let gi = 0; gi < groups.length; gi++) {
-        if (ctx.isCancelled()) return;
-        const g = groups[gi];
-        if (!g.fields || !g.fields.length) { skipped.push(gi + 1); groupPools[gi] = []; continue; }
-
-        const kwFilters = g.fields.map((f) => B.buildKeywordFilter(f.storageName, f.values, "IN"));
-        if (g.durMinMs != null || g.durMaxMs != null) {
-          const configuredLow = g.durMinMs != null ? g.durMinMs : 0;
-          const low = configuredLow > FALLBACK_MIN_MS ? FALLBACK_MIN_MS : configuredLow;
-          const high = g.durMaxMs != null ? g.durMaxMs : OPEN_MAX_MS;
-          kwFilters.push(B.buildDecimalFilter(DURATION, low, high));
+      const searchFields = new Set(["sourceMediaId", transSn, durSn, dtSn]);
+      const resolvedCols = COLUMN_DEFS.map(def => {
+        if (def.kind === "field") {
+          const sn = h.resolveStorageByDisplay(def.display) || def.fallback || null;
+          if (sn) searchFields.add(sn);
+          return { def, storageName: sn };
         }
-        const keywordGroup = { operator: "AND", invertOperator: false, filters: kwFilters };
-        ctx.progress.set(10 + Math.floor((gi / Math.max(1, groups.length)) * 70), "Searching Group " + (gi + 1) + " of " + groups.length + "...", "");
-        const result = await ctx.runSearch([{ keywordGroup, phraseGroups: [] }], SEARCH_FIELDS, {});
-        if (!result) return;
-        searchedAny = true;
-        groupPools[gi] = result.finalRows || [];
+        return { def, storageName: null };
+      });
+
+      const keywordFilters = [];
+      config.filters.forEach(f => {
+        const sn = h.resolveStorageByDisplay(f.display) || f.storageName || null;
+        if (!sn) return;
+        const values = Array.isArray(f.values) ? f.values : splitValues(f.value);
+        if (!values.length) return;
+        keywordFilters.push(b.buildKeywordFilter(sn, values, "IN"));
+      });
+
+      const min = config.durationMin || 0;
+      const max = config.durationMax || 0;
+      if (min > 0 || max > 0) {
+        const low = min > 0 ? min * 1000 : 0;
+        const high = max > 0 ? max * 1000 : DAY_MS;
+        keywordFilters.push(b.buildDecimalFilter(durSn, low, high));
       }
 
-      if (!searchedAny) { ctx.progress.remove(); alert("No searchable groups. Please add at least one field filter."); return; }
+      const runSets = [{
+        keywordGroup: { operator: "AND", invertOperator: false, filters: keywordFilters },
+        phraseGroups: []
+      }];
 
-      //##> Per-day sampling: pick each group's "calls per day" at random from that
-      //##> group's calls on each day. Selected rows are ordered by date, then group.
-      const dayset = new Set();
-      for (let gi = 0; gi < groupPools.length; gi++) for (const r of groupPools[gi]) dayset.add(dayKey(r.row));
-      const days = [...dayset].sort();
+      ctx.progress.set(5, "Searching calls...");
+      const result = await ctx.runSearch(runSets, Array.from(searchFields), {});
+      if (!result) { ctx.progress.remove(); return; }
 
-      const used = new Set();
-      const selectedRows = [];
-      const shortfalls = [];
-      const adjustments = [];
+      const finalRows = result.finalRows || [];
 
-      for (const day of days) {
-        let dayAdjustedMinMs = null;
-        for (let gi = 0; gi < groups.length; gi++) {
-          const g = groups[gi];
-          const n = g.callsToSelect == null ? 0 : g.callsToSelect;
-          if (n <= 0 || !groupPools[gi] || !groupPools[gi].length) continue;
-          const configuredMinMs = g.durMinMs != null ? g.durMinMs : 0;
-          let activeMinMs = configuredMinMs;
-          let dayRows = [];
-          while (true) {
-            dayRows = groupPools[gi].filter((r) => {
-              if (dayKey(r.row) !== day) return false;
-              const t = H.getFieldValue(r.row, TRANS);
-              if (t && used.has(t)) return false;
-              const duration = Number(H.getFieldValue(r.row, DURATION)) || 0;
-              return duration >= activeMinMs;
-            });
-            if (dayRows.length >= n || activeMinMs <= FALLBACK_MIN_MS || configuredMinMs <= FALLBACK_MIN_MS) break;
-            activeMinMs = Math.max(FALLBACK_MIN_MS, activeMinMs - FALLBACK_STEP_MS);
+      const byDay = {};
+      finalRows.forEach(entry => {
+        const raw = h.getFieldValue(entry.row, dtSn) || "";
+        const day = String(raw).slice(0, 10) || "unknown";
+        (byDay[day] = byDay[day] || []).push(entry);
+      });
+
+      const days = Object.keys(byDay).sort();
+      const output = [];
+      const shortDays = [];
+
+      days.forEach(day => {
+        const list = byDay[day];
+        let picks;
+        if (config.callsPerDay == null) {
+          picks = list.slice();
+        } else {
+          if (list.length < config.callsPerDay) {
+            shortDays.push({ day, have: list.length, want: config.callsPerDay });
           }
-          if (activeMinMs < configuredMinMs) {
-            dayAdjustedMinMs = dayAdjustedMinMs == null ? activeMinMs : Math.min(dayAdjustedMinMs, activeMinMs);
-          }
-          if (dayRows.length < n) shortfalls.push({ group: gi + 1, day, requested: n, got: dayRows.length });
-          const picks = pickRandom(dayRows, n);
-          for (const p of picks) { selectedRows.push(p); const t = H.getFieldValue(p.row, TRANS); if (t) used.add(t); }
+          picks = shuffle(list).slice(0, config.callsPerDay);
         }
-        if (dayAdjustedMinMs != null) adjustments.push({ day, minMs: dayAdjustedMinMs });
-      }
-
-      //##> All Calls: full deduped union of all groups, sorted by node.
-      const popSeen = new Set();
-      const populationRows = [];
-      for (let gi = 0; gi < groupPools.length; gi++) {
-        for (const r of groupPools[gi]) {
-          const t = H.getFieldValue(r.row, TRANS);
-          if (t) { if (popSeen.has(t)) continue; popSeen.add(t); }
-          populationRows.push(r);
-        }
-      }
-      populationRows.sort((a, b) => { const na = nodeVal(a), nb = nodeVal(b); return na < nb ? -1 : na > nb ? 1 : 0; });
-
-      //##> Fallback rows for a grid without the session hook: selected on top, a
-      //##> three-row gap, then the remaining population sorted by node.
-      const restRows = populationRows.filter((r) => { const t = H.getFieldValue(r.row, TRANS); return !t || !used.has(t); });
-      const gap = [{ row: {}, phrases: [] }, { row: {}, phrases: [] }, { row: {}, phrases: [] }];
-      const fallbackRows = selectedRows.concat(gap, restRows);
-
-      const gridSession = {
-        title: "Southwest Daily",
-        exportBaseName: "SWA Daily",
-        back: { toolId: "reports" },
-        sheets: [
-          { id: "population", name: "All Calls", export: true, rows: populationRows, fields: POP_FIELDS, headers: POP_HEADERS },
-          { id: "selected", name: "SWA Daily", export: true, rows: selectedRows, fields: SEL_FIELDS, headers: SEL_HEADERS }
-        ]
-      };
-      try { api.setShared("gridSession", gridSession); } catch (_) {}
-
-      const msgs = [];
-      if (adjustments.length) {
-        const lines = adjustments.map((a) => {
-          const p = a.day.split("-");
-          const displayDay = p.length === 3 ? Number(p[1]) + "/" + Number(p[2]) + "/" + p[0] : a.day;
-          return "-For " + displayDay + ", Duration Minimum adjusted to " + Math.round(a.minMs / 60000) + " mins.";
+        picks.sort((a, b2) => {
+          const av = String(h.getFieldValue(a.row, dtSn) || "");
+          const bv = String(h.getFieldValue(b2.row, dtSn) || "");
+          return av < bv ? -1 : av > bv ? 1 : 0;
         });
-        msgs.push("Insufficient calls were under default filters. The following adjustments were made:\n" + lines.join("\n"));
-      }
-      if (shortfalls.length) {
-        const lines = shortfalls.map((s) => s.requested + " calls requested from Group " + s.group + " for " + s.day + ", but only " + s.got + " qualifying calls were found after lowering Duration Minimum to 2 mins. All available calls were selected.");
-        msgs.push(lines.join("\n") + "\n\nIf more are required, try broadening the other filters or the date range.");
-      }
-      if (skipped.length) {
-        msgs.push("Group" + (skipped.length > 1 ? "s " : " ") + skipped.join(", ") + " had no field filters and " + (skipped.length > 1 ? "were" : "was") + " skipped.");
-      }
-      if (msgs.length) alert(msgs.join("\n\n"));
+        picks.forEach(entry => {
+          entry.row._report_duration = formatDuration(h.getFieldValue(entry.row, durSn));
+          output.push(entry);
+        });
+      });
 
-      ctx.dispatchToGrid(fallbackRows, { fields: SEL_FIELDS, headers: SEL_HEADERS });
+      const fields = [];
+      const headers = [];
+      resolvedCols.forEach(rc => {
+        const def = rc.def;
+        if (def.kind === "duration") {
+          fields.push("_report_duration"); headers.push("Duration");
+        } else if (def.kind === "blank") {
+          fields.push("_blank_" + def.label); headers.push(def.label);
+        } else if (rc.storageName) {
+          fields.push(rc.storageName); headers.push(def.label);
+        } else {
+          fields.push("_blank_" + def.label); headers.push(def.label);
+        }
+      });
+
+      const zipName = cleanFileName("NYCE Daily - " + formatMdy(ctx.fromVal) + " - " + formatMdy(ctx.toVal));
+      api.setShared("reportBatchPreset", {
+        exportTranscripts: true,
+        transcriptMode: "batch",
+        batchMode: "length",
+        targetTokens: 18500,
+        showTimestamps: true,
+        autoDownload: false,
+        zipFileName: zipName
+      });
+
+      ctx.progress.set(95, "Building results...");
+      ctx.dispatchToGrid(output, {
+        fields,
+        headers,
+        maxPhraseCols: result.maxPhraseCols,
+        includePhraseCol: result.includePhraseCol
+      });
+      ctx.progress.remove();
+
+      if (shortDays.length) {
+        const lines = shortDays.map(s => "  " + s.day + ": " + s.have + " of " + s.want);
+        alert("Some days had fewer calls than requested. All available were pulled:\n" + lines.join("\n"));
+      }
     }
   });
 })();
