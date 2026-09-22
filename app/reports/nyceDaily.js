@@ -4,7 +4,7 @@
   const registry = api.getShared("reportRegistry");
   if (!registry) return;
 
-  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA,pqUHC_EI_UMR_NYCE_Prv_GLO"
+  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA, pqUHC_EI_UMR_NYCE_Prv_GLO";
   const DAY_MS = 24 * 60 * 60 * 1000;
 
   const COLUMN_DEFS = [
@@ -46,6 +46,17 @@
   ];
 
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+  function splitValues(raw) {
+    return [...new Set(
+      String(raw || "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\t/g, "\n")
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
+    )];
+  }
 
   function formatDuration(ms) {
     const total = Math.round((Number(ms) || 0) / 1000);
@@ -106,10 +117,13 @@
 
       function addFilterRow(preset) {
         const picker = helpers.makeFieldPicker(helpers.metadataFields, (preset && preset.storageName) || "");
+        const presetValue = preset
+          ? (Array.isArray(preset.values) ? preset.values.join(", ") : (preset.value || ""))
+          : "";
         const valueInput = el("input", {
           type: "text",
-          value: (preset && preset.value) || "",
-          placeholder: "Value",
+          value: presetValue,
+          placeholder: "Values (comma or line separated)",
           style: "margin-left:8px;min-width:220px;"
         });
         const removeBtn = el("button", { type: "button", style: "margin-left:8px;" }, "Remove");
@@ -168,12 +182,12 @@
         getConfig() {
           const filters = [];
           rows.forEach(r => {
-            const value = r.valueInput.value.trim();
-            if (!value) return;
+            const values = splitValues(r.valueInput.value);
+            if (!values.length) return;
             filters.push({
               storageName: r.picker.getStorageName(),
               display: r.picker.getDisplayName(),
-              value
+              values
             });
           });
           const min = parseInt(minInput.value, 10);
@@ -239,7 +253,9 @@
       config.filters.forEach(f => {
         const sn = h.resolveStorageByDisplay(f.display) || f.storageName || null;
         if (!sn) return;
-        keywordFilters.push(b.buildKeywordFilter(sn, [f.value], "IN"));
+        const values = Array.isArray(f.values) ? f.values : splitValues(f.value);
+        if (!values.length) return;
+        keywordFilters.push(b.buildKeywordFilter(sn, values, "IN"));
       });
 
       const min = config.durationMin || 0;
