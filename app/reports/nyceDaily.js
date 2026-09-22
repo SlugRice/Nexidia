@@ -4,7 +4,7 @@
   const registry = api.getShared("reportRegistry");
   if (!registry) return;
 
-  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA";
+  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA,pqUHC_EI_UMR_NYCE_Prv_GLO;
   const DAY_MS = 24 * 60 * 60 * 1000;
 
   const COLUMN_DEFS = [
