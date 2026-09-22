@@ -4,8 +4,10 @@
   const registry = api.getShared("reportRegistry");
   if (!registry) return;
 
-  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA, pqUHC_EI_UMR_NYCE_Prv_GLO";
+
+  const DEFAULT_NODE_VALUE = "VQ_UHC_EI_UMR_NYCE_Provider_OGA,pqUHC_EI_UMR_NYCE_Prv_GLO;"
   const DAY_MS = 24 * 60 * 60 * 1000;
+
 
   const COLUMN_DEFS = [
     { kind: "field", label: "Agent", display: "Agent", fallback: "agentName" },
@@ -45,18 +47,9 @@
     { kind: "blank", label: "Special Notes" }
   ];
 
+
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 
-  function splitValues(raw) {
-    return [...new Set(
-      String(raw || "")
-        .replace(/\r\n/g, "\n")
-        .replace(/\t/g, "\n")
-        .split(/[\n,;]+/)
-        .map(s => s.trim())
-        .filter(Boolean)
-    )];
-  }
 
   function formatDuration(ms) {
     const total = Math.round((Number(ms) || 0) / 1000);
@@ -65,19 +58,23 @@
     return pad2(m) + ":" + pad2(s);
   }
 
+
   function formatMdy(ymd) {
     const p = String(ymd || "").split("-");
     if (p.length !== 3) return String(ymd || "");
     return p[1] + "-" + p[2] + "-" + p[0];
   }
 
+
   function cleanFileName(name) {
     return String(name || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\.+$/, "").trim();
   }
 
+
   function toYmd(d) {
     return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
   }
+
 
   function previousWeekRange() {
     const now = new Date();
@@ -91,6 +88,7 @@
     return { from: toYmd(prevMon), to: toYmd(prevFri) };
   }
 
+
   function shuffle(arr) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) {
@@ -100,30 +98,32 @@
     return a;
   }
 
+
   registry.register({
     id: "nyceDaily",
     label: "NYCE Daily",
     description: "Pulls NYCE OGA provider calls by node and date, trims by call length, and takes a random daily sample with batched transcript export.",
 
+
     defaultDateRange() { return previousWeekRange(); },
+
 
     buildConfig(container, helpers) {
       const el = helpers.el;
       const saved = helpers.savedConfig || null;
       const nodeStorage = helpers.resolveStorageByDisplay("Node") || "UDFVarchar120";
 
+
       const rows = [];
       const rowsWrap = el("div", {});
 
+
       function addFilterRow(preset) {
         const picker = helpers.makeFieldPicker(helpers.metadataFields, (preset && preset.storageName) || "");
-        const presetValue = preset
-          ? (Array.isArray(preset.values) ? preset.values.join(", ") : (preset.value || ""))
-          : "";
         const valueInput = el("input", {
           type: "text",
-          value: presetValue,
-          placeholder: "Values (comma or line separated)",
+          value: (preset && preset.value) || "",
+          placeholder: "Value",
           style: "margin-left:8px;min-width:220px;"
         });
         const removeBtn = el("button", { type: "button", style: "margin-left:8px;" }, "Remove");
@@ -140,8 +140,10 @@
         return entry;
       }
 
+
       const infoStyle = "margin-left:6px;cursor:help;color:#666;font-weight:bold;";
       const numStyle = "width:120px;";
+
 
       const minInput = el("input", { type: "number", min: "0", step: "1", style: numStyle,
         value: saved && saved.durationMin != null ? String(saved.durationMin) : "120" });
@@ -151,12 +153,15 @@
         placeholder: "All", title: "Leave blank to pull all calls.",
         value: saved && saved.callsPerDay != null ? String(saved.callsPerDay) : "20" });
 
+
       const addBtn = el("button", { type: "button", style: "margin-top:4px;" }, "Add field");
       addBtn.onclick = () => addFilterRow(null);
+
 
       container.appendChild(el("div", { style: "font-weight:bold;margin-bottom:6px;" }, "Filters"));
       container.appendChild(rowsWrap);
       container.appendChild(addBtn);
+
 
       container.appendChild(el("div", { style: "margin-top:14px;font-weight:bold;" }, "Call length (seconds)"));
       container.appendChild(el("div", { style: "display:flex;align-items:center;margin-top:6px;" },
@@ -166,11 +171,13 @@
         el("span", { style: infoStyle, title: "Set to 0 to disable max/min" }, "\u24D8")
       ));
 
+
       container.appendChild(el("div", { style: "margin-top:14px;font-weight:bold;" }, "Calls Per Day"));
       container.appendChild(el("div", { style: "display:flex;align-items:center;margin-top:6px;" },
         perDayInput,
         el("span", { style: infoStyle, title: "Leave blank to pull all calls." }, "\u24D8")
       ));
+
 
       if (saved && Array.isArray(saved.filters) && saved.filters.length) {
         saved.filters.forEach(f => addFilterRow(f));
@@ -178,16 +185,17 @@
         addFilterRow({ storageName: nodeStorage, value: DEFAULT_NODE_VALUE });
       }
 
+
       return {
         getConfig() {
           const filters = [];
           rows.forEach(r => {
-            const values = splitValues(r.valueInput.value);
-            if (!values.length) return;
+            const value = r.valueInput.value.trim();
+            if (!value) return;
             filters.push({
               storageName: r.picker.getStorageName(),
               display: r.picker.getDisplayName(),
-              values
+              value
             });
           });
           const min = parseInt(minInput.value, 10);
@@ -203,6 +211,7 @@
         }
       };
     },
+
 
     validateConfig(config) {
       const min = config && config.durationMin ? config.durationMin : 0;
@@ -223,10 +232,12 @@
       return true;
     },
 
+
     async run(ctx) {
       const h = ctx.helpers;
       const b = ctx.builders;
       const config = ctx.config || { filters: [], durationMin: 0, durationMax: 0, callsPerDay: null };
+
 
       api.setShared("reportReturnState", {
         reportId: "nyceDaily",
@@ -235,9 +246,11 @@
         toVal: ctx.toVal
       });
 
+
       const durSn = h.resolveStorageByDisplay("Duration") || "mediaFileDuration";
       const dtSn = h.resolveStorageByDisplay("Date/Time") || "recordedDateTime";
       const transSn = h.resolveStorageByDisplay("Trans_Id") || "UDFVarchar110";
+
 
       const searchFields = new Set(["sourceMediaId", transSn, durSn, dtSn]);
       const resolvedCols = COLUMN_DEFS.map(def => {
@@ -249,14 +262,14 @@
         return { def, storageName: null };
       });
 
+
       const keywordFilters = [];
       config.filters.forEach(f => {
         const sn = h.resolveStorageByDisplay(f.display) || f.storageName || null;
         if (!sn) return;
-        const values = Array.isArray(f.values) ? f.values : splitValues(f.value);
-        if (!values.length) return;
-        keywordFilters.push(b.buildKeywordFilter(sn, values, "IN"));
+        keywordFilters.push(b.buildKeywordFilter(sn, [f.value], "IN"));
       });
+
 
       const min = config.durationMin || 0;
       const max = config.durationMax || 0;
@@ -266,16 +279,20 @@
         keywordFilters.push(b.buildDecimalFilter(durSn, low, high));
       }
 
+
       const runSets = [{
         keywordGroup: { operator: "AND", invertOperator: false, filters: keywordFilters },
         phraseGroups: []
       }];
 
+
       ctx.progress.set(5, "Searching calls...");
       const result = await ctx.runSearch(runSets, Array.from(searchFields), {});
       if (!result) { ctx.progress.remove(); return; }
 
+
       const finalRows = result.finalRows || [];
+
 
       const byDay = {};
       finalRows.forEach(entry => {
@@ -284,9 +301,11 @@
         (byDay[day] = byDay[day] || []).push(entry);
       });
 
+
       const days = Object.keys(byDay).sort();
       const output = [];
       const shortDays = [];
+
 
       days.forEach(day => {
         const list = byDay[day];
@@ -310,6 +329,7 @@
         });
       });
 
+
       const fields = [];
       const headers = [];
       resolvedCols.forEach(rc => {
@@ -325,6 +345,7 @@
         }
       });
 
+
       const zipName = cleanFileName("NYCE Daily - " + formatMdy(ctx.fromVal) + " - " + formatMdy(ctx.toVal));
       api.setShared("reportBatchPreset", {
         exportTranscripts: true,
@@ -336,6 +357,7 @@
         zipFileName: zipName
       });
 
+
       ctx.progress.set(95, "Building results...");
       ctx.dispatchToGrid(output, {
         fields,
@@ -344,6 +366,7 @@
         includePhraseCol: result.includePhraseCol
       });
       ctx.progress.remove();
+
 
       if (shortDays.length) {
         const lines = shortDays.map(s => "  " + s.day + ": " + s.have + " of " + s.want);
