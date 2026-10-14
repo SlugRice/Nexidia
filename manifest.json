@@ -1,5 +1,5 @@
 {
-  "version": "0.1.937",
+  "version": "0.1.92",
   "entry": [
     "app/core/registry.js",
     "app/core/columnPrefs.js",
@@ -13,6 +13,7 @@
     "app/player/playlist.js",
     "app/reports/reportServices.js",
     "app/reports/reportsHub.js",
+    "app/unpack.js",
     "app/entry.js"
   ]
 }
