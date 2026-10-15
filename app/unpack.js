@@ -1,4 +1,4 @@
-//[Last Update: 11:48 AM 9/29/2026]
+//[Last Update: 12:34 PM 10/15/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -15,6 +15,13 @@
   const INCOMING_DELIM = ";";
   const TRANS_FIELD = "UDFVarchar110";
   const TRANS_ALIASES = ["trans_id", "transid", "trans id"];
+  //##> MERGE MATCHING: Column names are compared after removing case, spaces, and symbols. Close
+  //##> matches (up to 2 letters different) only count when both names are at least FUZZY_MIN_LENGTH
+  //##> characters, so short names like DOS and DOB never match. KNOWN_PAIRS are names that mean the
+  //##> same thing but don't look alike.
+  const FUZZY_MIN_LENGTH = 6;
+  const FUZZY_MAX_DISTANCE = 2;
+  const KNOWN_PAIRS = [["notes", "summary"]];
   const ROW_HEIGHT = 28;
   const BUFFER_ROWS = 20;
   const DEFAULT_COL_W = 150;
@@ -87,6 +94,28 @@
   function joinNames(list) {
     if (list.length === 1) return list[0];
     return list.join(", ") + ",";
+  }
+  function normName(s) {
+    return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+  function editDistance(a, b) {
+    if (Math.abs(a.length - b.length) > FUZZY_MAX_DISTANCE) return FUZZY_MAX_DISTANCE + 1;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  function namesMatch(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (KNOWN_PAIRS.some(([x, y]) => (a === x && b === y) || (a === y && b === x))) return true;
+    return a.length >= FUZZY_MIN_LENGTH && b.length >= FUZZY_MIN_LENGTH && editDistance(a, b) <= FUZZY_MAX_DISTANCE;
+  }
+  function pairKey(a, b) {
+    return [a, b].sort().join("|");
   }
 
   //##> VALIDATION: Every pasted line is checked before anything reaches the grid. Truncation is the
@@ -472,6 +501,8 @@
       metaAdded: false,
       meta: {},
       metaStatus: {},
+      merges: [],
+      mergeDismissed: [],
       imports: [],
       removed: [],
       pending: [{ text: "", error: "" }],
@@ -498,6 +529,7 @@
     let saveTimer = null;
     let closed = false;
     let metaBusy = false;
+    let mergeDialogOpen = false;
     let lastRange = { start: 0, end: 0 };
     let rafPending = false;
     let dragColIndex = null;
@@ -542,12 +574,72 @@
       if (on && i === -1) S.grid.visible.push(f);
       if (!on && i !== -1) S.grid.visible.splice(i, 1);
     }
-    function headerOf(f) {
+    function baseHeader(f) {
       if (f === "__conf__") return "Confidence";
       if (f.startsWith("j:")) { const c = colById(f.slice(2)); return c ? c.header : f; }
       if (f.startsWith("m:")) return S.metaHeaders[f.slice(2)] || f.slice(2);
       return f;
     }
+    function headerOf(f) { return baseHeader(f); }
+    function sourceName(f) { return String(f).startsWith("m:") ? "Nexidia" : "CoPilot"; }
+
+    //##> MERGES: S.merges is a log of { source, target } links between columns. A merged source column
+    //##> leaves the grid, and its values are stacked after the target's own values at render time.
+    //##> Each column can only be merged into one target, but a target can take in many. Merges chain,
+    //##> so a column merged into an already-merged column joins that whole group. Unmerge just removes
+    //##> the log entry and puts the column back next to its former target.
+    function mergeSourceOf(f, list) { return (list || S.merges).find((m) => m.source === f) || null; }
+    function rootOf(f, list) {
+      list = list || S.merges;
+      for (let g = 0; g < 100; g++) {
+        const m = list.find((x) => x.source === f);
+        if (!m) return f;
+        f = m.target;
+      }
+      return f;
+    }
+    function membersOf(f, list, depth) {
+      list = list || S.merges;
+      depth = depth || 0;
+      const out = [f];
+      if (depth > 50) return out;
+      for (const m of list) if (m.target === f) out.push(...membersOf(m.source, list, depth + 1));
+      return out;
+    }
+    function groupHasMeta(f, list) { return membersOf(f, list).some((x) => x.startsWith("m:")); }
+    function groupLabel(f, list) {
+      const others = membersOf(f, list).slice(1).map(baseHeader);
+      return others.length ? `${baseHeader(f)} \u2190 ${others.join(", ")}` : baseHeader(f);
+    }
+    function applyMerge(source, target, auto) {
+      if (!source || !target || source === target || mergeSourceOf(source)) return false;
+      S.merges.push({ id: "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), source, target, auto: !!auto, at: Date.now() });
+      const i = S.grid.order.indexOf(source);
+      if (i !== -1) S.grid.order.splice(i, 1);
+      setVis(source, false);
+      delete S.grid.filters[source];
+      S.grid.sorts = S.grid.sorts.filter((s) => s.field !== source);
+      return true;
+    }
+    function unmerge(mergeId) {
+      const m = S.merges.find((x) => x.id === mergeId);
+      if (!m) return;
+      S.merges = S.merges.filter((x) => x !== m);
+      const k = pairKey(m.source, m.target);
+      if (!S.mergeDismissed.includes(k)) S.mergeDismissed.push(k);
+      const ti = S.grid.order.indexOf(rootOf(m.target));
+      S.grid.order.splice(ti === -1 ? S.grid.order.length : ti + 1, 0, m.source);
+      setVis(m.source, true);
+      refreshAll();
+      toast(baseHeader(m.source) + " unmerged", "#0369a1");
+    }
+    function mergeableFields() {
+      const out = [];
+      for (const f of S.metaFields) if (!mergeSourceOf("m:" + f)) out.push("m:" + f);
+      for (const c of S.columns) if (!mergeSourceOf("j:" + c.id)) out.push("j:" + c.id);
+      return out;
+    }
+
     function ensureColumn(key, map) {
       const lk = String(key).trim().toLowerCase();
       if (map.has(lk)) return map.get(lk);
@@ -582,9 +674,7 @@
       return id ? colById(id) : null;
     }
     function transColumn() {
-      const m = aliasMap();
-      for (const a of TRANS_ALIASES) if (m.has(a)) return colById(m.get(a));
-      return null;
+      return S.columns.find((c) => c.aliases.some((a) => normName(a) === "transid")) || null;
     }
     function keyOf(entry, pk) {
       if (!pk) return "";
@@ -605,42 +695,38 @@
     function resolveValues(c, raw) {
       const s = S.settings;
       const present = raw.filter((v) => !isEmptyValue(v)).map((v) => String(v).trim());
-      if (!present.length) return { text: "" };
+      if (!present.length) return { tokens: [] };
       const voting = present.filter((v) => !isBlank(c, v));
       const pool = voting.length ? voting : [present[0]];
-      const dBasic = s.basicDelim || ";";
-      const dProse = s.proseDelim || "|";
       if (isProse(c)) {
         const distinct = dedupeExact(pool);
-        if (distinct.length === 1) return { text: distinct[0] };
-        if (s.proseRule === "first") return { text: pool[0], cat: "first" };
-        if (s.proseRule === "last") return { text: pool[pool.length - 1], cat: "last" };
-        return { text: distinct.join(dProse), cat: "all" };
+        if (distinct.length === 1) return { tokens: [distinct[0]] };
+        if (s.proseRule === "first") return { tokens: [pool[0]], cat: "first" };
+        if (s.proseRule === "last") return { tokens: [pool[pool.length - 1]], cat: "last" };
+        return { tokens: distinct, cat: "all" };
       }
       const toks = pool.map((v) => splitTokens(v, INCOMING_DELIM));
       const sig = toks.map((t) => dedupeTokens(t).map((x) => x.toLowerCase()).sort().join("\u0001"));
-      const fmt = (t) => t.join(dBasic);
       const flat = () => [].concat(...toks);
-      if (new Set(sig).size === 1) return { text: fmt(dedupeTokens(toks[0])) };
+      if (new Set(sig).size === 1) return { tokens: dedupeTokens(toks[0]) };
       switch (s.basicRule) {
-        case "first": return { text: fmt(toks[0]), cat: "first" };
-        case "last": return { text: fmt(toks[toks.length - 1]), cat: "last" };
-        case "listAll": return { text: fmt(flat()), cat: "all" };
+        case "first": return { tokens: toks[0], cat: "first" };
+        case "last": return { tokens: toks[toks.length - 1], cat: "last" };
+        case "listAll": return { tokens: flat(), cat: "all" };
         case "majority": {
           const counts = new Map();
           sig.forEach((k, i) => { if (!counts.has(k)) counts.set(k, { n: 0, i }); counts.get(k).n++; });
           let best = null;
           for (const v of counts.values()) if (!best || v.n > best.n) best = v;
-          if (best.n * 2 > sig.length) return { text: fmt(toks[best.i]), cat: "majority" };
-          if (s.noMajority === "first") return { text: fmt(toks[0]), cat: "noMajority" };
-          if (s.noMajority === "last") return { text: fmt(toks[toks.length - 1]), cat: "noMajority" };
-          return { text: fmt(dedupeTokens(flat())), cat: "noMajority" };
+          if (best.n * 2 > sig.length) return { tokens: toks[best.i], cat: "majority" };
+          if (s.noMajority === "first") return { tokens: toks[0], cat: "noMajority" };
+          if (s.noMajority === "last") return { tokens: toks[toks.length - 1], cat: "noMajority" };
+          return { tokens: dedupeTokens(flat()), cat: "noMajority" };
         }
-        default: return { text: fmt(dedupeTokens(flat())), cat: "all" };
+        default: return { tokens: dedupeTokens(flat()), cat: "all" };
       }
     }
     function applyImports(row, imports) {
-      const s = S.settings;
       for (const imp of imports) {
         if (imp.target.startsWith("m:")) {
           const f = imp.target.slice(2);
@@ -650,22 +736,19 @@
         const id = imp.target.slice(2);
         const c = colById(id);
         if (!c) continue;
-        const cur = row.jsonl[id] || "";
+        const cur = row.tok[id] || [];
         if (isProse(c)) {
-          const d = s.proseDelim || "|";
-          if (!cur) row.jsonl[id] = imp.value;
-          else if (!cur.split(d).map((x) => x.trim()).includes(imp.value.trim())) row.jsonl[id] = cur + d + imp.value;
+          if (!cur.some((x) => x.trim() === imp.value.trim())) row.tok[id] = cur.concat([imp.value]);
         } else {
-          const d = s.basicDelim || ";";
-          row.jsonl[id] = dedupeTokens([...splitTokens(cur, d), ...splitTokens(imp.value, INCOMING_DELIM)]).join(d);
+          row.tok[id] = dedupeTokens(cur.concat(splitTokens(imp.value, INCOMING_DELIM)));
         }
       }
     }
     function buildRow(g, importMap) {
-      const row = { id: g.id, key: g.key, missing: g.missing, count: g.entries.length, jsonl: {}, hl: {}, over: {}, meta: null, status: null };
+      const row = { id: g.id, key: g.key, missing: g.missing, count: g.entries.length, tok: {}, hl: {}, over: {}, cache: {}, meta: null, status: null };
       for (const c of S.columns) {
         const r = resolveValues(c, g.entries.map((e) => e.values[c.id]));
-        row.jsonl[c.id] = r.text;
+        row.tok[c.id] = r.tokens;
         if (r.cat) {
           const color = S.settings.highlight[isProse(c) ? "prose" : "basic"][r.cat];
           if (color) row.hl[c.id] = color;
@@ -687,8 +770,8 @@
       }
     }
     //##> DERIVATION: The grid is never edited directly. S.entries (every parsed object, in paste order)
-    //##> plus settings, imports, and metadata are the source of truth; derive() rebuilds the rows from
-    //##> them. Any settings change just calls derive() again, so nothing has to be re-pasted.
+    //##> plus settings, imports, merges, and metadata are the source of truth; derive() rebuilds the rows
+    //##> from them. Any settings change just calls derive() again, so nothing has to be re-pasted.
     function derive() {
       detectTypes();
       const pk = pkColumn();
@@ -714,7 +797,7 @@
         const status = g.key ? (S.metaStatus[lk] || null) : null;
         if (matches && matches.length > 1 && status === "multi") {
           matches.forEach((m, i) => {
-            const r = Object.assign({}, base, { id: base.id + "#" + i, meta: m, status: "multi" });
+            const r = Object.assign({}, base, { id: base.id + "#" + i, meta: m, status: "multi", cache: {} });
             if (!removed.has(r.id)) out.push(r);
           });
         } else {
@@ -730,26 +813,72 @@
       syncConfidenceField(s.combine && s.showConfidence && rows.some((r) => r.count > 1));
     }
 
-    function cellRaw(row, f) {
-      if (f === "__conf__") return String(row.count);
-      if (f.startsWith("j:")) return row.jsonl[f.slice(2)] || "";
-      if (f.startsWith("m:")) {
-        const k = f.slice(2);
-        let v = row.meta ? getFV(row.meta, k) : "";
-        if (isEmptyValue(v) && row.over[k]) v = row.over[k];
-        return v == null ? "" : String(v).trim();
+    function delimFor(f) {
+      if (f.startsWith("j:") && isProse(colById(f.slice(2)))) return S.settings.proseDelim || "|";
+      return S.settings.basicDelim || ";";
+    }
+    //##> METADATA ZEROS: For calls found in Nexidia, blank, all-zero, and masked (*) metadata values show
+    //##> as a single 0, matching the results grid. Calls that weren't found stay blank. When columns are
+    //##> merged, a 0 is dropped as soon as any real value is stacked with it.
+    function metaOwn(row, k) {
+      let v = row.meta ? getFV(row.meta, k) : "";
+      v = v == null ? "" : String(v).trim();
+      if (row.meta && (!v || /^0+$/.test(v) || v.includes("*"))) v = "0";
+      if ((!v || v === "0") && row.over[k]) v = row.over[k];
+      return v ? [v] : [];
+    }
+    function cellParts(row, f, depth) {
+      depth = depth || 0;
+      if (row.cache[f]) return row.cache[f];
+      let own;
+      if (f === "__conf__") own = [String(row.count)];
+      else if (f.startsWith("j:")) own = row.tok[f.slice(2)] || [];
+      else if (f.startsWith("m:")) own = metaOwn(row, f.slice(2));
+      else own = [];
+      const inbound = depth < 50 ? S.merges.filter((m) => m.target === f) : [];
+      let tokens = own;
+      if (inbound.length) {
+        let all = own.slice();
+        for (const m of inbound) all = all.concat(cellParts(row, m.source, depth + 1).tokens);
+        all = dedupeTokens(all);
+        if (all.some((t) => !/^0+$/.test(t))) all = all.filter((t) => !/^0+$/.test(t));
+        tokens = all;
       }
-      return "";
+      const res = { tokens, ownFirst: own[0], delim: delimFor(f) };
+      row.cache[f] = res;
+      return res;
+    }
+    function cellRaw(row, f) {
+      const p = cellParts(row, f);
+      return p.tokens.join(p.delim);
     }
     function cellText(row, f) {
-      const v = cellRaw(row, f);
-      if (v && f.startsWith("m:") && xls && xls.formatDisplayValue) return xls.formatDisplayValue(f.slice(2), v);
-      return v;
+      const p = cellParts(row, f);
+      if (!p.tokens.length) return "";
+      if (f.startsWith("m:") && xls && xls.formatDisplayValue && p.tokens[0] === p.ownFirst) {
+        const parts = p.tokens.slice();
+        parts[0] = xls.formatDisplayValue(f.slice(2), parts[0]);
+        return parts.join(p.delim);
+      }
+      return p.tokens.join(p.delim);
     }
     function cellIsBlank(row, f) {
       const v = cellRaw(row, f);
+      if (isEmptyValue(v)) return true;
       if (f.startsWith("j:")) return isBlank(colById(f.slice(2)), v);
-      return isEmptyValue(v);
+      if (f.startsWith("m:")) return v === "0";
+      return false;
+    }
+    function cellHl(row, f, depth) {
+      depth = depth || 0;
+      if (f.startsWith("j:") && row.hl[f.slice(2)]) return row.hl[f.slice(2)];
+      if (depth > 50) return null;
+      for (const m of S.merges) {
+        if (m.target !== f) continue;
+        const h = cellHl(row, m.source, depth + 1);
+        if (h) return h;
+      }
+      return null;
     }
 
     function addNotice(kind, text, id) {
@@ -766,7 +895,7 @@
     function searchFieldFor(name) {
       const lk = String(name || "").trim().toLowerCase();
       if (!lk) return null;
-      if (TRANS_ALIASES.includes(lk)) return TRANS_FIELD;
+      if (normName(lk) === "transid") return TRANS_FIELD;
       const cp = colPrefs();
       for (let i = 0; i < cp.fields.length; i++) {
         if (String(cp.headers[i] || "").toLowerCase() === lk || String(cp.fields[i]).toLowerCase() === lk) return cp.fields[i];
@@ -794,6 +923,24 @@
       S.grid.order = mf.concat(S.grid.order.filter((f) => !f.startsWith("m:")));
       S.grid.visible = mf.concat(S.grid.visible.filter((f) => !f.startsWith("m:")));
     }
+    function ensureMetaField(field, header) {
+      if (!field || S.metaFields.includes(field)) return;
+      if (!header) {
+        const cp = colPrefs();
+        const i = cp.fields.indexOf(field);
+        if (i !== -1) header = cp.headers[i];
+        if (!header) {
+          const mf = (api.getShared("metadataFields") || []).find((x) => x.storageName === field);
+          header = mf ? mf.displayName : field;
+        }
+      }
+      S.metaFields.push(field);
+      S.metaHeaders[field] = header;
+      let lastM = -1;
+      S.grid.order.forEach((f, i) => { if (f.startsWith("m:")) lastM = i; });
+      S.grid.order.splice(lastM + 1, 0, "m:" + field);
+      setVis("m:" + field, true);
+    }
     function updateMissingNotice() {
       const pk = pkColumn();
       const missing = [];
@@ -807,10 +954,53 @@
       const shown = missing.slice(0, 15).join(", ") + (missing.length > 15 ? `, and ${missing.length - 15} more` : "");
       addNotice("error", `${missing.length} call${missing.length === 1 ? "" : "s"} not found: ${shown}. Check the ${S.settings.primaryKey}. Also check that all your calls are from within the last 90 days.`, "missing");
     }
+    //##> KEY MERGE: The primary key column and any Trans_Id column are merged into their matching
+    //##> Nexidia column automatically, with no prompt. Unmerging one adds it to S.mergeDismissed so it
+    //##> isn't merged again on the next paste.
+    function autoMergeKeys() {
+      let changed = false;
+      const tryMerge = (colId, field) => {
+        const src = "j:" + colId;
+        const tgt = rootOf("m:" + field);
+        if (mergeSourceOf(src) || rootOf(src) === tgt) return;
+        if (S.mergeDismissed.includes(pairKey(src, "m:" + field))) return;
+        if (groupHasMeta(src)) return;
+        if (applyMerge(src, tgt, true)) changed = true;
+      };
+      const pk = pkColumn();
+      const field = pkSearchField();
+      if (pk && field) { ensureMetaField(field); tryMerge(pk.id, field); }
+      const tc = transColumn();
+      if (tc && S.metaFields.includes(TRANS_FIELD)) tryMerge(tc.id, TRANS_FIELD);
+      return changed;
+    }
+    function detectCandidates() {
+      const pairs = [];
+      const metas = S.metaFields.filter((f) => !mergeSourceOf("m:" + f));
+      const cops = S.columns.filter((c) => !mergeSourceOf("j:" + c.id));
+      for (const f of metas) {
+        const L = "m:" + f;
+        const mNames = [S.metaHeaders[f] || f, f].map(normName).filter(Boolean);
+        for (const c of cops) {
+          const R = "j:" + c.id;
+          if (rootOf(L) === rootOf(R) || groupHasMeta(R)) continue;
+          if (S.mergeDismissed.includes(pairKey(L, R))) continue;
+          const cNames = [c.header].concat(c.aliases).map(normName).filter(Boolean);
+          if (mNames.some((a) => cNames.some((b) => namesMatch(a, b)))) pairs.push({ left: L, right: R, auto: true });
+        }
+      }
+      return pairs;
+    }
+    function runMergeDetection() {
+      if (closed || mergeDialogOpen || !S.metaFields.length) return;
+      if (autoMergeKeys()) refreshAll();
+      const pairs = detectCandidates();
+      if (pairs.length) openMergeDialog(pairs, true);
+    }
     //##> METADATA: Searches the Explore API with the primary key's Nexidia field (Trans_Id resolves to
     //##> UDFVarchar110). If a key matches several calls, the Trans_Id column (when one exists and isn't
     //##> already the primary key) is used to narrow the matches down. The API only covers the last 90
-    //##> days, so misses are reported inline instead of treated as errors.
+    //##> days, so misses get a popup and an inline note, and their metadata cells stay blank.
     async function fetchMetadata(onlyNew) {
       if (metaBusy) return;
       const pk = pkColumn();
@@ -826,6 +1016,7 @@
       }
       clearNotice("pk");
       ensureMetaColumns();
+      ensureMetaField(field);
       const keys = new Map();
       for (const e of S.entries) {
         const k = keyOf(e, pk);
@@ -833,7 +1024,7 @@
         const lk = k.toLowerCase();
         if (!keys.has(lk) && (!onlyNew || !S.metaStatus[lk])) keys.set(lk, k);
       }
-      if (!keys.size) { S.metaAdded = true; refreshAll(); return; }
+      if (!keys.size) { S.metaAdded = true; refreshAll(); runMergeDetection(); return; }
       metaBusy = true;
       setMetaBusy(true, keys.size);
       const found = new Map();
@@ -872,6 +1063,7 @@
       clearNotice("metaFail");
       const tc = transColumn();
       const multi = [];
+      const notFound = [];
       for (const [lk, orig] of keys) {
         let m = found.get(lk) || [];
         if (m.length > 1 && tc && tc.id !== pk.id) {
@@ -885,14 +1077,27 @@
         S.meta[lk] = m;
         S.metaStatus[lk] = !m.length ? "missing" : (m.length > 1 ? "multi" : "ok");
         if (m.length > 1) multi.push(orig);
+        if (!m.length) notFound.push(orig);
       }
       S.metaAdded = true;
+      autoMergeKeys();
       updateMissingNotice();
       refreshAll();
+      if (notFound.length && !S.suppress.notFound) {
+        const r = await dialog({
+          title: `${notFound.length} call${notFound.length === 1 ? "" : "s"} not found`,
+          danger: true,
+          message: `No Nexidia metadata was found for ${notFound.length === 1 ? "this" : "these"} ${pkName} value${notFound.length === 1 ? "" : "s"}. ${notFound.length === 1 ? "Its" : "Their"} CoPilot values are still on the grid, but the metadata columns are left blank.\n\nCheck the ${pkName}. Also check that all your calls are from within the last 90 days.`,
+          list: notFound.slice(0, 300),
+          checkbox: "Do not show this again",
+          buttons: [{ label: "OK", value: true, primary: true }]
+        });
+        if (r.checked) { S.suppress.notFound = true; scheduleSave(); }
+      }
       if (multi.length && !S.suppress.multi) {
         const r = await dialog({
           title: "Multiple calls matched",
-          message: `${multi.length} ${S.settings.primaryKey} value${multi.length === 1 ? "" : "s"} matched more than one call and couldn't be narrowed down with a Trans_Id. Every match was added to the grid as its own row.\n\nMove these rows to the top of the grid?`,
+          message: `${multi.length} ${pkName} value${multi.length === 1 ? "" : "s"} matched more than one call and couldn't be narrowed down with a Trans_Id. Every match was added to the grid as its own row.\n\nMove these rows to the top of the grid?`,
           list: multi.slice(0, 50),
           checkbox: "Do not show this again",
           buttons: [{ label: "Move to Top", value: true, primary: true }, { label: "Leave in Place", value: false }]
@@ -901,6 +1106,7 @@
         S.settings.multiTop = !!r.value;
         refreshAll();
       }
+      runMergeDetection();
     }
 
     function processBlocks(blocks) {
@@ -931,6 +1137,7 @@
         toast(`${added.length} row${added.length === 1 ? "" : "s"} added`);
         checkMissingKeys(added);
         if (S.settings.autoMeta) fetchMetadata(true);
+        else runMergeDetection();
       }
       if (failures.length) showFailures(failures, lineCount, objects.length > 0);
       return { failures, added: added.length };
@@ -987,6 +1194,8 @@
       next.settings = Object.assign(defaultSettings(), next.settings || {});
       next.grid = Object.assign(base.grid, next.grid || {});
       if (!Array.isArray(next.pending) || !next.pending.length) next.pending = [{ text: "", error: "" }];
+      if (!Array.isArray(next.merges)) next.merges = [];
+      if (!Array.isArray(next.mergeDismissed)) next.mergeDismissed = [];
       if (!keepId) { next.sessionId = newState().sessionId; next.createdAt = Date.now(); }
       S = next;
       selected.clear();
@@ -1076,8 +1285,8 @@
     }
     //##> SPREADSHEET JOIN: Additive only, like the Feeder merge macro. Values are only added to rows
     //##> whose key is already on the grid, and only to columns that already exist (matched by header or
-    //##> alias). Stacked values are split on semicolons and deduped into the existing cell. Metadata
-    //##> cells are only filled when they're empty.
+    //##> alias, including columns that were merged into others). Stacked values are split on semicolons
+    //##> and deduped into the existing cell. Metadata cells are only filled when they're empty.
     function joinSheet(sheetRows, headerIdx, keyNames, fileName) {
       const headers = sheetRows[headerIdx].map((h) => String(h == null ? "" : h).trim());
       const am = aliasMap();
@@ -1133,6 +1342,201 @@
       addNotice("info", parts.join(" "), "import");
     }
 
+    //##> MERGE POPUP: Pairs are worked top to bottom. Each pair's choice is simulated before the next
+    //##> pair is drawn, so if Member_Id is merged into Member ID, a later Member ID / MemberID pair shows
+    //##> the combined group. The auto-detected popup can't be closed until every pair has a choice,
+    //##> unless the user picks Close Anyway, which leaves unanswered pairs separate.
+    function openMergeDialog(initialRows, auto) {
+      if (mergeDialogOpen) return;
+      mergeDialogOpen = true;
+      const items = initialRows.map((r) => ({ left: r.left || "", right: r.right || "", auto: !!r.auto, manual: !!r.manual, choice: null }));
+      const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000018;display:flex;align-items:center;justify-content:center;" + FONT });
+      const box = el("div", { style: "background:#fff;width:760px;max-width:96vw;max-height:88vh;overflow-y:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+      box.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;" }, auto ? "Possible Matches Detected" : "Merge Columns"));
+      box.appendChild(el("div", { style: "font-size:13px;color:#374151;margin-bottom:12px;" }, auto ? "Would you like to merge any of the following columns:" : "Choose the columns to merge and how to combine them. The column the arrow points to keeps its name and its values come first."));
+      const listWrap = el("div", { style: "display:flex;flex-direction:column;gap:8px;" });
+      const addBtn = el("button", { style: btnStyle("#6366f1", "margin-top:10px;") }, "+ Add Columns to Merge");
+      const noteEl = el("div", { style: "font-size:12px;color:#b91c1c;margin-top:10px;display:none;" });
+      const btnRow = el("div", { style: "display:flex;gap:8px;margin-top:14px;" });
+      const applyB = el("button", { style: "flex:1;" + PRIMARY_BTN }, "Apply");
+      const closeAnywayB = el("button", { style: "flex:1;display:none;" + PLAIN_BTN }, "Close Anyway");
+      const cancelB = el("button", { style: "flex:1;" + PLAIN_BTN }, "Cancel");
+      btnRow.appendChild(applyB);
+      btnRow.appendChild(closeAnywayB);
+      if (!auto) btnRow.appendChild(cancelB);
+      box.appendChild(listWrap);
+      box.appendChild(addBtn);
+      box.appendChild(noteEl);
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+
+      function simulate() {
+        const sim = S.merges.slice();
+        return items.map((it) => {
+          if (!it.left || !it.right) return { state: "incomplete", sim: sim.slice() };
+          const L = rootOf(it.left, sim), R = rootOf(it.right, sim);
+          const info = { L, R, sim: sim.slice() };
+          if (L === R) info.state = "same";
+          else if (groupHasMeta(L, sim) && groupHasMeta(R, sim)) info.state = "twoMeta";
+          else {
+            info.state = "ok";
+            if (it.choice === "left") sim.push({ source: R, target: L });
+            else if (it.choice === "right") sim.push({ source: L, target: R });
+          }
+          return info;
+        });
+      }
+      function choiceText(choice, info) {
+        const metaPair = info.L.startsWith("m:") && !info.R.startsWith("m:");
+        if (choice === "sep") return "Leave Both Columns Separate";
+        if (choice === "left") return metaPair ? "Merge CoPilot to Nexidia" : `Merge ${baseHeader(info.R)} into ${baseHeader(info.L)}`;
+        return metaPair ? "Merge Nexidia to CoPilot" : `Merge ${baseHeader(info.L)} into ${baseHeader(info.R)}`;
+      }
+      const ICONS = { left: "\u2190", sep: "| |", right: "\u2192" };
+      function sourceTag(f) {
+        const isMeta = String(f).startsWith("m:");
+        return el("span", {
+          style: `font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px;flex-shrink:0;cursor:help;${isMeta ? "background:#ede9fe;color:#6d28d9;" : "background:#dcfce7;color:#15803d;"}`,
+          title: isMeta ? "This column came from Nexidia." : "This column came from your CoPilot output."
+        }, isMeta ? "Nexidia" : "CoPilot");
+      }
+      function sideSelect(it, side) {
+        const sel = el("select", { style: "flex:1;min-width:0;padding:5px 6px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+        sel.appendChild(el("option", { value: "" }, "Choose a column..."));
+        for (const f of mergeableFields()) sel.appendChild(el("option", { value: f }, `${groupLabel(f)} (${sourceName(f)})`));
+        sel.value = it[side];
+        sel.onchange = async () => {
+          const prev = it[side];
+          it[side] = sel.value;
+          it.choice = null;
+          if (it.left && it.right && it.left.startsWith("m:") && it.right.startsWith("m:")) {
+            it[side] = prev;
+            await dialog({ title: "Can't merge these columns", danger: true, message: "You can't merge two Nexidia columns together." });
+          } else if (it.left && it.left === it.right) {
+            it[side] = "";
+          } else if (it.right.startsWith("m:") && !it.left.startsWith("m:")) {
+            const t = it.left;
+            it.left = it.right;
+            it.right = t;
+          }
+          render();
+        };
+        return sel;
+      }
+      function choiceControl(it, info) {
+        const wrap = el("div", { style: "display:flex;align-items:center;gap:2px;flex-shrink:0;" });
+        const shown = it.choice || "left";
+        const btn = el("button", { style: `width:200px;display:flex;flex-direction:column;align-items:center;padding:5px 6px;border-radius:8px;cursor:pointer;background:${it.choice ? "#eff6ff" : "#fff"};border:${it.choice ? "1px solid #3b82f6" : "1px dashed #94a3b8"};opacity:${it.choice ? 1 : 0.6};`, title: "Click to choose, click again to change" });
+        btn.appendChild(el("span", { style: "font-size:16px;font-weight:700;color:#1d4ed8;line-height:1;" }, ICONS[shown]));
+        btn.appendChild(el("span", { style: "font-size:10px;color:#374151;margin-top:3px;text-align:center;" }, choiceText(shown, info)));
+        if (!it.choice) btn.appendChild(el("span", { style: "font-size:9px;color:#b45309;margin-top:2px;" }, "Click to choose"));
+        btn.onclick = () => {
+          const order = ["left", "sep", "right"];
+          it.choice = !it.choice ? "left" : order[(order.indexOf(it.choice) + 1) % 3];
+          noteEl.style.display = "none";
+          render();
+        };
+        const more = el("span", { style: "font-size:13px;color:#64748b;cursor:pointer;padding:2px 4px;", title: "Pick an option" }, "\u25BE");
+        more.onclick = () => {
+          const r = more.getBoundingClientRect();
+          const pop = popover(null, 230, r.left - 200, r.bottom + 4);
+          pop.style.zIndex = "1000019";
+          for (const opt of ["left", "sep", "right"]) {
+            const row = el("div", { style: "padding:6px 10px;font-size:12px;cursor:pointer;display:flex;gap:8px;align-items:center;" }, el("span", { style: "font-weight:700;color:#1d4ed8;width:22px;" }, ICONS[opt]), choiceText(opt, info));
+            row.onmouseenter = () => { row.style.background = "#e8f0fe"; };
+            row.onmouseleave = () => { row.style.background = ""; };
+            row.onclick = () => { pop.remove(); it.choice = opt; noteEl.style.display = "none"; render(); };
+            pop.appendChild(row);
+          }
+        };
+        wrap.appendChild(btn);
+        wrap.appendChild(more);
+        return wrap;
+      }
+      function render() {
+        listWrap.innerHTML = "";
+        const infos = simulate();
+        items.forEach((it, i) => {
+          const info = infos[i];
+          const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #e5e7eb;border-radius:8px;" });
+          const side = (key) => {
+            const cell = el("div", { style: "flex:1;min-width:0;display:flex;align-items:center;gap:6px;" });
+            if (it.manual) {
+              cell.appendChild(sideSelect(it, key));
+              if (it[key]) cell.appendChild(sourceTag(it[key]));
+              return cell;
+            }
+            const root = key === "left" ? info.L : info.R;
+            cell.appendChild(sourceTag(root));
+            const label = groupLabel(root, info.sim);
+            cell.appendChild(el("span", { style: "font-size:12px;color:#111827;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", title: label }, label));
+            return cell;
+          };
+          row.appendChild(side("left"));
+          if (info.state === "ok") row.appendChild(choiceControl(it, info));
+          else {
+            const msg = info.state === "same" ? "Already combined by a selection above" : (info.state === "twoMeta" ? "Can't merge two Nexidia columns" : "Choose both columns");
+            row.appendChild(el("div", { style: "width:224px;text-align:center;font-size:11px;color:#6b7280;flex-shrink:0;" }, msg));
+          }
+          row.appendChild(side("right"));
+          if (it.manual) {
+            const x = el("span", { style: "cursor:pointer;font-size:15px;color:#9ca3af;flex-shrink:0;", title: "Remove" }, "\u00D7");
+            x.onclick = () => { items.splice(i, 1); render(); };
+            row.appendChild(x);
+          }
+          listWrap.appendChild(row);
+        });
+        if (!items.length) listWrap.appendChild(el("div", { style: "font-size:12px;color:#9ca3af;padding:6px;" }, "No pairs. Use Add Columns to Merge."));
+      }
+      function finish() {
+        closePopovers();
+        overlay.remove();
+        mergeDialogOpen = false;
+      }
+      function commit(force) {
+        const infos = simulate();
+        const pending = items.some((it, i) => (infos[i].state === "ok" && !it.choice) || (it.manual && infos[i].state === "incomplete" && (it.left || it.right)));
+        if (pending && !force) {
+          noteEl.textContent = "Make a selection for every pair before applying. Or choose Close Anyway, and any pair without a selection will be left separate.";
+          noteEl.style.display = "block";
+          closeAnywayB.style.display = "";
+          return;
+        }
+        let merged = 0;
+        for (const it of items) {
+          if (!it.left || !it.right) continue;
+          const L = rootOf(it.left), R = rootOf(it.right);
+          const valid = L !== R && !(groupHasMeta(L) && groupHasMeta(R));
+          if (valid && it.choice === "left") { if (applyMerge(R, L, false)) merged++; }
+          else if (valid && it.choice === "right") { if (applyMerge(L, R, false)) merged++; }
+          else if (it.auto) {
+            const k = pairKey(it.left, it.right);
+            if (!S.mergeDismissed.includes(k)) S.mergeDismissed.push(k);
+          }
+        }
+        finish();
+        refreshAll();
+        if (merged) toast(`${merged} column${merged === 1 ? "" : "s"} merged`, "#0369a1");
+      }
+      addBtn.onclick = () => { items.push({ left: "", right: "", manual: true, auto: false, choice: null }); render(); };
+      applyB.onclick = () => commit(false);
+      closeAnywayB.onclick = () => commit(true);
+      cancelB.onclick = () => finish();
+      render();
+    }
+    function openUnmerge(field) {
+      const inbound = S.merges.filter((m) => m.target === field);
+      if (!inbound.length) return;
+      dialog({
+        title: "Unmerge Column",
+        message: `Choose a column to separate from ${baseHeader(field)}.`,
+        list: inbound.map((m) => ({ label: `${groupLabel(m.source)} (${sourceName(m.source)})`, value: m.id })),
+        listClickable: true,
+        buttons: [{ label: "Cancel", value: null }]
+      }).then((r) => { if (r.value) unmerge(r.value); });
+    }
+
     const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;" + FONT });
     modal.dataset.nexidiaUnpack = "1";
     const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
@@ -1147,6 +1551,7 @@
     const removeSelectedBtn = el("button", { style: btnStyle("#ef4444", "display:none;") }, "Remove Selected");
     const settingsBtn = el("button", { style: btnStyle("#0ea5e9", "color:#0369a1;") }, "\u2699 Unpack Settings");
     const metaBtn = el("button", { style: btnStyle("#8b5cf6", "color:#7c3aed;") }, "Add Nexidia Metadata");
+    const mergeBtn = el("button", { style: btnStyle("#0369a1") }, "Merge Columns");
     const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "\u2630");
     const adHocBtn = el("button", { style: btnStyle("#6366f1") }, "+ Add Column");
     const importSheetBtn = el("button", { style: btnStyle("#0f766e") }, "Import Spreadsheet");
@@ -1159,7 +1564,7 @@
     const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "margin-left:auto;width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
     const sheetInput = el("input", { type: "file", accept: ".xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
     const sessionInput = el("input", { type: "file", accept: ".txt,.json", style: "display:none;" });
-    [titleEl, menuBtn, rowCountEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, columnsBtn, adHocBtn, importSheetBtn, exportExcelBtn, exportTranscriptsBtn, exportSessionBtn, importSessionBtn, resetBtn, clickModeBtn, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
+    [titleEl, menuBtn, rowCountEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportExcelBtn, exportTranscriptsBtn, exportSessionBtn, importSessionBtn, resetBtn, clickModeBtn, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
 
     const bannerWrap = el("div", { style: "display:none;padding:8px 16px;background:#fffbeb;border-bottom:1px solid #fde68a;" });
     const topPanel = el("div", { style: "padding:8px 16px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;gap:6px;" });
@@ -1203,7 +1608,7 @@
     instrBody.appendChild(el("div", {}, "1. Build your prompt: open the PromptBuilder below, paste all of it into a new CoPilot chat, describe your job at the bottom under \"Input from Analyst\", and work through its questions until it hands you a finished prompt."));
     instrBody.appendChild(el("div", {}, "2. Run your batches: send each transcript batch file with that prompt in its own fresh CoPilot chat."));
     instrBody.appendChild(el("div", {}, "3. Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. Rows are added to the grid as you go."));
-    instrBody.appendChild(el("div", {}, "4. Metadata from Nexidia is added using your primary key (Trans_Id by default). Adjust duplicates, delimiters, and highlights in Unpack Settings."));
+    instrBody.appendChild(el("div", {}, "4. Metadata from Nexidia is added using your primary key (Trans_Id by default). If your columns look like Nexidia's, you'll be asked whether to merge them. Adjust duplicates, delimiters, and highlights in Unpack Settings."));
     instrBody.appendChild(el("div", {}, "5. Review, play calls, and export to Excel. Use Export Session to save your work to a file you can import later."));
     const promptBtn = el("button", { style: btnStyle("#1d4ed8", "margin-top:6px;") }, "View PromptBuilder");
     instrBody.appendChild(promptBtn);
@@ -1527,7 +1932,7 @@
         const cb = el("input", { type: "checkbox" });
         cb.checked = isVis(f);
         cb.onchange = () => { setVis(f, cb.checked); renderHeader(); renderRows(); scheduleSave(); };
-        const labelEl = el("span", { style: `font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"}` }, headerOf(f) + (hasFilter ? " (filtered)" : ""));
+        const labelEl = el("span", { style: `font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"}`, title: groupLabel(f) }, headerOf(f) + (hasFilter ? " (filtered)" : ""));
         labelEl.onclick = () => openFilterPopover(f, labelEl);
         rowEl.appendChild(cb);
         rowEl.appendChild(labelEl);
@@ -1545,7 +1950,7 @@
         const rect = anchor.getBoundingClientRect();
         top = rect.bottom + 4;
         left = Math.min(rect.left, window.innerWidth - width - 10);
-      } else { top = y; left = Math.min(x, window.innerWidth - width - 10); }
+      } else { top = y; left = Math.min(Math.max(10, x), window.innerWidth - width - 10); }
       const pop = el("div", { style: `position:fixed;top:${top}px;left:${left}px;width:${width}px;max-height:${Math.max(200, window.innerHeight - top - 20)}px;overflow-y:auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;box-shadow:0 6px 20px rgba(0,0,0,.18);z-index:1000012;` + FONT });
       pop.dataset.unpackPop = "1";
       document.body.appendChild(pop);
@@ -1636,6 +2041,15 @@
       }
       return pop;
     }
+    function pkCandidateFor(field) {
+      if (field.startsWith("j:")) return colById(field.slice(2));
+      const j = membersOf(field).find((f) => f.startsWith("j:"));
+      return j ? colById(j.slice(2)) : null;
+    }
+    function openMergeFor(field) {
+      if (field.startsWith("m:")) openMergeDialog([{ left: field, right: "", manual: true }], false);
+      else openMergeDialog([{ left: "", right: field, manual: true }], false);
+    }
     function openHeaderMenu(field, x, y) {
       const isJ = field.startsWith("j:");
       const items = [
@@ -1648,7 +2062,12 @@
         items.push({ label: "Rename...", run: () => renameColumn(colById(field.slice(2))) });
         items.push({ label: "Attributes...", run: () => openAttributes(colById(field.slice(2)), x, y) });
       }
-      if (isJ) items.push({ label: "Set as Primary Key", run: () => setPrimaryKey(headerOf(field)) });
+      if (field !== "__conf__") {
+        items.push({ label: "Merge Column...", run: () => openMergeFor(field) });
+        if (S.merges.some((m) => m.target === field)) items.push({ label: "Unmerge...", run: () => openUnmerge(field) });
+        const pkc = pkCandidateFor(field);
+        if (pkc) items.push({ label: "Set as Primary Key", run: () => setPrimaryKey(pkc.header) });
+      }
       items.push("-");
       items.push({ label: "Select Column", run: () => selectColumn(field) });
       items.push({ label: "Hide Column", run: () => { setVis(field, false); rerender(); } });
@@ -1666,13 +2085,30 @@
         const clash = S.columns.find((o) => o.id !== c.id && o.aliases.some((a) => String(a).toLowerCase() === lk));
         const metaClash = S.metaFields.find((f) => String(S.metaHeaders[f] || "").toLowerCase() === lk);
         if (!clash && !metaClash) break;
-        await dialog({ title: "Name already in use", danger: true, message: `"${value}" is already used by the ${clash ? clash.header : S.metaHeaders[metaClash]} column. Pick a different name.` });
+        const otherRef = metaClash ? rootOf("m:" + metaClash) : rootOf("j:" + clash.id);
+        const self = "j:" + c.id;
+        const sameGroup = rootOf(self) === otherRef;
+        const canMerge = !sameGroup && !(groupHasMeta(otherRef) && groupHasMeta(rootOf(self)));
+        const res = await dialog({
+          title: "Name already in use",
+          danger: true,
+          message: `"${value}" is already used by the ${baseHeader(otherRef)} column.${canMerge ? " You can merge these two columns instead, or pick a different name." : " Pick a different name."}`,
+          buttons: canMerge ? [{ label: "Merge Columns", value: "merge", primary: true }, { label: "Pick Another Name", value: "again" }, { label: "Cancel", value: null }] : [{ label: "Pick Another Name", value: "again", primary: true }, { label: "Cancel", value: null }]
+        });
+        if (res.value === "merge") {
+          const selfRoot = rootOf(self);
+          if (otherRef.startsWith("m:") || !selfRoot.startsWith("m:")) openMergeDialog([{ left: otherRef, right: selfRoot, manual: true }], false);
+          else openMergeDialog([{ left: selfRoot, right: otherRef, manual: true }], false);
+          return;
+        }
+        if (res.value !== "again") return;
       }
       const wasPk = pkColumn() === c;
       c.header = value;
       if (!c.aliases.some((a) => String(a).toLowerCase() === value.toLowerCase())) c.aliases.push(value);
       if (wasPk) S.settings.primaryKey = value;
       refreshAll();
+      runMergeDetection();
     }
     function openAttributes(c, x, y) {
       if (!c) return;
@@ -1783,23 +2219,28 @@
       trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(1, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px 6px;font-size:10px;color:#9ca3af;text-align:right;` }, "#"));
       if (S.grid.clickMode === "select") trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(2, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px;font-size:10px;color:#9ca3af;text-align:center;` }, "\u25B6"));
       const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
+      const pkc = pkColumn();
+      const pkRoot = pkc ? rootOf("j:" + pkc.id) : null;
       vf.forEach((field, i) => {
         const sortIdx = S.grid.sorts.findIndex((s) => s.field === field);
         const hasFilter = S.grid.filters[field] && S.grid.filters[field].rules && S.grid.filters[field].rules.length;
         const sortColor = sortIdx >= 0 ? (tierColors[sortIdx] || "#374151") : null;
         const isMeta = field.startsWith("m:");
         const w = getColWidth(field);
-        const isPk = field.startsWith("j:") && pkColumn() && pkColumn().id === field.slice(2);
-        const th = el("th", { style: `position:sticky;top:0;z-index:5;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;background:${sortColor ? "#dbeafe" : (hasFilter ? "#eff6ff" : (isMeta ? "#f5f3ff" : "#f9fafb"))};border-bottom:2px solid ${sortColor || (hasFilter ? "#3b82f6" : "#e5e7eb")};padding:0;font-size:11px;text-align:left;white-space:nowrap;user-select:none;${sortColor ? "color:" + sortColor + ";font-weight:700;" : (hasFilter ? "color:#2563eb;font-weight:600;" : "color:#374151;")}`, title: (isMeta ? "Nexidia metadata. " : "") + "Click to sort, drag to reorder, right-click for options" });
+        const isPk = field === pkRoot;
+        const memberCount = membersOf(field).length - 1;
+        const tip = (isMeta ? "Nexidia metadata. " : "") + (memberCount ? "Merged: " + groupLabel(field) + ". " : "") + "Click to sort, drag to reorder, right-click for options";
+        const th = el("th", { style: `position:sticky;top:0;z-index:5;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;background:${sortColor ? "#dbeafe" : (hasFilter ? "#eff6ff" : (isMeta ? "#f5f3ff" : "#f9fafb"))};border-bottom:2px solid ${sortColor || (hasFilter ? "#3b82f6" : "#e5e7eb")};padding:0;font-size:11px;text-align:left;white-space:nowrap;user-select:none;${sortColor ? "color:" + sortColor + ";font-weight:700;" : (hasFilter ? "color:#2563eb;font-weight:600;" : "color:#374151;")}`, title: tip });
         const labelRow = el("div", { style: "display:flex;align-items:center;padding:7px 4px 7px 10px;cursor:pointer;" });
         let label = (isPk ? "\uD83D\uDD11 " : "") + headerOf(field);
         if (sortIdx >= 0) label += S.grid.sorts[sortIdx].dir === 1 ? " \u2191" : " \u2193";
         const thLabel = el("span", { style: "flex:1;overflow:hidden;text-overflow:ellipsis;" }, label);
+        labelRow.appendChild(thLabel);
+        if (memberCount) labelRow.appendChild(el("span", { style: "font-size:9px;font-weight:700;color:#0369a1;background:#e0f2fe;border-radius:999px;padding:1px 5px;margin-left:4px;flex-shrink:0;" }, "+" + memberCount));
         const chev = el("span", { style: `font-size:14px;cursor:pointer;margin-left:4px;padding:0 4px;border-radius:4px;color:${hasFilter ? "#3b82f6" : "#94a3b8"};`, title: "Column options" }, hasFilter ? "\u25BC" : "\u25BE");
         chev.onmouseenter = () => { chev.style.background = "#e5e7eb"; };
         chev.onmouseleave = () => { chev.style.background = ""; };
         chev.onclick = (e) => { e.stopPropagation(); const r = chev.getBoundingClientRect(); openHeaderMenu(field, r.left, r.bottom + 4); };
-        labelRow.appendChild(thLabel);
         labelRow.appendChild(chev);
         th.appendChild(labelRow);
         const handle = el("div", { style: "position:absolute;top:0;right:0;width:5px;height:100%;cursor:col-resize;z-index:7;" });
@@ -1923,7 +2364,7 @@
         vf.forEach((field, ci) => {
           const display = cellText(row, field);
           const w = getColWidth(field);
-          const hl = field.startsWith("j:") ? row.hl[field.slice(2)] : null;
+          const hl = cellHl(row, field);
           const cSel = selectMode && cellSel.has(ri + "," + ci);
           const td = el("td", { style: `padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;${selectMode ? "cursor:cell;" : ""}${cSel ? "background:#dbeafe;outline:1px solid #93c5fd;outline-offset:-1px;" : (hl ? "background:" + hl + ";" : "")}`, title: display }, display);
           td.dataset.r = String(ri);
@@ -2082,7 +2523,8 @@
     //##> EXCEL EXPORT: Unpacked columns export as text (x:str) by default so long identifiers like
     //##> User to User never turn into scientific notation. Only columns positively typed as Date,
     //##> Number, or Currency export as real Excel values. Metadata columns follow the same date,
-    //##> duration, hold, and sentiment formatting as export.js.
+    //##> duration, hold, and sentiment formatting as export.js. Merged cells with stacked values
+    //##> always export as text.
     function exportCell(row, f) {
       const raw = cellRaw(row, f);
       const str = (v) => '<td x:str="' + escHtml(v) + '">' + escHtml(v) + "</td>";
@@ -2167,7 +2609,7 @@
       const ids = [];
       for (const r of list) {
         let t = r.meta ? getFV(r.meta, TRANS_FIELD) : "";
-        if (!t && tc) t = splitTokens(r.jsonl[tc.id], S.settings.basicDelim || ";")[0] || "";
+        if (!t && tc) t = (r.tok[tc.id] || [])[0] || "";
         if (t && t !== "0" && !ids.includes(t)) ids.push(t);
       }
       if (!ids.length) { dialog({ title: "No Trans_Ids found", message: "None of these rows have a Trans_Id to send to the Batch Builder." }); return; }
@@ -2209,14 +2651,7 @@
     }
     function addMetaColumn(field, header) {
       ensureMetaColumns();
-      if (!S.metaFields.includes(field)) {
-        S.metaFields.push(field);
-        S.metaHeaders[field] = header;
-        let lastM = -1;
-        S.grid.order.forEach((f, i) => { if (f.startsWith("m:")) lastM = i; });
-        S.grid.order.splice(lastM + 1, 0, "m:" + field);
-        setVis("m:" + field, true);
-      }
+      ensureMetaField(field, header);
       if (S.entries.length) {
         S.meta = {};
         S.metaStatus = {};
@@ -2278,7 +2713,6 @@
       for (const [, l] of HL_COLS) hr.appendChild(el("th", { style: "padding:4px;color:#6b7280;font-weight:600;text-align:center;" }, l));
       matrix.appendChild(hr);
       const cellName = (rk, ck) => `${HL_ROWS.find(([k]) => k === rk)[1]} / ${HL_COLS.find(([k]) => k === ck)[1]}`;
-      const swatches = [];
       const paintSwatch = (sw, color) => { sw.style.cssText = `width:26px;height:18px;border-radius:4px;border:1px solid #d1d5db;cursor:pointer;display:inline-block;${color ? "background:" + color + ";" : NO_FILL_STYLE}`; sw.title = color ? "Click to change" : "No Fill"; };
       for (const [rk, rl] of HL_ROWS) {
         const tr = el("tr", {});
@@ -2289,7 +2723,6 @@
           const sw = el("span", {});
           paintSwatch(sw, d.highlight[rk][ck]);
           sw.onclick = () => openPalette(sw, rk, ck);
-          swatches.push(sw);
           td.appendChild(sw);
           tr.appendChild(td);
         }
@@ -2351,11 +2784,11 @@
         combineTip.title = `Combine rows with a ${pkName} value in common, rather than list multiple rows for the same call. (Recommended)`;
         confTip.title = `If duplicate rows are detected by ${pkName}, a confidence score will display how many times it appeared. Use this if you're running your calls through multiple passes to measure how many times each call was flagged.`;
         const lk = pkInput.value.trim().toLowerCase();
-        const onGrid = S.columns.some((c) => c.aliases.some((a) => String(a).toLowerCase() === lk));
-        const searchable = !!searchFieldFor(pkInput.value) || (onGrid && S.columns.find((c) => c.aliases.some((a) => String(a).toLowerCase() === lk)).aliases.some((a) => searchFieldFor(a)));
+        const gridCol = S.columns.find((c) => c.aliases.some((a) => String(a).toLowerCase() === lk));
+        const searchable = !!searchFieldFor(pkInput.value) || (gridCol && gridCol.aliases.some((a) => searchFieldFor(a)));
         if (!lk) { pkNote.textContent = ""; }
         else if (!S.columns.length) { pkNote.textContent = searchable ? "Nexidia field. Metadata can be added with it." : "Not a Nexidia field. Duplicates can be combined, but metadata can't be searched."; pkNote.style.color = searchable ? "#16a34a" : "#b45309"; }
-        else if (!onGrid) { pkNote.textContent = "No column on the grid has this name yet."; pkNote.style.color = "#b91c1c"; }
+        else if (!gridCol) { pkNote.textContent = "No column on the grid has this name yet."; pkNote.style.color = "#b91c1c"; }
         else { pkNote.textContent = searchable ? "On the grid and searchable in Nexidia." : "On the grid, but not a Nexidia field. Metadata can't be searched with it."; pkNote.style.color = searchable ? "#16a34a" : "#b45309"; }
         dupWrap.style.opacity = combineCb.checked ? "1" : "0.45";
         dupWrap.style.pointerEvents = combineCb.checked ? "" : "none";
@@ -2481,6 +2914,10 @@
     menuBtn.onclick = () => requestClose(true);
     settingsBtn.onclick = () => openSettings();
     metaBtn.onclick = () => fetchMetadata(false);
+    mergeBtn.onclick = () => {
+      if (!S.columns.length) { toast("Paste a CoPilot output first.", "#6b7280"); return; }
+      openMergeDialog([{ left: "", right: "", manual: true }], false);
+    };
     columnsBtn.onclick = () => { colPanel.style.display = colPanel.style.display === "none" ? "block" : "none"; };
     adHocBtn.onclick = () => openAdHocPicker();
     importSheetBtn.onclick = () => sheetInput.click();
