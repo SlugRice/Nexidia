@@ -1,4 +1,4 @@
-//[Last Update: 12:34 PM 10/15/2026]
+//[Last Update: 1:41 PM 10/16/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -36,7 +36,7 @@
   const HL_COLS = [["majority", "Majority Selected"], ["noMajority", "No Majority"], ["first", "First Only"], ["last", "Last Only"], ["all", "Listing All"]];
   const HL_ROWS = [["basic", "Basic Values"], ["prose", "Prose Values"]];
   const PROSE_HL_ALLOWED = new Set(["first", "last", "all"]);
-  const TYPES = [["auto", "Auto Detect"], ["text", "Text"], ["prose", "Prose"], ["boolean", "Boolean"], ["categorical", "Categorical"], ["identifier", "Identifier"], ["number", "Number"], ["currency", "Currency"], ["date", "Date"]];
+  const TYPES = [["auto", "Auto Detect"], ["text", "Text"], ["prose", "Prose"], ["boolean", "Boolean"], ["categorical", "Categorical"], ["identifier", "Identifier"], ["number", "Number"], ["currency", "Currency"], ["date", "Date"], ["timestamp", "Timestamp"]];
   const TYPE_LABELS = Object.fromEntries(TYPES);
   const NULL_EQ = [["zero", "0 = blank"], ["zeros", "All-zero groupings = blank"], ["null", "null = blank"], ["false", "false = blank"], ["na", "N/A = blank"]];
   const KNOWN_MESSAGES = [/^no transcripts found\.?$/i, /^no file attached\.?$/i, /^no matches found\.?$/i];
@@ -260,8 +260,26 @@
   //##> derive, so a Boolean column that later receives a "3" drops to Number on its own. Prose is
   //##> decided by the first 10 values (3+ spaces, majority). Categorical waits for 100+ values.
   //##> A user-selected type always wins over detection.
+  function parseTimestampToken(value, fallbackLabel) {
+    const raw = String(value || "").trim();
+    const at = raw.lastIndexOf("@");
+    const label = at > 0 ? raw.slice(0, at).trim() : (fallbackLabel || "Timestamp");
+    const time = at > 0 ? raw.slice(at + 1).trim() : raw;
+    const m = time.match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Number(m[1] || 0), min = Number(m[2]), sec = Number(m[3]);
+    if (min > 59 || sec > 59) return null;
+    return { label, ms: (h * 3600 + min * 60 + sec) * 1000 };
+  }
+  function timestampTokens(value, fallbackLabel) {
+    return splitTokens(value, INCOMING_DELIM).map((v) => parseTimestampToken(v, fallbackLabel)).filter(Boolean);
+  }
   function detectType(values) {
     if (!values.length) return "text";
+    if (values.length >= 3 && values.every((v) => {
+      const tokens = splitTokens(v, INCOMING_DELIM);
+      return tokens.length && tokens.every((t) => parseTimestampToken(t));
+    })) return "timestamp";
     const sample = values.slice(0, 10);
     const proseHits = sample.filter((v) => (v.match(/ /g) || []).length >= 3).length;
     if (proseHits * 2 > sample.length) return "prose";
@@ -1139,8 +1157,8 @@
         if (S.settings.autoMeta) fetchMetadata(true);
         else runMergeDetection();
       }
-      if (failures.length) showFailures(failures, lineCount, objects.length > 0);
-      return { failures, added: added.length };
+      const errorPromise = failures.length ? showFailures(failures, lineCount, objects.length > 0) : Promise.resolve();
+      return { failures, added: added.length, errorPromise };
     }
     function showFailures(failures, lineCount, someAdded) {
       const trunc = failures.filter((f) => f.status === "truncated");
@@ -1154,9 +1172,9 @@
       if (bad.length) {
         parts.push(bad.length === 1 && !many ? `This output couldn't be read: ${bad[0].message}.` : `${bad.length} output${bad.length === 1 ? "" : "s"} couldn't be read. Details are listed below.`);
       }
-      if (someAdded) parts.push("Everything else in this paste was added to the grid. The lines that failed were left in the input so you can see which ones to rerun.");
-      const list = many ? failures.map((f) => `Line ${f.line}: ${f.status === "truncated" ? "Cut off" : f.message}. ${preview(f.raw)}`) : [];
-      dialog({ title: "This output contains an error", danger: true, message: parts.join("\n\n"), list, buttons: [{ label: "OK", value: true, primary: true }] });
+      if (someAdded) parts.push("Everything else in this paste was added to the grid. The failed output is shown below for review and will be cleared when you click OK.");
+      const list = failures.map((f) => `${many ? "Line " + f.line + ": " : ""}${f.status === "truncated" ? "Cut off" : f.message}. ${f.raw}`);
+      return dialog({ title: "This output contains an error", danger: true, message: parts.join("\n\n"), list, buttons: [{ label: "OK", value: true, primary: true }] });
     }
     function checkMissingKeys(added) {
       const pk = pkColumn();
@@ -1187,6 +1205,54 @@
     }
     function exportSession() {
       downloadText("nexidia_unpack_session_" + stamp() + ".txt", sessionFile(JSON.parse(JSON.stringify(S))));
+    }
+    function rawObject(entry) {
+      const out = {};
+      for (const c of S.columns) if (Object.prototype.hasOwnProperty.call(entry.values, c.id)) out[c.source] = entry.values[c.id];
+      return out;
+    }
+    function rawLines() {
+      return S.entries.map((entry) => JSON.stringify(rawObject(entry)));
+    }
+    function exportRawData() {
+      const lines = rawLines();
+      if (!lines.length) { toast("Nothing to export yet.", "#6b7280"); return; }
+      const body = lines.map((line) => `<tr><td x:str="${escHtml(line)}">${escHtml(line)}</td></tr>`).join("");
+      const html = `<?mso-application progid="Excel.Sheet"?><html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"/></head><body><table><tr><th>CoPilot Output</th></tr>${body}</table></body></html>`;
+      const name = "nexidia_copilot_raw_" + stamp() + ".xls";
+      if (xls && xls.downloadExcelFile) xls.downloadExcelFile(name, html);
+      else downloadText(name, html);
+    }
+    async function chooseExportData() {
+      if (!S.entries.length) { toast("Nothing to export yet.", "#6b7280"); return; }
+      const r = await dialog({
+        title: "Export",
+        message: `Choose what to export.\n\nSession Data includes metadata and transformations and restores the sheet exactly as you see it here.\n\nRaw CoPilot Data includes only the original CoPilot JSON objects, one object per spreadsheet row.`,
+        buttons: [{ label: "Export Session Data", value: "session", primary: true }, { label: "Export Raw CoPilot Data", value: "raw" }, { label: "Cancel", value: null }]
+      });
+      if (r.value === "session") exportSession();
+      else if (r.value === "raw") exportRawData();
+    }
+    async function importRawFile(file) {
+      let text = await file.text();
+      if (/<table/i.test(text)) {
+        const sheets = parseHtmlTables(text);
+        text = sheets.flatMap((sh) => sh.rows.slice(1).map((row) => row[0] || "")).filter(Boolean).join("\n");
+      }
+      const blocks = [{ text }];
+      const result = processBlocks(blocks);
+      if (!result.added && !result.failures.length) dialog({ title: "Import failed", danger: true, message: "No CoPilot JSON objects were found in that file." });
+    }
+    async function chooseImportData() {
+      const r = await dialog({
+        title: "Import",
+        message: `Choose what to import.\n\nSession Data includes metadata and transformations and replaces the current page.\n\nRaw CoPilot Data includes only CoPilot JSON objects and adds them to the current grid.`,
+        buttons: [{ label: "Import Session Data", value: "session", primary: true }, { label: "Import Raw CoPilot Data", value: "raw" }, { label: "Cancel", value: null }]
+      });
+      if (!r.value) return;
+      sessionInput.dataset.mode = r.value;
+      sessionInput.accept = r.value === "session" ? ".txt,.json" : ".xls,.html,.htm,.txt,.jsonl,.json";
+      sessionInput.click();
     }
     function loadSessionData(data, keepId) {
       const base = newState();
@@ -1546,6 +1612,7 @@
     const titleEl = el("div", { style: "font-size:15px;font-weight:700;color:#111827;flex-shrink:0;" }, "Unpack CoPilot Outputs");
     const menuBtn = el("button", { style: btnStyle("#94a3b8", "color:#475569;") }, "\u2190 Main Menu");
     const rowCountEl = el("div", { style: "font-size:12px;color:#6b7280;flex-shrink:0;" });
+    const statsEl = el("div", { style: "font-size:11px;color:#64748b;flex-shrink:0;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:999px;", title: "Pastes are accepted input events. Objects are the original CoPilot JSON objects. Duplicates are additional objects sharing the current Primary Key." });
     const selCountEl = el("div", { style: "font-size:12px;color:#2563eb;font-weight:600;flex-shrink:0;display:none;" });
     const cellSelCountEl = el("div", { style: "font-size:12px;color:#16a34a;font-weight:600;flex-shrink:0;display:none;" });
     const removeSelectedBtn = el("button", { style: btnStyle("#ef4444", "display:none;") }, "Remove Selected");
@@ -1559,12 +1626,13 @@
     const exportTranscriptsBtn = el("button", { style: btnStyle("#6366f1", "color:#4f46e5;") }, "Export Transcripts");
     const exportSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;") }, "Export Session");
     const importSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;") }, "Import Session");
-    const resetBtn = el("button", { style: btnStyle("#9ca3af", "color:#374151;") }, "Reset View");
+    const resetBtn = el("button", { style: btnStyle("#9ca3af", "color:#374151;") }, "Clear / Reset");
+    const playTimestampsBtn = el("button", { style: btnStyle("#f97316", "color:#c2410c;") }, "Play Timestamps");
     const clickModeBtn = el("button", { style: btnStyle("#22c55e", "color:#16a34a;") }, "On Click: Select Field");
     const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "margin-left:auto;width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
     const sheetInput = el("input", { type: "file", accept: ".xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
     const sessionInput = el("input", { type: "file", accept: ".txt,.json", style: "display:none;" });
-    [titleEl, menuBtn, rowCountEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportExcelBtn, exportTranscriptsBtn, exportSessionBtn, importSessionBtn, resetBtn, clickModeBtn, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
+    [titleEl, menuBtn, rowCountEl, statsEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportExcelBtn, exportTranscriptsBtn, exportSessionBtn, importSessionBtn, resetBtn, playTimestampsBtn, clickModeBtn, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
 
     const bannerWrap = el("div", { style: "display:none;padding:8px 16px;background:#fffbeb;border-bottom:1px solid #fde68a;" });
     const topPanel = el("div", { style: "padding:8px 16px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;gap:6px;" });
@@ -1685,16 +1753,17 @@
           if (!txt) return;
           e.preventDefault();
           const blocks = [{ text: txt }];
-          processBlocks(blocks);
+          const result = processBlocks(blocks);
           ta.value = blocks[0].failedText || "";
-          ta.focus();
+          result.errorPromise.finally(() => { ta.value = ""; ta.focus(); });
         });
         ta.addEventListener("keydown", (e) => {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && ta.value.trim()) {
             e.preventDefault();
             const blocks = [{ text: ta.value }];
-            processBlocks(blocks);
+            const result = processBlocks(blocks);
             ta.value = blocks[0].failedText || "";
+            result.errorPromise.finally(() => { ta.value = ""; ta.focus(); });
           }
         });
         inputWrap.appendChild(ta);
@@ -1766,13 +1835,10 @@
         const filled = S.pending.filter((p) => p.text);
         if (!filled.length) return;
         const blocks = filled.map((p) => ({ text: p.text }));
-        processBlocks(blocks);
-        const kept = [];
-        blocks.forEach((b) => {
-          if (b.failedText) kept.push({ text: b.failedText, error: "This output couldn't be processed. Rerun it and paste again." });
-        });
-        S.pending = kept.concat([{ text: "", error: "" }]);
+        const result = processBlocks(blocks);
+        S.pending = blocks.filter((b) => b.failedText).map((b) => ({ text: b.failedText, error: "This output couldn't be processed. Rerun it and paste again." })).concat([{ text: "", error: "" }]);
         renderInput();
+        result.errorPromise.finally(() => { S.pending = [{ text: "", error: "" }]; renderInput(); scheduleSave(); });
         scheduleSave();
       };
     }
@@ -1880,6 +1946,16 @@
 
     function updateCounts() {
       rowCountEl.textContent = view.length.toLocaleString() + " of " + rows.length.toLocaleString() + " rows";
+      const pk = pkColumn();
+      const seen = new Set();
+      let duplicates = 0;
+      for (const entry of S.entries) {
+        const key = keyOf(entry, pk).toLowerCase();
+        if (!key) continue;
+        if (seen.has(key)) duplicates++;
+        else seen.add(key);
+      }
+      statsEl.textContent = `Pastes: ${S.pasteCount.toLocaleString()}  |  Objects: ${S.entries.length.toLocaleString()}  |  Duplicates: ${duplicates.toLocaleString()}  |  Unique Calls: ${seen.size.toLocaleString()}`;
       selCountEl.textContent = selected.size ? selected.size.toLocaleString() + " selected" : "";
       selCountEl.style.display = selected.size ? "" : "none";
       removeSelectedBtn.style.display = selected.size ? "" : "none";
@@ -2880,6 +2956,106 @@
       }
     }
 
+    function defaultGridOrder() {
+      const meta = S.metaFields.map((f) => "m:" + f);
+      const json = S.columns.map((c) => "j:" + c.id);
+      return meta.concat(S.settings.showConfidence ? ["__conf__"] : [], json);
+    }
+    async function resetPrompt() {
+      const r = await dialog({
+        title: "Clear / Reset",
+        message: "Choose what to reset. Clear Transformations rebuilds from the original CoPilot objects. Clear Page removes everything. You can export first from either option.",
+        buttons: [{ label: "Clear Transformations", value: "transform", primary: true }, { label: "Clear Page", value: "page" }, { label: "Cancel", value: null }]
+      });
+      if (r.value === "transform") openResetTransformations();
+      else if (r.value === "page") confirmClearPage();
+    }
+    async function openResetTransformations() {
+      const options = [
+        ["filters", "Filters", "Clear column and global filters"],
+        ["added", "Added Columns", "Remove manually added Nexidia columns"],
+        ["removed", "Removed Columns", "Restore hidden columns and removed rows"],
+        ["sorts", "Sorts", "Restore original object order"],
+        ["merges", "Merges", "Separate merged columns without asking to merge them again"],
+        ["layout", "Column Layout", "Restore column order and widths"],
+        ["renames", "Renames and Type Overrides", "Restore original column names and automatic typing"],
+        ["highlights", "Highlights", "Clear highlight colors"],
+        ["imports", "Spreadsheet Joins", "Remove values added through Import Spreadsheet"],
+        ["metadata", "Metadata", "Remove fetched Nexidia metadata"]
+      ];
+      const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000020;display:flex;align-items:center;justify-content:center;" + FONT });
+      const box = el("div", { style: "background:#fff;width:500px;max-width:94vw;max-height:84vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+      box.appendChild(el("div", { style: "font-size:15px;font-weight:700;margin-bottom:6px;" }, "Clear Transformations"));
+      box.appendChild(el("div", { style: "font-size:12px;color:#4b5563;margin-bottom:12px;" }, "Selected items will be rebuilt from the original CoPilot objects. All are selected by default."));
+      const checks = {};
+      for (const [key, label, help] of options) {
+        const cb = el("input", { type: "checkbox", checked: true }); checks[key] = cb;
+        box.appendChild(el("label", { style: "display:flex;align-items:flex-start;gap:8px;padding:6px 0;cursor:pointer;" }, cb, el("span", {}, el("div", { style: "font-size:12px;font-weight:600;" }, label), el("div", { style: "font-size:10px;color:#6b7280;" }, help))));
+      }
+      const btns = el("div", { style: "display:flex;gap:8px;margin-top:14px;" });
+      const exp = el("button", { style: "flex:1;" + PRIMARY_BTN }, "Export Session & Continue");
+      const go = el("button", { style: "flex:1;" + PLAIN_BTN }, "Continue Without Export");
+      const cancel = el("button", { style: "flex:1;" + PLAIN_BTN }, "Cancel");
+      btns.append(exp, go, cancel); box.append(btns); overlay.append(box); document.body.append(overlay);
+      const apply = (doExport) => {
+        if (doExport) exportSession();
+        if (checks.filters.checked) { S.grid.filters = {}; S.grid.globalFilter = ""; globalSearchBox.value = ""; }
+        if (checks.added.checked) { const defaults = new Set(colPrefs().fields); S.metaFields = S.metaFields.filter((f) => defaults.has(f)); for (const f of Object.keys(S.metaHeaders)) if (!defaults.has(f)) delete S.metaHeaders[f]; }
+        if (checks.removed.checked) S.removed = [];
+        if (checks.sorts.checked) S.grid.sorts = [];
+        if (checks.merges.checked) { for (const m of S.merges) { const k = pairKey(m.source, m.target); if (!S.mergeDismissed.includes(k)) S.mergeDismissed.push(k); } S.merges = []; }
+        if (checks.renames.checked) for (const c of S.columns) { c.header = c.source; c.aliases = [c.source]; c.type = "auto"; c.nullEq = {}; }
+        if (checks.highlights.checked) S.settings.highlight = { basic: {}, prose: {} };
+        if (checks.imports.checked) S.imports = [];
+        if (checks.metadata.checked) { S.meta = {}; S.metaStatus = {}; S.metaAdded = false; clearNotice("missing"); }
+        if (checks.layout.checked || checks.added.checked || checks.merges.checked) { S.grid.order = defaultGridOrder(); S.grid.widths = {}; }
+        if (checks.removed.checked || checks.layout.checked || checks.added.checked || checks.merges.checked) S.grid.visible = S.grid.order.slice();
+        overlay.remove(); selected.clear(); refreshAll();
+      };
+      exp.onclick = () => apply(true); go.onclick = () => apply(false); cancel.onclick = () => overlay.remove();
+    }
+    async function confirmClearPage() {
+      const r = await dialog({ title: "Clear Page?", danger: true, message: "This removes the raw CoPilot objects, metadata, joins, and every transformation from this page.", buttons: [{ label: "Export Session & Clear", value: "export", primary: true }, { label: "Clear Without Export", value: "clear" }, { label: "Cancel", value: null }] });
+      if (!r.value) return;
+      if (r.value === "export") exportSession();
+      const id = S.sessionId; S = newState(); selected.clear(); cellSel.clear(); activeSmid = null; await dbDel(id); renderInput(); globalSearchBox.value = ""; refreshAll(); toast("Page cleared", "#6b7280");
+    }
+    function timestampColumns() {
+      return S.columns.filter((c) => effType(c) === "timestamp" && !mergeSourceOf("j:" + c.id));
+    }
+    async function chooseTimestampColumn() {
+      const choices = S.columns.map((c) => ({ label: c.header, value: c.id }));
+      const r = await dialog({ title: "Select Timestamp Column", message: "No timestamp column has been identified yet. Select the column containing Label@MM:SS, MM:SS, or H:MM:SS values.", list: choices, listClickable: true, buttons: [{ label: "Cancel", value: null }] });
+      if (!r.value) return null;
+      const c = colById(r.value); if (c) { c.type = "timestamp"; refreshAll(); } return c;
+    }
+    async function playTimestamps() {
+      let cols = timestampColumns();
+      if (!cols.length) { const chosen = await chooseTimestampColumn(); if (!chosen) return; cols = [chosen]; }
+      const items = [];
+      let skippedDuration = 0, noCall = 0;
+      for (const row of rows) {
+        const smid = row.meta ? getFV(row.meta, "sourceMediaId") : "";
+        let stamps = [];
+        for (const c of cols) for (const token of (row.tok[c.id] || [])) stamps.push(...timestampTokens(token, c.header));
+        stamps = stamps.filter((t, i, a) => a.findIndex((x) => x.ms === t.ms && x.label.toLowerCase() === t.label.toLowerCase()) === i);
+        if (!stamps.length) continue;
+        const dur = row.meta ? secondsFromMillisish(getFV(row.meta, "mediaFileDuration")) : null;
+        if (dur !== null) { const before = stamps.length; stamps = stamps.filter((t) => t.ms <= dur * 1000); skippedDuration += before - stamps.length; }
+        if (!stamps.length) continue;
+        if (!smid) { noCall++; continue; }
+        items.push({ key: row.key, smid, displayLabel: rowLabel(row), timestamps: stamps });
+      }
+      if (!items.length) { dialog({ title: "No playable timestamps", message: noCall ? "Timestamped rows were found, but their calls are not linked to Nexidia metadata." : "No valid timestamp values were found in the selected column." }); return; }
+      api.setShared("playlistState", { mode: "standalone", timestampsPrimary: true, items });
+      if (!playerCtrl) {
+        const pt = api.listTools().find((t) => t.id === "mediaPlayer");
+        if (!pt || !pt._openPlayerPane) { dialog({ title: "Media Player unavailable", danger: true, message: "The Media Player module is not loaded." }); return; }
+        playerCtrl = pt._openPlayerPane(card, (reg) => { stopPlayer = reg; }, { initialHeight: "50vh", closeable: true, onClosed: () => { playerCtrl = null; stopPlayer = null; activeSmid = null; api.setShared("playlistState", null); } });
+      }
+      playerCtrl.setPlaylist(items); playerCtrl.loadPlaylistIndex(0);
+      if (skippedDuration) addNotice("error", `${skippedDuration} timestamp${skippedDuration === 1 ? " was" : "s were"} skipped because ${skippedDuration === 1 ? "it was" : "they were"} beyond the call duration.`, "timestampDuration");
+    }
     function teardown() {
       closed = true;
       clearTimeout(saveTimer);
@@ -2924,23 +3100,19 @@
     sheetInput.onchange = () => { const f = sheetInput.files && sheetInput.files[0]; sheetInput.value = ""; if (f) importSpreadsheet(f); };
     exportExcelBtn.onclick = () => exportExcel();
     exportTranscriptsBtn.onclick = () => exportTranscripts();
-    exportSessionBtn.onclick = () => { if (!S.entries.length) { toast("Nothing to export yet.", "#6b7280"); return; } exportSession(); };
-    importSessionBtn.onclick = () => sessionInput.click();
-    sessionInput.onchange = () => { const f = sessionInput.files && sessionInput.files[0]; sessionInput.value = ""; if (f) importSessionFile(f); };
+    exportSessionBtn.textContent = "Export Data";
+    exportSessionBtn.title = "Export the entire session or only the original CoPilot outputs.";
+    importSessionBtn.textContent = "Import Data";
+    importSessionBtn.title = "Import a saved session or raw CoPilot outputs.";
+    exportSessionBtn.onclick = () => chooseExportData();
+    importSessionBtn.onclick = () => chooseImportData();
+    sessionInput.onchange = () => { const f = sessionInput.files && sessionInput.files[0]; const mode = sessionInput.dataset.mode; sessionInput.value = ""; if (f) { if (mode === "raw") importRawFile(f); else importSessionFile(f); } };
     removeSelectedBtn.onclick = async () => {
       const r = await dialog({ title: "Remove rows?", message: `Remove ${selected.size.toLocaleString()} selected row${selected.size === 1 ? "" : "s"} from the grid?`, buttons: [{ label: "Remove", value: true, primary: true }, { label: "Cancel", value: false }] });
       if (r.value) removeRows([...selected]);
     };
-    resetBtn.onclick = () => {
-      S.grid.sorts = [];
-      S.grid.filters = {};
-      S.grid.globalFilter = "";
-      S.grid.widths = {};
-      S.grid.visible = S.grid.order.slice();
-      globalSearchBox.value = "";
-      selected.clear();
-      rerender();
-    };
+    resetBtn.onclick = () => resetPrompt();
+    playTimestampsBtn.onclick = () => playTimestamps();
     clickModeBtn.onclick = () => setClickMode(S.grid.clickMode === "select" ? "play" : "select");
     globalSearchBox.oninput = () => { S.grid.globalFilter = globalSearchBox.value || ""; rerender(); };
 
