@@ -248,5 +248,5 @@ dispatch();
     }
   }
 
-  api.registerTool({ id: "dispatcher", label: "Dispatcher", open: openDispatcher });
+  api.registerTool({ id: "dispatcher", label: "Dispatcher", hidden: true, open: openDispatcher });
 })();
