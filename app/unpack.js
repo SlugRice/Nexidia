@@ -21,7 +21,10 @@
   //##> same thing but don't look alike.
   const FUZZY_MIN_LENGTH = 6;
   const FUZZY_MAX_DISTANCE = 2;
-  const KNOWN_PAIRS = [["notes", "summary"]];
+  const KNOWN_PAIRS = [
+  ["notes", "summary"],
+  ["tin", "providertaxid"]
+  ];
   const ROW_HEIGHT = 28;
   const BUFFER_ROWS = 20;
   const DEFAULT_COL_W = 150;
