@@ -1,4 +1,4 @@
-//[Last Update: 1:40 PM 6/1/2026]
+//[Last Update: 1:41 PM 10/16/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -287,7 +287,7 @@ function buildPlayerPane(gridCard, initialHeight) {
   gridCard.appendChild(pane);
 
   return {
-    pane, callTitle, statusEl, hideBtn,
+    pane, body, utilBar, callTitle, statusEl, hideBtn,
     prevNavBtn, nextNavBtn, navLabel,
     sidebarList, sidebarWrap,
     timelineWrap, waveformImg, segCanvas, playheadDiv,
@@ -504,7 +504,7 @@ function openPlayerPane(gridCard, onClose, options) {
     if (audio) { audio.pause(); audio.src = ""; audio = null; }
   }
   function setStatus(msg) { els.statusEl.textContent = msg; }
-  function setTitle(t) { els.callTitle.textContent = t; }
+  function setTitle(t) { els.callTitle.textContent = t; minimizedTitle.textContent = t; }
 
   /* ── Time / playhead / transcript sync ── */
   function updateTime() {
@@ -791,18 +791,26 @@ function openPlayerPane(gridCard, onClose, options) {
     audio.currentTime = ((e.clientX - rect.left) / rect.width) * (durationMs / 1000);
   });
 
-  /* ── Hide/show toggle ── */
-  els.hideBtn.onclick = () => {
-    const hidden = pane_is_hidden();
-    els.pane.style.height = hidden ? "85vh" : "0px";
-    els.pane.style.overflow = hidden ? "visible" : "hidden";
-    els.hideBtn.textContent = hidden ? "Hide Player" : "Show Player";
-  };
-  function pane_is_hidden() { return els.pane.style.height === "0px"; }
-
-  if (typeof onClose === "function") {
-    onClose(() => stopAudio());
+  /* ── Hide/show/close controls ── */
+  const minimizedBar = el("div", { style: "display:none;height:34px;min-height:34px;background:#0f172a;border-top:1px solid #334155;align-items:center;gap:8px;padding:0 10px;color:#cbd5e1;font-family:Segoe UI,Arial,sans-serif;" });
+  const minimizedTitle = el("div", { style: "flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, "Media Player");
+  const restoreBtn = el("button", { style: "border:0;background:#1e293b;color:#cbd5e1;width:26px;height:24px;border-radius:6px;cursor:pointer;", title: "Restore Player" }, "↑");
+  const closePlayerBtn = el("button", { style: "border:0;background:#7f1d1d;color:#fff;width:26px;height:24px;border-radius:6px;cursor:pointer;", title: "Close Player" }, "×");
+  minimizedBar.append(minimizedTitle, restoreBtn, closePlayerBtn);
+  els.pane.parentNode.insertBefore(minimizedBar, els.pane.nextSibling);
+  let closedPlayer = false;
+  function minimizePlayer() { minimizedTitle.textContent = els.callTitle.textContent || "Media Player"; els.pane.style.display = "none"; minimizedBar.style.display = "flex"; }
+  function restorePlayer() { minimizedBar.style.display = "none"; els.pane.style.display = "flex"; els.pane.style.height = configuredHeight; els.pane.style.overflow = "visible"; }
+  function closePlayer() { if (closedPlayer) return; closedPlayer = true; stopAudio(); minimizedBar.remove(); els.pane.remove(); api.setShared("playlistState", null); if (typeof opts.onClosed === "function") opts.onClosed(); }
+  els.hideBtn.onclick = minimizePlayer;
+  restoreBtn.onclick = restorePlayer;
+  closePlayerBtn.onclick = closePlayer;
+  if (opts.closeable) {
+    const topClose = el("button", { style: "border:0;background:#7f1d1d;color:#fff;padding:3px 8px;border-radius:6px;font-size:11px;cursor:pointer;", title: "Close Player" }, "Close");
+    topClose.onclick = closePlayer;
+    els.utilBar.appendChild(topClose);
   }
+  if (typeof onClose === "function") onClose(() => closePlayer());
 
   /* ── SEARCH (Ctrl+F) ── */
   function openSearch() {
@@ -1087,7 +1095,7 @@ function openPlayerPane(gridCard, onClose, options) {
     }, { passive: true });
   }
 
-  return { loadCall, stopAudio, setPlaylist, loadPlaylistIndex, setGridNav, els };
+  return { loadCall, stopAudio, setPlaylist, loadPlaylistIndex, setGridNav, minimize: minimizePlayer, restore: restorePlayer, close: closePlayer, els };
 }
 
 api.registerTool({
