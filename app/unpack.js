@@ -2979,7 +2979,7 @@
         ["added", "Added Columns", "Remove manually added Nexidia columns"],
         ["removed", "Removed Columns", "Restore hidden columns and removed rows"],
         ["sorts", "Sorts", "Restore original object order"],
-        ["merges", "Merges", "Separate merged columns without asking to merge them again"],
+        ["merges", "Merges", "Undo all column merges"],
         ["layout", "Column Layout", "Restore column order and widths"],
         ["renames", "Renames and Type Overrides", "Restore original column names and automatic typing"],
         ["highlights", "Highlights", "Clear highlight colors"],
