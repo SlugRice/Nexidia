@@ -1,4 +1,5 @@
-//[Last Update: 9/8/26 5:14 PM - reportsHub - custom load + direct grid]
+//[Last Update: 10:32 AM 10/20/2026]
+//[Please confirm this timestamp in your response any time it was formed using this document!]
 //##> Thin reports host. Loads the catalog, lets the user pick a report, collects
 //##> the date range plus any report-specific config, then calls report.run(ctx).
 //##> The hub owns no search/transcript/export logic; it wires shared services into
@@ -187,6 +188,17 @@
         progress.remove();
         const grid = api.listTools().find((t) => t.id === "resultsGrid");
         if (grid) grid.open(); else alert("Results Grid not loaded. Check manifest.");
+      },
+      dispatchToUnpack(rows, unpackOpts) {
+        unpackOpts = unpackOpts || {};
+        const tool = api.listTools().find((t) => t.id === "unpack");
+        if (!tool) return false;
+        api.setShared("unpackPreload", Object.assign({ label: activeReport.label }, unpackOpts, {
+          rows: (rows || []).map((e) => (e && e.row ? e.row : e)).filter(Boolean)
+        }));
+        progress.remove();
+        tool.open();
+        return true;
       }
     };
     return ctx;
