@@ -1,4 +1,4 @@
-//[Last Update: 5:01 PM 9/10/2026]
+//[Last Update: 2:22 PM 11/3/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -279,10 +279,7 @@ function createEtaTracker(windowSize) {
         const VALUE_PLACEHOLDER = "One or more values. Commas or line breaks for multiple.";
         const PHRASE_PLACEHOLDER = "Enter phrases, one per line.";
         const PAGE_SIZE = 1000;
-        const MAX_ROWS = 50000;
         const CAP_LIMIT = 10000;
-        const MAX_SPLIT_DEPTH = 8;
-        const MAX_SEGMENTS = 64;
         const BIG_SEARCH_THRESHOLD = 50000;
         const BOOST_WARN = 100;
         const BOOST_SEVERE = 150;
@@ -348,6 +345,8 @@ function createEtaTracker(windowSize) {
           barOuter.appendChild(barInner);
           const metrics = document.createElement("div");
           metrics.style.cssText = "margin-top:8px;font-size:12px;color:#cbd5e1;white-space:pre-wrap;";
+          const warnBox = document.createElement("div");
+          warnBox.style.cssText = "display:none;margin-top:8px;padding:8px 10px;border-radius:6px;background:#422006;border:1px solid #b45309;color:#fcd34d;font-size:12px;line-height:1.4;white-space:pre-wrap;";
           const cancelBtn = document.createElement("div");
           cancelBtn.textContent = "Cancel";
           cancelBtn.style.cssText = "margin-top:8px;font-size:11px;color:#f87171;cursor:pointer;text-decoration:underline;";
@@ -361,6 +360,7 @@ function createEtaTracker(windowSize) {
           wrap.appendChild(status);
           wrap.appendChild(barOuter);
           wrap.appendChild(metrics);
+          wrap.appendChild(warnBox);
           wrap.appendChild(cancelBtn);
           return {
             show: () => document.body.appendChild(wrap),
@@ -370,6 +370,11 @@ function createEtaTracker(windowSize) {
               if (pct !== null && pct !== undefined)
                 barInner.style.width = Math.max(0, Math.min(100, pct)) + "%";
               metrics.textContent = meta || "";
+            },
+            warn: (lines) => {
+              const list = (lines || []).filter(Boolean);
+              warnBox.textContent = list.join("\n\n");
+              warnBox.style.display = list.length ? "block" : "none";
             }
           };
         })();
@@ -1462,11 +1467,19 @@ function buildPaneEl(paneIndex) {
             totalFetched: 0,
             totalKept: 0,
             bigSearchWarned: false,
-            atomicCapWarned: false,
-            bigSearchProceed: true,
-            maxRowsWarned: false,
-            maxRowsOverride: false
+            atomicCapWarned: false
           };
+          const warnings = { heavy: "", partial: "" };
+          function refreshWarnings() {
+            progressUI.warn([warnings.heavy, warnings.partial]);
+          }
+          function checkHeavySearch() {
+            if (ctx.bigSearchWarned) return;
+            if (ctx.totalFetched < BIG_SEARCH_THRESHOLD) return;
+            ctx.bigSearchWarned = true;
+            warnings.heavy = "\u26A0 Large search: over " + BIG_SEARCH_THRESHOLD.toLocaleString() + " rows pulled so far. This may take a long time and be slow to work with once finished. If this is more than you were expecting, click Cancel and narrow your search.";
+            refreshWarnings();
+          }
           //##> Load any previously-cached segments for this jobId. Each cached segment
           //##> is keyed by a hash of its keyword/phrase/date/exclude payload; matching
           //##> segments on resume are loaded straight into merged without re-fetching.
@@ -1577,11 +1590,8 @@ function buildPaneEl(paneIndex) {
               for (let ri = 0; ri < rows.length; ri++) setRows.push(rows[ri]);
               ctx.totalFetched += rows.length;
               progressUI.set(statusLabel, Math.min(80, 25 + Math.floor((ctx.segmentsCompleted / Math.max(1, ctx.estimatedSegments)) * 55)), progressMeta());
+              checkHeavySearch();
               if (rows.length < PAGE_SIZE) break;
-              if (setRows.length >= MAX_ROWS && !ctx.maxRowsOverride) {
-                const proceed = await maybeMaxRowsGate();
-                if (!proceed) return null;
-              }
               from += PAGE_SIZE;
               await sleep(250);
             }
@@ -1682,63 +1692,10 @@ function buildPaneEl(paneIndex) {
           function showAtomicCapWarning() {
             if (ctx.atomicCapWarned) return;
             ctx.atomicCapWarned = true;
-            setTimeout(function() {
-              alert("A search segment hit the 10,000 result limit and could not be split further. Results from that segment are partial. To see more, narrow your search by shortening the date range or searching fewer values at once.");
-            }, 0);
+            warnings.partial = "\u26A0 A search segment hit the 10,000 result limit and could not be split further. Results from that segment are partial. To see more, narrow your search by shortening the date range or searching fewer values at once.";
+            refreshWarnings();
           }
-          function confirmBigSearch() {
-            return new Promise(function(resolve) {
-              const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000010;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
-              const box = el("div", { style: "background:#fff;width:480px;border-radius:12px;padding:24px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
-              box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Large Search Detected"));
-              box.appendChild(el("div", { style: "font-size:13px;color:#374151;line-height:1.6;margin-bottom:16px;" }, "This appears to be a large search containing over 50,000 results. This may take a while to put together and be slow to work with. Click Continue to proceed with the search, or Back to go back and refine your search."));
-              const btnRow = el("div", { style: "display:flex;gap:8px;" });
-              const contBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Continue");
-              const backBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;" }, "Back");
-              contBtn.onclick = function() { overlay.remove(); resolve(true); };
-              backBtn.onclick = function() { overlay.remove(); resolve(false); };
-              btnRow.appendChild(contBtn); btnRow.appendChild(backBtn);
-              box.appendChild(btnRow);
-              overlay.appendChild(box); document.body.appendChild(overlay);
-            });
-          }
-          async function maybeBigSearchGate() {
-            if (ctx.bigSearchWarned) return ctx.bigSearchProceed;
-            if (ctx.totalFetched < BIG_SEARCH_THRESHOLD) return true;
-            ctx.bigSearchWarned = true;
-            const ok = await confirmBigSearch();
-            ctx.bigSearchProceed = ok;
-            return ok;
-          }
-          function confirmMaxRows() {
-            return new Promise(function(resolve) {
-              const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000010;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;" });
-              const box = el("div", { style: "background:#fff;width:480px;border-radius:12px;padding:24px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
-              box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Segment Exceeds 50,000 Rows"));
-              box.appendChild(el("div", { style: "font-size:13px;color:#374151;line-height:1.6;margin-bottom:16px;" }, "A single search segment has returned more than 50,000 rows. Continuing may be slow or unstable. Click Continue to keep pulling rows for the rest of this search session, or Back to stop here."));
-              const btnRow = el("div", { style: "display:flex;gap:8px;" });
-              const contBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;" }, "Continue");
-              const backBtn = el("button", { style: "flex:1;padding:10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:13px;font-weight:600;cursor:pointer;" }, "Back");
-              contBtn.onclick = function() { overlay.remove(); resolve(true); };
-              backBtn.onclick = function() { overlay.remove(); resolve(false); };
-              btnRow.appendChild(contBtn); btnRow.appendChild(backBtn);
-              box.appendChild(btnRow);
-              overlay.appendChild(box); document.body.appendChild(overlay);
-            });
-          }
-          async function maybeMaxRowsGate() {
-            if (ctx.maxRowsOverride) return true;
-            if (ctx.maxRowsWarned) return false;
-            ctx.maxRowsWarned = true;
-            const ok = await confirmMaxRows();
-            if (ok) { ctx.maxRowsOverride = true; return true; }
-            return false;
-          }            
           async function runWithSplit(keywordGroup, phraseFilter, dfilter, statusLabel, depth) {
-            if (ctx.segmentsCompleted >= MAX_SEGMENTS) {
-              showAtomicCapWarning();
-              return [];
-            }
             const segHash = computeSegmentHash(keywordGroup, phraseFilter, dfilter, excludeGroup);
             const cached = cachedSegments.get(segHash);
             if (cached && Array.isArray(cached.rows)) {
@@ -1746,8 +1703,6 @@ function buildPaneEl(paneIndex) {
               await bumpJobProgress();
               return cached.rows;
             }
-            const gateOk = await maybeBigSearchGate();
-            if (!gateOk) return null;
             const probe = await probeTotalResults(keywordGroup, phraseFilter, dfilter);
             if (probe.total === -1) return null;
             if (probe.bailed) {
@@ -1766,16 +1721,6 @@ function buildPaneEl(paneIndex) {
               return [];
             }
             if (probe.total > CAP_LIMIT) {
-              if (depth >= MAX_SPLIT_DEPTH) {
-                progressUI.set("Reached split depth limit. Pulling capped 10K...", null, progressMeta());
-                const rows = await fetchSegment(keywordGroup, phraseFilter, dfilter, statusLabel);
-                if (rows === null) return null;
-                ctx.segmentsCompleted++;
-                await persistSegment(segHash, rows, null);
-                await bumpJobProgress();
-                showAtomicCapWarning();
-                return rows;
-              }
               const splits = chooseSplit(keywordGroup, dfilter);
               if (!splits) {
                 progressUI.set("No further splits possible. Pulling capped 10K...", null, progressMeta());
@@ -1787,7 +1732,7 @@ function buildPaneEl(paneIndex) {
                 showAtomicCapWarning();
                 return rows;
               }
-              ctx.estimatedSegments += splits.length;
+              ctx.estimatedSegments += splits.length - 1;
               progressUI.set("Result count " + probe.total + " exceeds 10K. Splitting search...", null, progressMeta());
               const out = [];
               for (let si2 = 0; si2 < splits.length; si2++) {
@@ -1854,7 +1799,7 @@ function buildPaneEl(paneIndex) {
           let maxPhraseCols = 1;
           for (const v of merged.values()) { if (v.phrases.length > maxPhraseCols) maxPhraseCols = v.phrases.length; finalRows.push(v); }
           for (let i = 0; i < passthroughNoKey.length; i++) { if (passthroughNoKey[i].phrases.length > maxPhraseCols) maxPhraseCols = passthroughNoKey[i].phrases.length; finalRows.push(passthroughNoKey[i]); }
-          return { finalRows, maxPhraseCols, includePhraseCol: distinctPhraseLabels.size >= 2 };
+          return { finalRows, maxPhraseCols, includePhraseCol: distinctPhraseLabels.size >= 2, partial: ctx.atomicCapWarned };
         }
         //##> No-results terminus. Replaces the old dead-end alert. Offers a way back to the
         //##> search form (state restored via returnToSearch + lastSearchConfig) or a clean
@@ -1892,7 +1837,12 @@ function buildPaneEl(paneIndex) {
           //##> is already available from the grid toolbar.
           const grid = api.listTools().find((t) => t.id === "resultsGrid");
           if (grid) { grid.open(); }
-          else { alert("Results Grid not loaded. Check manifest."); }
+          else { alert("Results Grid not loaded. Check manifest."); return; }
+          if (result.partial) {
+            setTimeout(function() {
+              alert("Search complete, but at least one segment hit the 10,000 result limit and could not be split further. Results from that segment are partial. To see more, narrow your search by shortening the date range or searching fewer values at once.");
+            }, 300);
+          }
         }
         const LS_KEY = "NEXIDIA_SAVED_SEARCHES";
         function getSavedSearches() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_) { return {}; } }
