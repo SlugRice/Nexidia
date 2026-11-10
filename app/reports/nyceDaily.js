@@ -1,4 +1,4 @@
-//[Last Update: 12:31 AM 11/10/2026]
+//[Last Update: 9:23 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -38,17 +38,42 @@
     { kind: "meta", label: "TIN", display: "Provider Tax ID", fallback: "UDFVarchar136", stack: ["TIN"] },
     { kind: "copilot", label: "Repeat Caller", key: "Repeat_Call", aliases: ["Repeat_Caller"] },
     { kind: "copilot", label: "Caller Name", key: "Caller_Name" },
-    { kind: "copilot", label: "DOS", key: "DOS", dataType: "date", format: "M/D/YYYY" },
-    { kind: "copilot", label: "Billed Amount", key: "Billed_Amount", dataType: "currency", format: "$#,##0.00" },
+    { kind: "copilot", label: "DOS", key: "DOS", dataType: "date", format: "M/D/YYYY", single: true },
+    { kind: "copilot", label: "Billed Amount", key: "Billed_Amount", dataType: "currency", format: "$#,##0.00", single: true },
     { kind: "copilot", label: "Claim Number", key: "Claim_Number" },
-    { kind: "copilot", label: "Received", key: "Received_Date", dataType: "date", format: "M/D/YYYY" },
-    { kind: "copilot", label: "Status", key: "Status" },
-    { kind: "copilot", label: "Reference Number", key: "Reference_Number" },
+    { kind: "copilot", label: "Received", key: "Received_Date", dataType: "date", format: "M/D/YYYY", single: true },
+    { kind: "copilot", label: "Status", key: "Status", single: true },
+    {
+      kind: "copilot", label: "Reference Number", key: "Reference_Number",
+      checks: [
+        { type: "pattern", a: "(?!\\d{14}$).*", message: "Make sure to include the dash. Reference numbers look like YYMMDD-######## or YYYYMMDD-######." },
+        { type: "pattern", a: "\\d{6}-\\d{8}|\\d{8}-\\d{6}|\\d{14}", message: "Reference numbers should look like YYMMDD-######## or YYYYMMDD-######." }
+      ]
+    },
     { kind: "meta", label: "User to User", display: "User to User", fallback: "UDFVarchar1" },
     { kind: "copilot", label: "Special Notes", key: "Special_Notes" },
     { kind: "copilot", label: "Timestamps", key: "Timestamps" }
   ];
 
+  //##> UNPACK SETUP: What NYCE Daily hands Unpack besides its rows: the Instructions steps, the prompt the
+  //##> Instructions button opens, and how the Timestamps column is used. Column extras (type, format, one
+  //##> value only, checks) come from COLUMN_DEFS.
+  const PROMPT_URL = "https://raw.githubusercontent.com/SlugRice/Nexidia/main/docs/NYCE_PPO_Daily_Prompt.txt";
+  const PROMPT_LABEL = "NYCE Daily Prompt";
+  const INSTRUCTIONS = [
+    "Export Transcripts. The settings are already optimized for this report, so click Export Transcripts, then select Build Batches.",
+    "Run your batches: send each transcript batch file with the NYCE PPO Daily prompt in its own fresh CoPilot chat. Set each chat to Temporary so the chats aren't saved.",
+    "Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. New information is added to the existing rows.",
+    "Fields that were recognized but not complete on the transcript were given Timestamps. Click Play All Timestamps to load the calls with Timestamps. The media player jumps straight to the fields in question. Add missing data when it's available, and mark the Timestamps complete.",
+    "When you're finished, click Export to Excel to save your work to an Excel sheet."
+  ];
+  const TIMESTAMP_USE = { Timestamps: "edit" };
+  const COLUMN_EXTRAS = ["dataType", "format", "single", "unique", "checks"];
+  function columnExtras(def) {
+    const out = {};
+    for (const k of COLUMN_EXTRAS) if (def[k] !== undefined) out[k] = def[k];
+    return out;
+  }
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 
   function splitValues(raw) {
@@ -317,6 +342,7 @@
       });
 
       const unpackColumns = [];
+      const setupColumns = {};
       const fields = [];
       const headers = [];
       resolvedCols.forEach(rc => {
@@ -329,10 +355,9 @@
           return;
         }
         const key = def.key || stack[0] || def.label;
-        const col = { type: "copilot", key, header: def.label, aliases: nameVariants([key, def.label].concat(def.aliases || [])) };
-        if (def.dataType) col.dataType = def.dataType;
-        if (def.format) col.format = def.format;
-        unpackColumns.push(col);
+        const extras = columnExtras(def);
+        unpackColumns.push(Object.assign({ type: "copilot", key, header: def.label, aliases: nameVariants([key, def.label].concat(def.aliases || [])) }, extras));
+        if (Object.keys(extras).length) setupColumns[def.label] = extras;
         fields.push("_blank_" + def.label); headers.push(def.label);
       });
 
@@ -348,15 +373,28 @@
       });
 
       ctx.progress.set(95, "Building results...");
+      api.setShared("unpackReportSetup", {
+        reportId: "nyceDaily",
+        instructions: INSTRUCTIONS,
+        promptUrl: PROMPT_URL,
+        promptLabel: PROMPT_LABEL,
+        timestampUse: TIMESTAMP_USE,
+        columns: setupColumns
+      });
       const sentToUnpack = typeof ctx.dispatchToUnpack === "function" && ctx.dispatchToUnpack(output, {
         columns: unpackColumns,
         primaryKey: "Trans_Id",
         keyField: transSn,
         sortField: dtSn,
         suppressMergePrompts: true,
-        batchPreset: api.getShared("reportBatchPreset")
+        batchPreset: api.getShared("reportBatchPreset"),
+        instructions: INSTRUCTIONS,
+        promptUrl: PROMPT_URL,
+        promptLabel: PROMPT_LABEL,
+        timestampUse: TIMESTAMP_USE
       });
       if (!sentToUnpack) {
+        api.setShared("unpackReportSetup", null);
         ctx.dispatchToGrid(output, {
           fields,
           headers,
