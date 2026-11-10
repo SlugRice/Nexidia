@@ -1,4 +1,4 @@
-//[Last Update: 10:32 AM 10/20/2026]
+//[Last Update: 4:11 PM 11/9/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -28,6 +28,7 @@
   const COL0_W = 36;
   const COL1_W = 44;
   const PLAY_COL_W = 28;
+  const EDIT_COLOR = "#f97316";
   const PALETTE = ["#fde68a", "#fecaca", "#bbf7d0", "#bfdbfe", "#ddd6fe", "#fbcfe8", "#fed7aa", "#a5f3fc", "#d9f99d", "#e5e7eb"];
   const NO_FILL_STYLE = "background:linear-gradient(to top right,#fff calc(50% - 1px),#ef4444 50%,#fff calc(50% + 1px));";
   const BASIC_RULES = [["majority", "Majority Rule"], ["listDedup", "List All (deduped)"], ["listAll", "List All (not deduped)"], ["first", "Show First"], ["last", "Show Last"]];
@@ -43,8 +44,13 @@
   const OP_LIST = [["hideempty", "Hide Empty"], ["showempty", "Show Empty Only"], ["contains", "Contains"], ["notcontains", "Does Not Contain"], ["exact", "Exact Match"], ["startswith", "Starts With"], ["endswith", "Ends With"], ["gt", "Greater Than"], ["lt", "Less Than"], ["eq", "Equal To"], ["between", "Between"]];
   const NO_VALUE_OPS = new Set(["hideempty", "showempty"]);
   const TWO_VALUE_OPS = new Set(["between"]);
+  const CLICK_MODES = {
+    select: { text: "On Click: Select Field", color: "#22c55e", textColor: "#16a34a", tip: "Clicking a cell selects it. Click to switch to Play Audio." },
+    play: { text: "On Click: Play Audio", color: "#6366f1", textColor: "#6366f1", tip: "Clicking a row plays its call. Click to switch to Edit Field." },
+    edit: { text: "On Click: Edit Field", color: "#f59e0b", textColor: "#b45309", tip: "Clicking a cell lets you type over it. Enter, Tab, or clicking away saves. Esc cancels. Click to switch to Select Field." }
+  };
+  const CLICK_ORDER = ["select", "play", "edit"];
   const FONT = "font-family:Segoe UI,Arial,sans-serif;";
-
   const el = (tag, props, ...children) => {
     props = props || {};
     const node = document.createElement(tag);
@@ -58,7 +64,6 @@
   const btnStyle = (color, extra) => `padding:6px 10px;border-radius:8px;border:1px solid ${color};background:#fff;color:${color};cursor:pointer;font-size:12px;flex-shrink:0;${extra || ""}`;
   const PRIMARY_BTN = "padding:9px 14px;border-radius:8px;border:0;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:13px;font-weight:600;cursor:pointer;";
   const PLAIN_BTN = "padding:9px 14px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;color:#111827;font-size:13px;cursor:pointer;";
-
   function splitTokens(v, delim) {
     if (v === null || v === undefined) return [];
     return String(v).split(delim).map((s) => s.trim()).filter(Boolean);
@@ -117,7 +122,6 @@
   function pairKey(a, b) {
     return [a, b].sort().join("|");
   }
-
   //##> VALIDATION: Every pasted line is checked before anything reaches the grid. Truncation is the
   //##> known failure mode for CoPilot outputs (the response stops before the final closing bracket).
   //##> A line is treated as truncated if it doesn't end with } or ], or if a brace or quote is still
@@ -255,7 +259,6 @@
     }
     return { status: "ok", objects, dups };
   }
-
   //##> TYPE DETECTION: Types are inferred from the values, never from the JSONL. Re-run on every
   //##> derive, so a Boolean column that later receives a "3" drops to Number on its own. Prose is
   //##> decided by the first 10 values (3+ spaces, majority). Categorical waits for 100+ values.
@@ -281,7 +284,6 @@
     }
     return "text";
   }
-
   function parseDelimited(text) {
     const head = text.split(/\r?\n/, 5).join("\n");
     const delim = (head.match(/\t/g) || []).length > (head.match(/,/g) || []).length ? "\t" : ",";
@@ -381,7 +383,6 @@
     if (m) return { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
     return null;
   }
-
   let dbPromise = null;
   function db() {
     if (!dbPromise) {
@@ -406,7 +407,6 @@
   const dbPut = (rec) => dbTx("readwrite", (st) => st.put(rec)).catch((e) => console.warn("[unpack] save failed", e));
   const dbDel = (id) => dbTx("readwrite", (st) => st.delete(id)).catch((e) => console.warn("[unpack] delete failed", e));
   const dbAll = () => dbTx("readonly", (st) => st.getAll()).catch(() => []);
-
   function dialog(opts) {
     return new Promise((resolve) => {
       let cb = null, input = null;
@@ -445,6 +445,7 @@
       const btnRow = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" });
       for (const b of (opts.buttons || [{ label: "OK", value: true, primary: true }])) {
         const btn = el("button", { style: "flex:1;" + (b.primary ? PRIMARY_BTN : PLAIN_BTN) }, b.label);
+        if (b.title) btn.title = b.title;
         btn.onclick = () => finish(b.value);
         btnRow.appendChild(btn);
       }
@@ -505,6 +506,8 @@
       mergeDismissed: [],
       imports: [],
       removed: [],
+      edits: {},
+      editPolicy: { all: null, fields: {} },
       pending: [{ text: "", error: "" }],
       notices: [],
       suppress: {},
@@ -513,7 +516,6 @@
       lockedKeys: null
     };
   }
-
   function openUnpack() {
     if (document.querySelector("[data-nexidia-unpack]")) {
       if (api.getShared("unpackPreload")) {
@@ -544,7 +546,10 @@
     let dragGhost = null;
     let dragPendingIndex = null;
     let bannerDismissed = new Set();
-
+    let editing = null;
+    let newDataPending = false;
+    let conflictBusy = false;
+    let conflictAgain = false;
     function getFV(rowObj, key) {
       if (xls && xls.getFieldValue) return xls.getFieldValue(rowObj, key);
       if (!rowObj) return "";
@@ -556,7 +561,6 @@
     function colPrefs() {
       return api.getShared("columnPrefs") || { fields: [], headers: [] };
     }
-
     function colById(id) { return S.columns.find((c) => c.id === id) || null; }
     function aliasMap() {
       const m = new Map();
@@ -590,7 +594,6 @@
     }
     function headerOf(f) { return baseHeader(f); }
     function sourceName(f) { return String(f).startsWith("m:") ? "Nexidia" : "CoPilot"; }
-
     //##> MERGES: S.merges is a log of { source, target } links between columns. A merged source column
     //##> leaves the grid, and its values are stacked after the target's own values at render time.
     //##> Each column can only be merged into one target, but a target can take in many. Merges chain,
@@ -647,7 +650,6 @@
       for (const c of S.columns) if (!mergeSourceOf("j:" + c.id)) out.push("j:" + c.id);
       return out;
     }
-
     function ensureColumn(key, map) {
       const lk = String(key).trim().toLowerCase();
       if (map.has(lk)) return map.get(lk);
@@ -689,7 +691,6 @@
       const v = entry.values[pk.id];
       return isEmptyValue(v) ? "" : String(v).trim();
     }
-
     function detectTypes() {
       const vals = new Map(S.columns.map((c) => [c.id, []]));
       for (const e of S.entries) {
@@ -753,7 +754,7 @@
       }
     }
     function buildRow(g, importMap) {
-      const row = { id: g.id, key: g.key, missing: g.missing, count: g.entries.filter((e) => !e.seed).length, tok: {}, hl: {}, over: {}, cache: {}, meta: null, status: null };
+      const row = { id: g.id, key: g.key, missing: g.missing, count: g.entries.filter((e) => !e.seed).length, tok: {}, hl: {}, over: {}, cache: {}, bcache: {}, meta: null, status: null };
       for (const c of S.columns) {
         const r = resolveValues(c, g.entries.map((e) => e.values[c.id]));
         row.tok[c.id] = r.tokens;
@@ -805,7 +806,7 @@
         const status = g.key ? (S.metaStatus[lk] || null) : null;
         if (matches && matches.length > 1 && status === "multi") {
           matches.forEach((m, i) => {
-            const r = Object.assign({}, base, { id: base.id + "#" + i, meta: m, status: "multi", cache: {} });
+            const r = Object.assign({}, base, { id: base.id + "#" + i, meta: m, status: "multi", cache: {}, bcache: {} });
             if (!removed.has(r.id)) out.push(r);
           });
         } else {
@@ -820,7 +821,6 @@
       rows = out;
       syncConfidenceField(s.combine && s.showConfidence && rows.some((r) => r.count > 1));
     }
-
     function delimFor(f) {
       if (f.startsWith("j:") && isProse(colById(f.slice(2)))) return S.settings.proseDelim || "|";
       return S.settings.basicDelim || ";";
@@ -835,9 +835,13 @@
       if ((!v || v === "0") && row.over[k]) v = row.over[k];
       return v ? [v] : [];
     }
-    function cellParts(row, f, depth) {
+    function getEdit(row, f) {
+      const r = row && S.edits[row.id];
+      return r && r[f] ? r[f] : null;
+    }
+    function baseParts(row, f, depth) {
       depth = depth || 0;
-      if (row.cache[f]) return row.cache[f];
+      if (row.bcache[f]) return row.bcache[f];
       let own;
       if (f === "__conf__") own = [String(row.count)];
       else if (f.startsWith("j:")) own = row.tok[f.slice(2)] || [];
@@ -853,8 +857,20 @@
         tokens = all;
       }
       const res = { tokens, ownFirst: own[0], delim: delimFor(f) };
+      row.bcache[f] = res;
+      return res;
+    }
+    function cellParts(row, f, depth) {
+      if (row.cache[f]) return row.cache[f];
+      const base = baseParts(row, f, depth);
+      const ed = getEdit(row, f);
+      const res = ed ? { tokens: isEmptyValue(ed.value) ? [] : [String(ed.value)], ownFirst: undefined, delim: base.delim, edited: true } : base;
       row.cache[f] = res;
       return res;
+    }
+    function baseRaw(row, f) {
+      const p = baseParts(row, f);
+      return p.tokens.join(p.delim);
     }
     function cellRaw(row, f) {
       const p = cellParts(row, f);
@@ -888,7 +904,9 @@
       }
       return null;
     }
-
+    function clearRowCaches() {
+      for (const r of rows) { r.cache = {}; r.bcache = {}; }
+    }
     function addNotice(kind, text, id) {
       S.notices = S.notices.filter((n) => n.id !== id);
       S.notices.push({ id: id || ("n" + Date.now()), kind, text });
@@ -899,7 +917,6 @@
       S.notices = S.notices.filter((n) => n.id !== id);
       if (before !== S.notices.length) renderNotices();
     }
-
     function searchFieldFor(name) {
       const lk = String(name || "").trim().toLowerCase();
       if (!lk) return null;
@@ -1091,6 +1108,7 @@
       S.metaAdded = true;
       autoMergeKeys();
       updateMissingNotice();
+      newDataPending = true;
       refreshAll();
       if (notFound.length && !S.suppress.notFound) {
         const r = await dialog({
@@ -1117,7 +1135,6 @@
       }
       runMergeDetection();
     }
-
     function processBlocks(blocks) {
       const accepted = [];
       const failures = [];
@@ -1154,6 +1171,7 @@
       const emptyBatches = accepted.filter((a) => a.message).length;
       if (emptyBatches) toast(`${emptyBatches} batch${emptyBatches === 1 ? "" : "es"} returned no rows (${accepted.find((a) => a.message).message})`, "#6366f1");
       if (added.length) {
+        newDataPending = true;
         refreshAll();
         toast(`${added.length} row${added.length === 1 ? "" : "s"} added`);
         checkMissingKeys(added);
@@ -1210,7 +1228,6 @@
         buttons: [{ label: "OK", value: true, primary: true }]
       }).then((r) => { if (r.checked) { S.suppress.missingKey = true; scheduleSave(); } });
     }
-
     function scheduleSave() {
       if (closed) return;
       clearTimeout(saveTimer);
@@ -1225,10 +1242,12 @@
     function sessionFile(data) {
       return JSON.stringify({ type: "nexidiaUnpackSession", version: 1, savedAt: new Date().toISOString(), data }, null, 1);
     }
-    function exportSession() {
+    function saveSessionFile() {
+      if (editing) commitEdit();
       downloadText("nexidia_unpack_session_" + stamp() + ".txt", sessionFile(JSON.parse(JSON.stringify(S))));
     }
     function loadSessionData(data, keepId) {
+      editing = null;
       const base = newState();
       const next = Object.assign(base, data || {});
       next.settings = Object.assign(defaultSettings(), next.settings || {});
@@ -1237,6 +1256,10 @@
       if (!Array.isArray(next.merges)) next.merges = [];
       if (!Array.isArray(next.mergeDismissed)) next.mergeDismissed = [];
       if (!Array.isArray(next.lockedKeys) || !next.lockedKeys.length) next.lockedKeys = null;
+      if (!next.edits || typeof next.edits !== "object") next.edits = {};
+      if (!next.editPolicy || typeof next.editPolicy !== "object") next.editPolicy = { all: null, fields: {} };
+      if (!next.editPolicy.fields) next.editPolicy.fields = {};
+      if (!next.suppress || typeof next.suppress !== "object") next.suppress = {};
       if (!keepId) { next.sessionId = newState().sessionId; next.createdAt = Date.now(); }
       S = next;
       selected.clear();
@@ -1249,22 +1272,21 @@
       renderInput();
       scheduleSave();
     }
-    async function importSessionFile(file) {
+    async function loadSessionFile(file) {
       let parsed;
       try { parsed = JSON.parse(await file.text()); } catch (_) { parsed = null; }
       if (!parsed || parsed.type !== "nexidiaUnpackSession" || !parsed.data) {
-        dialog({ title: "Import failed", danger: true, message: "That file isn't an exported Unpack session." });
+        dialog({ title: "Load failed", danger: true, message: "That file isn't a saved Unpack session." });
         return;
       }
       if (S.entries.length) {
-        const r = await dialog({ title: "Replace current session?", message: "Importing replaces what's on the grid now. Your current session will stay saved in the resume list.", buttons: [{ label: "Import", value: true, primary: true }, { label: "Cancel", value: false }] });
+        const r = await dialog({ title: "Replace current session?", message: "Loading replaces what's on the grid now. Your current session will stay saved in the resume list.", buttons: [{ label: "Load", value: true, primary: true }, { label: "Cancel", value: false }] });
         if (!r.value) return;
         saveNow();
       }
       loadSessionData(parsed.data, false);
-      toast("Session imported");
+      toast("Session loaded");
     }
-
     async function importSpreadsheet(file) {
       if (!S.entries.length) {
         dialog({ title: "Nothing to join to", message: "Paste your CoPilot outputs first. Spreadsheet imports only add values to rows already on the grid." });
@@ -1377,13 +1399,233 @@
           values++;
         }
       }
+      newDataPending = true;
       refreshAll();
       const parts = [`Imported ${values.toLocaleString()} value${values === 1 ? "" : "s"} into ${matchedRows.toLocaleString()} row${matchedRows === 1 ? "" : "s"} from ${fileName}.`];
       if (unmatched) parts.push(`${unmatched.toLocaleString()} row${unmatched === 1 ? " had a key" : "s had keys"} not on the grid and ${unmatched === 1 ? "was" : "were"} skipped.`);
       if (skipped.length) parts.push(`Columns not on the grid were skipped: ${skipped.slice(0, 12).join(", ")}${skipped.length > 12 ? ", and " + (skipped.length - 12) + " more" : ""}.`);
       addNotice("info", parts.join(" "), "import");
     }
-
+    function rowsById() {
+      return new Map(rows.map((r) => [r.id, r]));
+    }
+    function syncEditBases() {
+      if (conflictBusy) return;
+      const byId = rowsById();
+      for (const rowId of Object.keys(S.edits)) {
+        const row = byId.get(rowId);
+        if (!row) continue;
+        for (const f of Object.keys(S.edits[rowId])) S.edits[rowId][f].base = baseRaw(row, f);
+      }
+    }
+    function hasEdits() {
+      return Object.keys(S.edits).some((k) => Object.keys(S.edits[k]).length);
+    }
+    function conflictDialog(row, f, ed, incoming) {
+      return new Promise((resolve) => {
+        const delim = delimFor(f);
+        const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000021;display:flex;align-items:center;justify-content:center;" + FONT });
+        const box = el("div", { style: "background:#fff;width:500px;max-width:94vw;max-height:86vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+        box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;" }, "New data for an edited field"));
+        box.appendChild(el("div", { style: "font-size:13px;color:#374151;line-height:1.45;margin-bottom:10px;" }, "This data impacts a field that you have made edits to. How should we handle the new data?"));
+        const detail = el("div", { style: "border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:12px;color:#374151;line-height:1.5;" });
+        detail.appendChild(el("div", {}, el("b", {}, "Field: "), baseHeader(f)));
+        detail.appendChild(el("div", {}, el("b", {}, "Row: "), row.key || row.id));
+        detail.appendChild(el("div", { style: "word-break:break-word;" }, el("b", {}, "Your edit: "), String(ed.value || "(blank)")));
+        detail.appendChild(el("div", { style: "word-break:break-word;" }, el("b", {}, "New data: "), String(incoming || "(blank)")));
+        box.appendChild(detail);
+        const scopeName = "nx-conflict-scope-" + Date.now();
+        const scopes = [["all", "Always do this for all edited fields."], ["field", `Always do this for this field (${baseHeader(f)}).`], ["ask", "Ask Again Next Time"]];
+        const scopeWrap = el("div", { style: "margin:4px 0 14px;" });
+        const radios = [];
+        for (const [v, l] of scopes) {
+          const rb = el("input", { type: "radio", name: scopeName, value: v, checked: v === "ask" });
+          radios.push(rb);
+          scopeWrap.appendChild(el("label", { style: "display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;margin:4px 0;cursor:pointer;" }, rb, l));
+        }
+        const choices = [
+          ["ignore", "Ignore New Data", "Disregard new info for this field, leave it as it is."],
+          ["replace", "Replace With New Data", "Disregard your edit and replace the field with this new value."],
+          ["combine", "Add And Combine", `Stack new incoming data on top of existing data using a [${delim}] delimiter.`]
+        ];
+        const btnRow = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;" });
+        for (const [v, l, tip] of choices) {
+          const b = el("button", { style: "flex:1;" + (v === "ignore" ? PRIMARY_BTN : PLAIN_BTN), title: tip }, l);
+          b.onclick = () => {
+            const picked = radios.find((r) => r.checked);
+            overlay.remove();
+            resolve({ choice: v, scope: picked ? picked.value : "ask" });
+          };
+          btnRow.appendChild(b);
+        }
+        box.appendChild(btnRow);
+        box.appendChild(scopeWrap);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+      });
+    }
+    async function checkEditConflicts() {
+      if (!hasEdits()) return;
+      if (conflictBusy) { conflictAgain = true; return; }
+      conflictBusy = true;
+      try {
+        const byId = rowsById();
+        for (const rowId of Object.keys(S.edits)) {
+          const row = byId.get(rowId);
+          if (!row) continue;
+          for (const f of Object.keys(S.edits[rowId] || {})) {
+            const ed = S.edits[rowId] && S.edits[rowId][f];
+            if (!ed) continue;
+            const nb = baseRaw(row, f);
+            if (nb === ed.base) continue;
+            if (isEmptyValue(nb) || nb === ed.value) { ed.base = nb; continue; }
+            let choice = (S.editPolicy.fields && S.editPolicy.fields[f]) || S.editPolicy.all;
+            if (!choice) {
+              const r = await conflictDialog(row, f, ed, nb);
+              if (closed) return;
+              choice = r.choice;
+              if (r.scope === "all") S.editPolicy.all = choice;
+              else if (r.scope === "field") S.editPolicy.fields[f] = choice;
+            }
+            if (choice === "replace") {
+              delete S.edits[rowId][f];
+              if (!Object.keys(S.edits[rowId]).length) delete S.edits[rowId];
+            } else if (choice === "combine") {
+              const d = delimFor(f);
+              const prior = new Set(splitTokens(ed.base, d).map((t) => t.toLowerCase()));
+              const fresh = splitTokens(nb, d).filter((t) => !prior.has(t.toLowerCase()));
+              ed.value = dedupeTokens(splitTokens(ed.value, d).concat(fresh.length ? fresh : splitTokens(nb, d))).join(d);
+              ed.base = nb;
+              ed.at = Date.now();
+            } else {
+              ed.base = nb;
+            }
+            row.cache = {};
+          }
+        }
+      } finally {
+        conflictBusy = false;
+      }
+      if (closed) return;
+      clearRowCaches();
+      renderRows();
+      scheduleSave();
+      if (conflictAgain) { conflictAgain = false; checkEditConflicts(); }
+    }
+    function applyEdit(rowId, f, value) {
+      const row = rows.find((r) => r.id === rowId);
+      if (!row) return false;
+      const cur = cellRaw(row, f);
+      if (value === cur) return false;
+      const base = baseRaw(row, f);
+      if (value === base) {
+        if (S.edits[rowId]) {
+          delete S.edits[rowId][f];
+          if (!Object.keys(S.edits[rowId]).length) delete S.edits[rowId];
+        }
+      } else {
+        if (!S.edits[rowId]) S.edits[rowId] = {};
+        S.edits[rowId][f] = { value, base, at: Date.now() };
+      }
+      row.cache = {};
+      scheduleSave();
+      return true;
+    }
+    async function revertEdits(targets) {
+      const list = targets.filter((t) => S.edits[t.rowId] && S.edits[t.rowId][t.field]);
+      if (!list.length) return;
+      if (!S.suppress.revertConfirm) {
+        const one = list.length === 1;
+        const r = await dialog({
+          title: one ? "Revert this field?" : `Revert ${list.length} fields?`,
+          message: one ? "This field will go back to its original value from your CoPilot output, spreadsheet import, or Nexidia metadata. Your edit will be removed." : "These fields will go back to their original values from your CoPilot outputs, spreadsheet imports, or Nexidia metadata. Your edits will be removed.",
+          checkbox: "Don't ask me again this session",
+          buttons: [{ label: "Revert", value: true, primary: true }, { label: "Cancel", value: false }]
+        });
+        if (!r.value) return;
+        if (r.checked) S.suppress.revertConfirm = true;
+      }
+      for (const t of list) {
+        delete S.edits[t.rowId][t.field];
+        if (!Object.keys(S.edits[t.rowId]).length) delete S.edits[t.rowId];
+      }
+      clearRowCaches();
+      renderRows();
+      scheduleSave();
+      toast(`${list.length} field${list.length === 1 ? "" : "s"} reverted`, "#0369a1");
+    }
+    function editedInSelection() {
+      const vf = visFields();
+      const out = [];
+      for (const key of cellSel) {
+        const [r, c] = key.split(",").map(Number);
+        const row = view[r], f = vf[c];
+        if (row && f && getEdit(row, f)) out.push({ rowId: row.id, field: f });
+      }
+      return out;
+    }
+    function scrollCellIntoView(ri, ci) {
+      const vf = visFields();
+      const top = ri * ROW_HEIGHT;
+      const headH = thead.offsetHeight || ROW_HEIGHT;
+      if (top < tableWrap.scrollTop) tableWrap.scrollTop = top;
+      else if (top + ROW_HEIGHT > tableWrap.scrollTop + tableWrap.clientHeight - headH) tableWrap.scrollTop = top + ROW_HEIGHT - tableWrap.clientHeight + headH;
+      let left = frozenW();
+      for (let i = 0; i < ci; i++) left += getColWidth(vf[i]);
+      const w = getColWidth(vf[ci]);
+      const visLeft = tableWrap.scrollLeft + frozenW();
+      if (left < visLeft) tableWrap.scrollLeft = left - frozenW();
+      else if (left + w > tableWrap.scrollLeft + tableWrap.clientWidth) tableWrap.scrollLeft = left + w - tableWrap.clientWidth;
+    }
+    function startEdit(ri, ci) {
+      const vf = visFields();
+      const row = view[ri], f = vf[ci];
+      if (!row || !f) return;
+      if (f === "__conf__") { toast("Confidence is calculated and can't be edited.", "#6b7280"); return; }
+      if (editing) commitEdit();
+      const value = cellRaw(row, f);
+      const input = el("input", { type: "text", style: "width:100%;height:100%;box-sizing:border-box;border:2px solid #f59e0b;border-radius:2px;padding:2px 8px;font-size:11px;outline:none;background:#fffbeb;color:#111827;" + FONT });
+      input.value = value;
+      editing = { rowId: row.id, field: f, ri, ci, input, orig: value };
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); moveEdit(e.shiftKey ? -1 : 1, 0); }
+        else if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); moveEdit(0, e.shiftKey ? -1 : 1); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
+      });
+      input.addEventListener("mousedown", (e) => e.stopPropagation());
+      scrollCellIntoView(ri, ci);
+      renderRows();
+      input.focus();
+      const end = input.value.length;
+      try { input.setSelectionRange(end, end); } catch (_) {}
+    }
+    function commitEdit() {
+      if (!editing) return false;
+      const { rowId, field, input } = editing;
+      editing = null;
+      const changed = applyEdit(rowId, field, input.value);
+      renderRows();
+      return changed;
+    }
+    function cancelEdit() {
+      if (!editing) return;
+      editing = null;
+      renderRows();
+    }
+    function moveEdit(dr, dc) {
+      if (!editing) return;
+      const { ri, ci } = editing;
+      commitEdit();
+      const nr = ri + dr, nc = ci + dc;
+      if (nr < 0 || nr >= view.length || nc < 0 || nc >= visFields().length) return;
+      startEdit(nr, nc);
+    }
+    document.addEventListener("mousedown", onOutsideEdit, true);
+    function onOutsideEdit(e) {
+      if (!editing) return;
+      if (editing.input.contains(e.target)) return;
+      commitEdit();
+    }
     //##> MERGE POPUP: Pairs are worked top to bottom. Each pair's choice is simulated before the next
     //##> pair is drawn, so if Member_Id is merged into Member ID, a later Member ID / MemberID pair shows
     //##> the combined group. The auto-detected popup can't be closed until every pair has a choice,
@@ -1412,7 +1654,6 @@
       box.appendChild(btnRow);
       overlay.appendChild(box);
       document.body.appendChild(overlay);
-
       function simulate() {
         const sim = S.merges.slice();
         return items.map((it) => {
@@ -1578,12 +1819,10 @@
         buttons: [{ label: "Cancel", value: null }]
       }).then((r) => { if (r.value) unmerge(r.value); });
     }
-
     const modal = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:flex;align-items:center;justify-content:center;" + FONT });
     modal.dataset.nexidiaUnpack = "1";
     const stickyClose = el("button", { style: "position:fixed;top:20px;right:20px;z-index:1000000;border:0;background:rgba(30,30,30,.75);color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.4);" }, "X");
     const card = el("div", { style: "background:#fff;width:1280px;max-width:97vw;height:92vh;overflow:hidden;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;" });
-
     const toolbar = el("div", { style: "padding:12px 16px 8px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;flex-wrap:wrap;" });
     const titleEl = el("div", { style: "font-size:15px;font-weight:700;color:#111827;flex-shrink:0;" }, "Unpack CoPilot Outputs");
     const menuBtn = el("button", { style: btnStyle("#94a3b8", "color:#475569;") }, "\u2190 Main Menu");
@@ -1593,21 +1832,22 @@
     const removeSelectedBtn = el("button", { style: btnStyle("#ef4444", "display:none;") }, "Remove Selected");
     const settingsBtn = el("button", { style: btnStyle("#0ea5e9", "color:#0369a1;") }, "\u2699 Unpack Settings");
     const metaBtn = el("button", { style: btnStyle("#8b5cf6", "color:#7c3aed;") }, "Add Nexidia Metadata");
-    const mergeBtn = el("button", { style: btnStyle("#0369a1") }, "Merge Columns");
+    const mergeBtn = el("button", { style: btnStyle("#0369a1"), title: "Combine columns that hold the same information, like a CoPilot Member_Id column and the Nexidia Member ID column." }, "Merge Columns");
     const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "\u2630");
     const adHocBtn = el("button", { style: btnStyle("#6366f1") }, "+ Add Column");
     const importSheetBtn = el("button", { style: btnStyle("#0f766e") }, "Import Spreadsheet");
-    const exportExcelBtn = el("button", { style: btnStyle("#22c55e", "color:#16a34a;") }, "Export to Excel");
     const exportTranscriptsBtn = el("button", { style: btnStyle("#6366f1", "color:#4f46e5;") }, "Export Transcripts");
-    const exportSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;") }, "Export Session");
-    const importSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;") }, "Import Session");
+    const saveSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;"), title: "Save a hard copy of this session so you can come back later and continue your work." }, "Save Session");
+    const loadSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;"), title: "Load a saved copy from a previous session." }, "Load Session");
     const resetBtn = el("button", { style: btnStyle("#9ca3af", "color:#374151;") }, "Reset View");
     const clickModeBtn = el("button", { style: btnStyle("#22c55e", "color:#16a34a;") }, "On Click: Select Field");
-    const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "margin-left:auto;width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
+    const exportSlot = el("div", { style: "flex:1;min-width:170px;display:flex;justify-content:center;" });
+    const exportExcelBtn = el("button", { style: "padding:8px 20px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(22,163,74,.35);", title: "Download the grid as an Excel sheet." }, "Export to Excel");
+    exportSlot.appendChild(exportExcelBtn);
+    const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
     const sheetInput = el("input", { type: "file", accept: ".xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
     const sessionInput = el("input", { type: "file", accept: ".txt,.json", style: "display:none;" });
-    [titleEl, menuBtn, rowCountEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportExcelBtn, exportTranscriptsBtn, exportSessionBtn, importSessionBtn, resetBtn, clickModeBtn, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
-
+    [titleEl, menuBtn, rowCountEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportTranscriptsBtn, saveSessionBtn, loadSessionBtn, resetBtn, clickModeBtn, exportSlot, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
     const bannerWrap = el("div", { style: "display:none;padding:8px 16px;background:#fffbeb;border-bottom:1px solid #fde68a;" });
     const topPanel = el("div", { style: "padding:8px 16px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;gap:6px;" });
     const instrHead = el("div", { style: "font-size:12px;font-weight:600;color:#1d4ed8;cursor:pointer;user-select:none;" }, "\u25B8 Instructions");
@@ -1618,7 +1858,6 @@
     topPanel.appendChild(instrBody);
     topPanel.appendChild(noticeWrap);
     topPanel.appendChild(inputWrap);
-
     const sortBar = el("div", { style: "padding:4px 16px;min-height:30px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;background:#fafafa;" });
     const body = el("div", { style: "display:flex;flex:1;min-height:0;" });
     const colPanel = el("div", { style: "width:220px;border-right:1px solid #e5e7eb;padding:10px;overflow-y:auto;display:none;flex-shrink:0;" });
@@ -1646,12 +1885,12 @@
     modal.appendChild(card);
     document.body.appendChild(modal);
     document.body.appendChild(stickyClose);
-
     instrBody.appendChild(el("div", {}, "1. Build your prompt: open the PromptBuilder below, paste all of it into a new CoPilot chat, describe your job at the bottom under \"Input from Analyst\", and work through its questions until it hands you a finished prompt."));
     instrBody.appendChild(el("div", {}, "2. Run your batches: send each transcript batch file with that prompt in its own fresh CoPilot chat."));
     instrBody.appendChild(el("div", {}, "3. Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. Rows are added to the grid as you go."));
     instrBody.appendChild(el("div", {}, "4. Metadata from Nexidia is added using your primary key (Trans_Id by default). If your columns look like Nexidia's, you'll be asked whether to merge them. Adjust duplicates, delimiters, and highlights in Unpack Settings."));
-    instrBody.appendChild(el("div", {}, "5. Review, play calls, and export to Excel. Use Export Session to save your work to a file you can import later."));
+    instrBody.appendChild(el("div", {}, "5. Review your rows and play calls. To fix a value, switch On Click to Edit Field and click the cell. Use Save Session to keep a copy you can load later and keep working."));
+    instrBody.appendChild(el("div", {}, "6. When you're finished, click Export to Excel to save your work to an Excel sheet."));
     const promptBtn = el("button", { style: btnStyle("#1d4ed8", "margin-top:6px;") }, "View PromptBuilder");
     instrBody.appendChild(promptBtn);
     instrHead.onclick = () => {
@@ -1660,7 +1899,6 @@
       instrHead.textContent = (open ? "\u25BE" : "\u25B8") + " Instructions";
     };
     promptBtn.onclick = () => openPromptPanel();
-
     async function openPromptPanel() {
       document.querySelectorAll("[data-unpack-prompt]").forEach((p) => p.remove());
       const panel = el("div", { style: "position:fixed;top:70px;right:24px;width:480px;max-width:92vw;height:70vh;background:#fff;border:1px solid #d1d5db;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.3);z-index:1000010;display:flex;flex-direction:column;padding:14px;" + FONT });
@@ -1694,7 +1932,6 @@
       };
       dlBtn.onclick = () => { if (text) downloadText("PromptBuilder.txt", text); };
     }
-
     function renderNotices() {
       noticeWrap.innerHTML = "";
       for (const n of S.notices) {
@@ -1708,7 +1945,6 @@
       }
       updateMetaBtn();
     }
-
     function renderInput() {
       inputWrap.innerHTML = "";
       const immediate = S.settings.unpackImmediately;
@@ -1818,7 +2054,6 @@
         scheduleSave();
       };
     }
-
     function setMetaBusy(on, count) {
       metaBtn.disabled = on;
       metaBtn.textContent = on ? `Adding metadata for ${count ? count.toLocaleString() + " " : ""}call${count === 1 ? "" : "s"}...` : "Add Nexidia Metadata";
@@ -1829,17 +2064,16 @@
       const failed = S.notices.some((n) => n.id === "metaFail");
       metaBtn.style.display = S.settings.autoMeta && !failed ? "none" : "";
     }
-
     function getColWidth(f) { return S.grid.widths[f] || DEFAULT_COL_W; }
-    function frozenCount() { return S.grid.clickMode === "select" ? 3 : 2; }
-    function frozenW() { return COL0_W + COL1_W + (S.grid.clickMode === "select" ? PLAY_COL_W : 0); }
+    function showPlayCol() { return S.grid.clickMode !== "play"; }
+    function frozenCount() { return showPlayCol() ? 3 : 2; }
+    function frozenW() { return COL0_W + COL1_W + (showPlayCol() ? PLAY_COL_W : 0); }
     function frozenStyle(i, isHeader) {
       const lefts = [0, COL0_W, COL0_W + COL1_W];
       const widths = [COL0_W, COL1_W, PLAY_COL_W];
       return `position:sticky;left:${lefts[i]}px;z-index:${isHeader ? 6 : 3};width:${widths[i]}px;min-width:${widths[i]}px;max-width:${widths[i]}px;box-sizing:border-box;`;
     }
     function visFields() { return S.grid.order.filter((f) => isVis(f)); }
-
     function evaluateRule(rule, row, field) {
       const cell = cellText(row, field);
       const cellLower = cell.toLowerCase();
@@ -1902,7 +2136,14 @@
     }
     function refreshAll() {
       if (closed) return;
+      if (editing) commitEdit();
       derive();
+      if (newDataPending) {
+        newDataPending = false;
+        checkEditConflicts();
+      } else {
+        syncEditBases();
+      }
       recompute();
       renderSortBar();
       renderHeader();
@@ -1912,6 +2153,7 @@
       scheduleSave();
     }
     function rerender() {
+      if (editing) commitEdit();
       recompute();
       renderSortBar();
       renderHeader();
@@ -1919,7 +2161,6 @@
       rebuildColPanel();
       scheduleSave();
     }
-
     function updateCounts() {
       rowCountEl.textContent = view.length.toLocaleString() + " of " + rows.length.toLocaleString() + " rows";
       selCountEl.textContent = selected.size ? selected.size.toLocaleString() + " selected" : "";
@@ -1930,7 +2171,6 @@
         cellSelCountEl.style.display = "";
       } else cellSelCountEl.style.display = "none";
     }
-
     function renderSortBar() {
       sortBar.innerHTML = "";
       const sorts = S.grid.sorts.filter((s) => S.grid.order.includes(s.field));
@@ -1965,7 +2205,6 @@
       if (S.grid.sorts.length > 3) S.grid.sorts.length = 3;
       rerender();
     }
-
     function rebuildColPanel() {
       colList.innerHTML = "";
       for (const f of S.grid.order) {
@@ -1973,7 +2212,7 @@
         const rowEl = el("div", { style: "display:flex;align-items:center;gap:6px;margin:4px 0;" });
         const cb = el("input", { type: "checkbox" });
         cb.checked = isVis(f);
-        cb.onchange = () => { setVis(f, cb.checked); renderHeader(); renderRows(); scheduleSave(); };
+        cb.onchange = () => { if (editing) commitEdit(); setVis(f, cb.checked); renderHeader(); renderRows(); scheduleSave(); };
         const labelEl = el("span", { style: `font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"}`, title: groupLabel(f) }, headerOf(f) + (hasFilter ? " (filtered)" : ""));
         labelEl.onclick = () => openFilterPopover(f, labelEl);
         rowEl.appendChild(cb);
@@ -1981,7 +2220,6 @@
         colList.appendChild(rowEl);
       }
     }
-
     function closePopovers() {
       document.querySelectorAll("[data-unpack-pop]").forEach((p) => p.remove());
     }
@@ -2199,13 +2437,14 @@
     function openRowMenu(row, ri, x, y) {
       const items = [
         { label: "Select Row", run: () => { if (S.grid.clickMode !== "select") setClickMode("select"); cellSel.clear(); visFields().forEach((_, c) => cellSel.add(ri + "," + c)); updateCellHighlights(); } },
-        { label: "Play Call", run: () => triggerPlay(row) },
-        "-",
-        { label: "Remove Row", danger: true, run: () => removeRows([row.id]) }
+        { label: "Play Call", run: () => triggerPlay(row) }
       ];
+      const rowEdits = S.edits[row.id] ? Object.keys(S.edits[row.id]) : [];
+      if (rowEdits.length) items.push({ label: `Revert Edits in Row (${rowEdits.length})`, run: () => revertEdits(rowEdits.map((f) => ({ rowId: row.id, field: f }))) });
+      items.push("-");
+      items.push({ label: "Remove Row", danger: true, run: () => removeRows([row.id]) });
       menu(x, y, items);
     }
-
     function createDragGhost(text) {
       if (dragGhost) dragGhost.remove();
       dragGhost = el("div", { style: "position:fixed;top:-9999px;left:-9999px;z-index:1000010;background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;padding:6px 14px;border-radius:6px;white-space:nowrap;pointer-events:none;" + FONT }, text);
@@ -2242,7 +2481,6 @@
       renderRows();
       scheduleSave();
     }
-
     function renderHeader() {
       const vf = visFields();
       thead.innerHTML = "";
@@ -2259,7 +2497,7 @@
       thSel.appendChild(selectAll);
       trh.appendChild(thSel);
       trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(1, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px 6px;font-size:10px;color:#9ca3af;text-align:right;` }, "#"));
-      if (S.grid.clickMode === "select") trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(2, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px;font-size:10px;color:#9ca3af;text-align:center;` }, "\u25B6"));
+      if (showPlayCol()) trh.appendChild(el("th", { style: `position:sticky;top:0;${frozenStyle(2, true)}background:#f9fafb;border-bottom:2px solid #e5e7eb;padding:4px;font-size:10px;color:#9ca3af;text-align:center;` }, "\u25B6"));
       const tierColors = ["#1d4ed8", "#0369a1", "#0f766e"];
       const pkc = pkColumn();
       const pkRoot = pkc ? rootOf("j:" + pkc.id) : null;
@@ -2338,7 +2576,6 @@
       table.style.width = (frozenW() + vf.reduce((s, f) => s + getColWidth(f), 0)) + "px";
       emptyEl.style.display = rows.length ? "none" : "block";
     }
-
     function getVisibleRange() {
       if (!view.length) return { start: 0, end: 0 };
       const st = tableWrap.scrollTop;
@@ -2351,17 +2588,29 @@
       if (row.status === "multi") return { color: "#d97706", title: "This key matched more than one call." };
       return null;
     }
+    function editMarker(row, field) {
+      const hit = el("span", { style: "position:absolute;top:0;right:0;width:12px;height:12px;cursor:pointer;z-index:2;", title: "This field has been edited. Click to revert back to original value." });
+      hit.appendChild(el("span", { style: `position:absolute;top:0;right:0;width:0;height:0;border-top:8px solid ${EDIT_COLOR};border-left:8px solid transparent;` }));
+      hit.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); });
+      hit.addEventListener("click", (e) => { e.stopPropagation(); revertEdits([{ rowId: row.id, field }]); });
+      return hit;
+    }
     function renderRows() {
       const range = getVisibleRange();
       lastRange = range;
       const vf = visFields();
-      const selectMode = S.grid.clickMode === "select";
+      const mode = S.grid.clickMode;
+      const selectMode = mode === "select";
+      const editMode = mode === "edit";
+      const playCol = showPlayCol();
       updateCounts();
       const selAll = thead.querySelector("input[type=checkbox]");
       if (selAll) {
         selAll.checked = view.length > 0 && view.every((r) => selected.has(r.id));
         selAll.indeterminate = selected.size > 0 && !selAll.checked;
       }
+      const hadFocus = editing && document.activeElement === editing.input;
+      const caret = hadFocus ? [editing.input.selectionStart, editing.input.selectionEnd] : null;
       tbody.innerHTML = "";
       const span = vf.length + frozenCount();
       if (range.start > 0) {
@@ -2375,7 +2624,7 @@
         const isActive = smid && smid === activeSmid;
         const isChecked = selected.has(row.id);
         const bg = isActive || isChecked ? "#eff6ff" : (ri % 2 ? "#f8fafc" : "#fff");
-        const tr = el("tr", { style: `height:${ROW_HEIGHT}px;background:${bg};${isActive ? "outline:2px solid #3b82f6;outline-offset:-2px;" : ""}${selectMode ? "" : "cursor:pointer;"}` });
+        const tr = el("tr", { style: `height:${ROW_HEIGHT}px;background:${bg};${isActive ? "outline:2px solid #3b82f6;outline-offset:-2px;" : ""}${mode === "play" ? "cursor:pointer;" : ""}` });
         const tdSel = el("td", { style: `${frozenStyle(0, false)}background:${bg};padding:2px 4px;border-bottom:1px solid #f1f5f9;text-align:center;height:${ROW_HEIGHT}px;` });
         const cb = el("input", { type: "checkbox" });
         cb.checked = isChecked;
@@ -2396,7 +2645,7 @@
           updateCellHighlights();
         };
         tr.appendChild(tdNum);
-        if (selectMode) {
+        if (playCol) {
           const tdPlay = el("td", { style: `${frozenStyle(2, false)}background:${bg};padding:2px 4px;border-bottom:1px solid #f1f5f9;text-align:center;height:${ROW_HEIGHT}px;` });
           const icon = el("span", { style: `font-size:13px;cursor:${smid ? "pointer" : "default"};color:${smid ? "#3b82f6" : "#d1d5db"};`, title: smid ? "Play" : "No call linked yet" }, "\u25B6");
           icon.onclick = (e) => { e.stopPropagation(); triggerPlay(row); };
@@ -2404,18 +2653,31 @@
           tr.appendChild(tdPlay);
         }
         vf.forEach((field, ci) => {
-          const display = cellText(row, field);
           const w = getColWidth(field);
+          const isEditing = editing && editing.rowId === row.id && editing.field === field;
+          const edited = !!getEdit(row, field);
+          if (isEditing) {
+            editing.ri = ri;
+            editing.ci = ci;
+            const td = el("td", { style: `padding:0;border-bottom:1px solid #f1f5f9;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;` });
+            td.dataset.r = String(ri);
+            td.dataset.c = String(ci);
+            td.appendChild(editing.input);
+            tr.appendChild(td);
+            return;
+          }
+          const display = cellText(row, field);
           const hl = cellHl(row, field);
           const cSel = selectMode && cellSel.has(ri + "," + ci);
-          const td = el("td", { style: `padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;${selectMode ? "cursor:cell;" : ""}${cSel ? "background:#dbeafe;outline:1px solid #93c5fd;outline-offset:-1px;" : (hl ? "background:" + hl + ";" : "")}`, title: display }, display);
+          const td = el("td", { style: `position:relative;padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;${selectMode ? "cursor:cell;" : (editMode ? "cursor:text;" : "")}${cSel ? "background:#dbeafe;outline:1px solid #93c5fd;outline-offset:-1px;" : (hl ? "background:" + hl + ";" : "")}`, title: display }, display);
           td.dataset.r = String(ri);
           td.dataset.c = String(ci);
           if (hl) td.dataset.hl = hl;
+          if (edited) td.appendChild(editMarker(row, field));
           tr.appendChild(td);
         });
         tr.addEventListener("click", (e) => {
-          if (selectMode || tdSel.contains(e.target) || tdNum.contains(e.target)) return;
+          if (mode !== "play" || tdSel.contains(e.target) || tdNum.contains(e.target)) return;
           triggerPlay(row);
         });
         tbody.appendChild(tr);
@@ -2424,6 +2686,10 @@
         const sp = el("tr", {});
         sp.appendChild(el("td", { colSpan: span, style: `height:${(view.length - range.end) * ROW_HEIGHT}px;padding:0;border:0;` }));
         tbody.appendChild(sp);
+      }
+      if (editing && editing.input.isConnected && hadFocus && document.activeElement !== editing.input) {
+        editing.input.focus();
+        try { editing.input.setSelectionRange(caret[0], caret[1]); } catch (_) {}
       }
     }
     function updateCellHighlights() {
@@ -2466,11 +2732,18 @@
       });
     }
     tbody.addEventListener("mousedown", (e) => {
-      if (S.grid.clickMode !== "select" || e.button !== 0) return;
+      if (e.button !== 0) return;
       const td = e.target.closest ? e.target.closest("td[data-r]") : null;
       if (!td) return;
-      e.preventDefault();
       const r = Number(td.dataset.r), c = Number(td.dataset.c);
+      if (S.grid.clickMode === "edit") {
+        if (editing && editing.input.contains(e.target)) return;
+        e.preventDefault();
+        startEdit(r, c);
+        return;
+      }
+      if (S.grid.clickMode !== "select") return;
+      e.preventDefault();
       if (e.shiftKey && cellAnchor) selectRect(cellAnchor.r, cellAnchor.c, r, c);
       else if (e.ctrlKey) {
         const k = r + "," + c;
@@ -2499,7 +2772,10 @@
       if (e.target.closest && (e.target.closest("th") || !e.target.closest("td[data-r]"))) return;
       if (S.grid.clickMode !== "select" || !cellSel.size) return;
       e.preventDefault();
-      menu(e.clientX, e.clientY, [{ label: "Copy", run: copyCellSelection }]);
+      const items = [{ label: "Copy", run: copyCellSelection }];
+      const editedCells = editedInSelection();
+      if (editedCells.length) items.push({ label: `Revert Edited Cells (${editedCells.length})`, run: () => revertEdits(editedCells) });
+      menu(e.clientX, e.clientY, items);
     });
     function onKey(e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "c" && S.grid.clickMode === "select" && cellSel.size) {
@@ -2516,23 +2792,21 @@
       requestAnimationFrame(() => { renderRows(); rafPending = false; });
     });
     function setClickMode(mode) {
-      S.grid.clickMode = mode === "play" ? "play" : "select";
-      if (S.grid.clickMode === "play") {
+      if (editing) commitEdit();
+      S.grid.clickMode = CLICK_MODES[mode] ? mode : "select";
+      const m = CLICK_MODES[S.grid.clickMode];
+      if (S.grid.clickMode !== "select") {
         cellSel.clear();
         cellAnchor = null;
-        clickModeBtn.textContent = "On Click: Play Audio";
-        clickModeBtn.style.borderColor = "#6366f1";
-        clickModeBtn.style.color = "#6366f1";
-      } else {
-        clickModeBtn.textContent = "On Click: Select Field";
-        clickModeBtn.style.borderColor = "#22c55e";
-        clickModeBtn.style.color = "#16a34a";
       }
+      clickModeBtn.textContent = m.text;
+      clickModeBtn.style.borderColor = m.color;
+      clickModeBtn.style.color = m.textColor;
+      clickModeBtn.title = m.tip;
       renderHeader();
       renderRows();
       scheduleSave();
     }
-
     function rowLabel(row) {
       const m = row.meta || {};
       const agent = getFV(m, "agentName");
@@ -2558,7 +2832,6 @@
       playerCtrl.loadCall(smid, rowLabel(row), undefined, null);
       renderRows();
     }
-
     function escHtml(s) {
       return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
@@ -2574,6 +2847,7 @@
       if (!raw) return "<td></td>";
       if (f === "__conf__") return num(raw, "int");
       if (f.startsWith("m:")) {
+        if (getEdit(row, f)) return str(raw);
         const k = f.slice(2).toLowerCase();
         if (k === "recordeddatetime") {
           const d = new Date(raw);
@@ -2641,6 +2915,7 @@
       return r.value === "sel" ? view.filter((row) => selected.has(row.id)) : view;
     }
     async function exportExcel() {
+      if (editing) commitEdit();
       const list = await chooseScope();
       if (list) doExcelExport(list);
     }
@@ -2701,7 +2976,6 @@
         fetchMetadata(false);
       } else refreshAll();
     }
-
     function openSettings() {
       const d = JSON.parse(JSON.stringify(S.settings));
       const colTypes = new Map(S.columns.map((c) => [c.id, c.type]));
@@ -2714,7 +2988,6 @@
       const line = (l, ctrl, indent) => el("div", { style: `display:flex;align-items:center;justify-content:space-between;gap:10px;margin:7px 0;${indent ? "padding-left:18px;" : ""}` }, l, ctrl);
       const select = (opts, val) => { const s = el("select", { style: "padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:210px;" }); for (const [v, t] of opts) s.appendChild(el("option", { value: v }, t)); s.value = val; return s; };
       const textIn = (val, max) => el("input", { type: "text", value: val, maxLength: max, style: "padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:210px;box-sizing:border-box;" });
-
       box.appendChild(section("Primary Key"));
       const pkInput = textIn(d.primaryKey, 80);
       pkInput.setAttribute("list", "nx-unpack-pk-options");
@@ -2728,7 +3001,6 @@
       box.appendChild(line(label("Primary Key", info("What field will uniquely identify your call? This will be used to fill metadata and handle duplicates.")), pkInput));
       const pkNote = el("div", { style: "font-size:11px;padding-left:2px;margin-top:-2px;" });
       box.appendChild(pkNote);
-
       box.appendChild(section("Duplicate Handling"));
       const combineCb = el("input", { type: "checkbox", checked: d.combine });
       const combineTip = info("");
@@ -2748,7 +3020,6 @@
       const proseDelimIn = textIn(d.proseDelim, 20);
       const proseDelimRow = line(label("Separate Values With:"), proseDelimIn, true);
       dupWrap.appendChild(proseDelimRow);
-
       dupWrap.appendChild(el("div", { style: "font-size:13px;color:#111827;margin:14px 0 6px;display:flex;align-items:center;" }, "Highlight Options", info("Color cells where duplicates disagreed, based on how the conflict was resolved. Only applies to rows that were combined from more than one output.")));
       const matrix = el("table", { style: "border-collapse:collapse;font-size:11px;width:100%;" });
       const hr = el("tr", {});
@@ -2805,11 +3076,20 @@
       const confCb = el("input", { type: "checkbox", checked: d.showConfidence });
       const confTip = info("");
       dupWrap.appendChild(line(label("Display Confidence Score", confTip), confCb));
-
       box.appendChild(section("Metadata"));
       const autoCb = el("input", { type: "checkbox", checked: d.autoMeta });
       box.appendChild(line(label("Add Nexidia Metadata Automatically", info("Look up each new call in Nexidia as soon as it's added. When this is off, use the Add Nexidia Metadata button instead.")), autoCb));
-
+      box.appendChild(section("Edited Fields"));
+      const policyOpts = [["ask", "Ask me each time"], ["ignore", "Ignore New Data"], ["replace", "Replace With New Data"], ["combine", "Add And Combine"]];
+      const policySel = select(policyOpts, S.editPolicy.all || "ask");
+      box.appendChild(line(label("When new data hits an edited field", info("What to do when a new paste, spreadsheet import, or metadata lookup changes a field you've already edited. Applies to all edited fields this session.")), policySel));
+      const fieldPolicies = Object.keys(S.editPolicy.fields || {});
+      const clearFieldPol = el("button", { style: btnStyle("#9ca3af", "color:#374151;padding:4px 10px;font-size:11px;") }, `Clear ${fieldPolicies.length} field choice${fieldPolicies.length === 1 ? "" : "s"}`);
+      let clearFields = false;
+      clearFieldPol.onclick = () => { clearFields = true; clearFieldPol.disabled = true; clearFieldPol.textContent = "Will clear on Apply"; };
+      if (fieldPolicies.length) box.appendChild(line(label("Saved choices for single fields", info("Fields where you picked \"Always do this for this field.\" Clear them to be asked again.")), clearFieldPol));
+      const revertCb = el("input", { type: "checkbox", checked: !S.suppress.revertConfirm });
+      box.appendChild(line(label("Confirm before reverting an edit"), revertCb));
       if (S.columns.length) {
         box.appendChild(section("Column Types"));
         box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Auto Detect reads the values as they come in. Prose columns use the Prose rules above; everything else uses the Basic rules."));
@@ -2821,7 +3101,6 @@
           box.appendChild(line(label(c.header), sel));
         }
       }
-
       const sync = () => {
         const pkName = pkInput.value.trim() || "Primary Key";
         combineTip.title = `Combine rows with a ${pkName} value in common, rather than list multiple rows for the same call. (Recommended)`;
@@ -2843,7 +3122,6 @@
       [pkInput, basicDelimIn, proseDelimIn].forEach((n) => n.addEventListener("input", sync));
       [combineCb, basicSel, noMajSel, proseSel].forEach((n) => n.addEventListener("change", sync));
       sync();
-
       const btnRow = el("div", { style: "display:flex;gap:8px;margin-top:18px;" });
       const applyB = el("button", { style: "flex:1;" + PRIMARY_BTN }, "Apply");
       const cancelB = el("button", { style: "flex:1;" + PLAIN_BTN }, "Cancel");
@@ -2864,6 +3142,9 @@
         const pkChanged = d.primaryKey !== S.settings.primaryKey;
         const autoTurnedOn = d.autoMeta && !S.settings.autoMeta;
         S.settings = d;
+        S.editPolicy.all = policySel.value === "ask" ? null : policySel.value;
+        if (clearFields) S.editPolicy.fields = {};
+        if (revertCb.checked) delete S.suppress.revertConfirm; else S.suppress.revertConfirm = true;
         for (const c of S.columns) if (colTypes.has(c.id)) c.type = colTypes.get(c.id);
         if (pkChanged) {
           S.meta = {};
@@ -2880,7 +3161,6 @@
       overlay.appendChild(box);
       document.body.appendChild(overlay);
     }
-
     //##> RESUME BANNER: Sessions are saved to IndexedDB as you work and deleted when the tool is closed
     //##> properly (X or Main Menu). So a session only shows up here if the tab crashed, reloaded, or was
     //##> closed without exiting the tool. Nothing loads unless the user picks Resume.
@@ -2895,11 +3175,11 @@
         const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:3px 0;" });
         const when = new Date(rec.updatedAt || rec.createdAt).toLocaleString();
         row.appendChild(el("div", { style: "flex:1;font-size:12px;color:#78350f;" }, `Last edited ${when} \u00B7 ${Number(rec.rowCount || 0).toLocaleString()} rows \u00B7 ${Number(rec.pasteCount || 0).toLocaleString()} pastes`));
-        const mk = (t, color) => el("button", { style: btnStyle(color, "padding:3px 9px;font-size:11px;") }, t);
-        const resumeB = mk("Resume Session", "#1d4ed8");
-        const saveB = mk("Save", "#16a34a");
-        const expB = mk("Export", "#b45309");
-        const discB = mk("Discard", "#b91c1c");
+        const mk = (t, color, tip) => el("button", { style: btnStyle(color, "padding:3px 9px;font-size:11px;"), title: tip || "" }, t);
+        const resumeB = mk("Resume Session", "#1d4ed8", "Pick this session back up where you left off.");
+        const keepB = mk("Keep for Later", "#16a34a", "Hide this from the list for now. It stays saved in this browser.");
+        const saveB = mk("Save Session", "#b45309", "Save a hard copy of this session so you can come back later and continue your work.");
+        const discB = mk("Discard", "#b91c1c", "Delete this session permanently.");
         resumeB.onclick = async () => {
           if (S.entries.length) {
             const r = await dialog({ title: "Resume session?", message: "Your current session will stay saved in this list so you can come back to it.", buttons: [{ label: "Resume", value: true, primary: true }, { label: "Cancel", value: false }] });
@@ -2910,39 +3190,41 @@
           if (S.settings.autoMeta && S.entries.length) fetchMetadata(true);
           renderBanner();
         };
-        saveB.onclick = () => { bannerDismissed.add(rec.id); renderBanner(); };
-        expB.onclick = () => downloadText("nexidia_unpack_session_" + stamp() + ".txt", sessionFile(rec.data));
+        keepB.onclick = () => { bannerDismissed.add(rec.id); renderBanner(); };
+        saveB.onclick = () => downloadText("nexidia_unpack_session_" + stamp() + ".txt", sessionFile(rec.data));
         discB.onclick = async () => {
           const r = await dialog({ title: "Discard session?", message: "This session will be deleted permanently.", buttons: [{ label: "Discard", value: true, primary: true }, { label: "Cancel", value: false }] });
           if (!r.value) return;
           await dbDel(rec.id);
           renderBanner();
         };
-        [resumeB, saveB, expB, discB].forEach((b) => row.appendChild(b));
+        [resumeB, keepB, saveB, discB].forEach((b) => row.appendChild(b));
         bannerWrap.appendChild(row);
       }
     }
-
     function teardown() {
       closed = true;
+      editing = null;
       clearTimeout(saveTimer);
       if (typeof stopPlayer === "function") { try { stopPlayer(); } catch (_) {} }
       removeDragGhost();
       closePopovers();
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onOutsideEdit, true);
       document.querySelectorAll("[data-unpack-prompt]").forEach((p) => p.remove());
       try { modal.remove(); } catch (_) {}
       try { stickyClose.remove(); } catch (_) {}
     }
     async function requestClose(toMenu) {
+      if (editing) commitEdit();
       if (S.entries.length) {
         const r = await dialog({
           title: "Close this session?",
-          message: "Closing clears this session. Export Session first if you want to pick it back up later.",
-          buttons: [{ label: "Export & Close", value: "export", primary: true }, { label: "Close", value: "close" }, { label: "Cancel", value: null }]
+          message: "Closing clears this session. Use Save Session first if you want to pick it back up later.",
+          buttons: [{ label: "Save & Close", value: "save", primary: true, title: "Save a hard copy of this session, then close." }, { label: "Close", value: "close" }, { label: "Cancel", value: null }]
         });
         if (!r.value) return;
-        if (r.value === "export") exportSession();
+        if (r.value === "save") saveSessionFile();
       }
       const id = S.sessionId;
       teardown();
@@ -2952,7 +3234,6 @@
         if (typeof fn === "function") fn();
       }
     }
-
     stickyClose.onclick = () => requestClose(false);
     menuBtn.onclick = () => requestClose(true);
     settingsBtn.onclick = () => openSettings();
@@ -2967,9 +3248,9 @@
     sheetInput.onchange = () => { const f = sheetInput.files && sheetInput.files[0]; sheetInput.value = ""; if (f) importSpreadsheet(f); };
     exportExcelBtn.onclick = () => exportExcel();
     exportTranscriptsBtn.onclick = () => exportTranscripts();
-    exportSessionBtn.onclick = () => { if (!S.entries.length) { toast("Nothing to export yet.", "#6b7280"); return; } exportSession(); };
-    importSessionBtn.onclick = () => sessionInput.click();
-    sessionInput.onchange = () => { const f = sessionInput.files && sessionInput.files[0]; sessionInput.value = ""; if (f) importSessionFile(f); };
+    saveSessionBtn.onclick = () => { if (!S.entries.length) { toast("Nothing to save yet.", "#6b7280"); return; } saveSessionFile(); };
+    loadSessionBtn.onclick = () => sessionInput.click();
+    sessionInput.onchange = () => { const f = sessionInput.files && sessionInput.files[0]; sessionInput.value = ""; if (f) loadSessionFile(f); };
     removeSelectedBtn.onclick = async () => {
       const r = await dialog({ title: "Remove rows?", message: `Remove ${selected.size.toLocaleString()} selected row${selected.size === 1 ? "" : "s"} from the grid?`, buttons: [{ label: "Remove", value: true, primary: true }, { label: "Cancel", value: false }] });
       if (r.value) removeRows([...selected]);
@@ -2984,9 +3265,8 @@
       selected.clear();
       rerender();
     };
-    clickModeBtn.onclick = () => setClickMode(S.grid.clickMode === "select" ? "play" : "select");
+    clickModeBtn.onclick = () => setClickMode(CLICK_ORDER[(CLICK_ORDER.indexOf(S.grid.clickMode) + 1) % CLICK_ORDER.length]);
     globalSearchBox.oninput = () => { S.grid.globalFilter = globalSearchBox.value || ""; rerender(); };
-
     (async () => {
       if (!api.getShared("metadataFields")) {
         try {
@@ -3082,6 +3362,5 @@
     refreshAll();
     renderBanner();
   }
-
   api.registerTool({ id: "unpack", label: "Unpack CoPilot Outputs", open: openUnpack });
 })();
