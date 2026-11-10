@@ -1,4 +1,4 @@
-//[Last Update: 12:19 AM 11/10/2026]
+//[Last Update: 9:23 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
 const api = window.NEXIDIA_TOOLS;
@@ -744,6 +744,20 @@ function openPlayerPane(gridCard, onClose, options) {
     else if (e.shiftKey && e.key === "ArrowDown") { e.preventDefault(); applySpeed(Math.max(speedIdx - 1, 0)); }
   };
   document.addEventListener("keydown", onSpeedKeys);
+  //##> PLAYER SHORTCUTS: Ctrl+Left / Ctrl+Right press Prev / Next (tag or call). A module that handles its own
+  //##> shortcuts (like Unpack) opens the player with shortcuts: false.
+  const onNavKeys = (e) => {
+    if (opts.shortcuts === false || closedPlayer) return;
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    const btn = e.key === "ArrowLeft" ? els.prevNavBtn : els.nextNavBtn;
+    if (btn.style.display === "none") return;
+    e.preventDefault();
+    btn.click();
+  };
+  document.addEventListener("keydown", onNavKeys);
   /* ── Transcript scroll: breaks auto-scroll, snaps back after 5s ── */
   els.transcriptPane.addEventListener("wheel", () => {
     if (autoScrollEnabled) {
@@ -1672,6 +1686,7 @@ function openPlayerPane(gridCard, onClose, options) {
     document.removeEventListener("mousemove", onDocMouseMove);
     document.removeEventListener("mouseup", onDocMouseUp);
     document.removeEventListener("keydown", onSpeedKeys);
+    document.removeEventListener("keydown", onNavKeys);
     document.removeEventListener("keydown", onFindKey);
     window.removeEventListener("resize", onResize);
     if (scrollSnapTimer) clearTimeout(scrollSnapTimer);
