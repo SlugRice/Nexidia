@@ -1,4 +1,4 @@
-//[Last Update: 10:59 AM 11/10/2026]
+//[Last Update: 11:04 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -984,8 +984,8 @@
       body.appendChild(line(label("When a field opens for editing", "Start on a new line: the cursor waits on an empty line under the existing values, ready for a new one. Start on the last value: the cursor goes to the end of the last value already in the field."), select([["newline", "Start on a new line"], ["last", "Start on the last value"]], draft.tagEditCaret === "last" ? "last" : "newline", (v) => { draft.tagEditCaret = v; })));
       const doneSel = select([["ask", "Ask me"], ["exit", "Exit editing mode"], ["stay", "Stay in timestamp mode"]], allDonePref(), (v) => { try { localStorage.setItem(LS_ALL_DONE, v); } catch (_) {} });
       body.appendChild(line(label("When every timestamp is complete", "What happens once the last timestamp is marked complete. This one is saved in this browser, not just this session."), doneSel));
-      body.appendChild(line(label("Pause automatically", "Pause playback near the next tag (using the Timestamp Buffer on the General tab) or near the end of the call while you're still editing."), check(draft.tagAutoPause !== false, (v) => { draft.tagAutoPause = v; })));
-      body.appendChild(line(label("Also pause for incomplete tags", "Pause near the next tag whenever the current tag isn't marked complete, even if you aren't editing."), check(!!draft.tagPauseIncomplete, (v) => { draft.tagPauseIncomplete = v; })));
+      body.appendChild(line(label("Pause automatically", "Pause playback near the end of the call if you're still editing, so it doesn't move on to the next call."), check(draft.tagAutoPause !== false, (v) => { draft.tagAutoPause = v; })));
+      body.appendChild(line(label("Also pause for incomplete tags", "Also pause near the end of the call whenever the current tag isn't marked complete, even if you aren't editing."), check(!!draft.tagPauseIncomplete, (v) => { draft.tagPauseIncomplete = v; })));
       body.appendChild(line(label("Unhide hidden columns while their tag is active", "If a tag's column is hidden, show it while that tag is active, then hide it again."), check(!!draft.tagUnhide, (v) => { draft.tagUnhide = v; })));
     }
     function colPrefs() {
