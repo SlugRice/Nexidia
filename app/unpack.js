@@ -1,4 +1,4 @@
-//[Last Update: 9:23 AM 11/10/2026]
+//[Last Update: 12:40 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -37,15 +37,6 @@
   const LS_TS_HEIGHT = "nexidia_unpack_ts_height";
   const LS_GRID_HEIGHT = "nexidia_unpack_grid_height";
   const LS_ALL_DONE = "nexidia_unpack_all_done";
-  const LS_EDITOR_POS = "nexidia_unpack_editor_pos";
-  const DEFAULT_STEPS = [
-    "Build your prompt: open the PromptBuilder below, paste all of it into a new CoPilot chat, describe your job at the bottom under \"Input from Analyst\", and work through its questions until it hands you a finished prompt.",
-    "Run your batches: send each transcript batch file with that prompt in its own fresh CoPilot chat.",
-    "Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. Rows are added to the grid as you go.",
-    "Metadata from Nexidia is added using your primary key (Trans_Id by default). If your columns look like Nexidia's, you'll be asked whether to merge them. Adjust duplicates, delimiters, and highlights in Unpack Settings.",
-    "Review your rows and play calls. To fix a value, switch On Click to Edit Field and click the cell. If your outputs have timestamps, use Play All Timestamps to work through them one at a time. Use Save Session to keep a copy you can load later and keep working.",
-    "When you're finished, click Export to Excel to save your work to an Excel sheet."
-  ];
   const STRIP_ROW_H = 26;
   const STRIP_ROWS_COLLAPSED = 2;
   const STRIP_ROWS_EXPANDED_ABOVE = 4;
@@ -552,170 +543,12 @@
     for (let i = 0; i < end; i++) if (hasKey(rows[i])) return i;
     return -1;
   }
-  //##> NEXIDIA TIMES: Duration (mediaFileDuration) and Hold Time (UDFInt4) come from Nexidia in milliseconds,
-  //##> and spreadsheet imports are converted to milliseconds too, so export always divides by 1000.
-  function msToSeconds(raw) {
-    const s = String(raw == null ? "" : raw).trim();
-    const n = Number(s);
-    if (!s || !isFinite(n) || n === 0) return null;
-    return n / 1000;
-  }
-  //##> XLSX EXPORT: Builds a real .xlsx file in the browser with no outside library. The workbook has one
-  //##> sheet with inline strings, a bold frozen header row, column widths taken from the grid, and number
-  //##> formats from XLSX_FORMATS. The zip is written with no compression (stored), which Excel opens fine.
-  const XLSX_FORMATS = {
-    dt: "m/d/yyyy h:mm",
-    d: "m/d/yyyy",
-    dpad: "mm/dd/yyyy",
-    d2: "m/d/yy",
-    dpad2: "mm/dd/yy",
-    diso: "yyyy-mm-dd",
-    dur: "[h]:mm:ss",
-    int: "0",
-    dec2: "0.00",
-    dec2c: "#,##0.00",
-    thou: "#,##0",
-    cur: "$#,##0.00",
-    cur0: "$#,##0",
-    gen: "General"
-  };
-  const XLSX_MAX_TEXT = 32767;
-  const CRC_TABLE = (() => {
-    const t = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      t[n] = c >>> 0;
-    }
-    return t;
-  })();
-  function crc32(bytes) {
-    let c = 0xffffffff;
-    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  }
-  function zipStore(files) {
-    const enc = new TextEncoder();
-    const now = new Date();
-    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
-    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
-    const parts = [];
-    const central = [];
-    let offset = 0;
-    for (const f of files) {
-      const name = enc.encode(f.name);
-      const data = typeof f.data === "string" ? enc.encode(f.data) : f.data;
-      const crc = crc32(data);
-      const local = new DataView(new ArrayBuffer(30));
-      local.setUint32(0, 0x04034b50, true);
-      local.setUint16(4, 20, true);
-      local.setUint16(6, 0x0800, true);
-      local.setUint16(8, 0, true);
-      local.setUint16(10, dosTime, true);
-      local.setUint16(12, dosDate, true);
-      local.setUint32(14, crc, true);
-      local.setUint32(18, data.length, true);
-      local.setUint32(22, data.length, true);
-      local.setUint16(26, name.length, true);
-      local.setUint16(28, 0, true);
-      parts.push(new Uint8Array(local.buffer), name, data);
-      const cen = new DataView(new ArrayBuffer(46));
-      cen.setUint32(0, 0x02014b50, true);
-      cen.setUint16(4, 20, true);
-      cen.setUint16(6, 20, true);
-      cen.setUint16(8, 0x0800, true);
-      cen.setUint16(10, 0, true);
-      cen.setUint16(12, dosTime, true);
-      cen.setUint16(14, dosDate, true);
-      cen.setUint32(16, crc, true);
-      cen.setUint32(20, data.length, true);
-      cen.setUint32(24, data.length, true);
-      cen.setUint16(28, name.length, true);
-      cen.setUint16(30, 0, true);
-      cen.setUint16(32, 0, true);
-      cen.setUint16(34, 0, true);
-      cen.setUint16(36, 0, true);
-      cen.setUint32(38, 0, true);
-      cen.setUint32(42, offset, true);
-      central.push(new Uint8Array(cen.buffer), name);
-      offset += 30 + name.length + data.length;
-    }
-    const cenSize = central.reduce((n, p) => n + p.length, 0);
-    const end = new DataView(new ArrayBuffer(22));
-    end.setUint32(0, 0x06054b50, true);
-    end.setUint16(8, files.length, true);
-    end.setUint16(10, files.length, true);
-    end.setUint32(12, cenSize, true);
-    end.setUint32(16, offset, true);
-    return new Blob(parts.concat(central, [new Uint8Array(end.buffer)]), { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  }
-  function xmlEsc(s) {
-    return String(s == null ? "" : s)
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "")
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-  function colLetter(i) {
-    let s = "";
-    i += 1;
-    while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); }
-    return s;
-  }
-  function buildXlsx(sheetName, headers, rowsData, widthsPx) {
-    const fmtKeys = Object.keys(XLSX_FORMATS).filter((k) => k !== "gen");
-    const styleIndex = { gen: 0 };
-    fmtKeys.forEach((k, i) => { styleIndex[k] = i + 2; });
-    const numFmts = fmtKeys.map((k, i) => `<numFmt numFmtId="${164 + i}" formatCode="${xmlEsc(XLSX_FORMATS[k])}"/>`).join("");
-    const xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>', '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>']
-      .concat(fmtKeys.map((k, i) => `<xf numFmtId="${164 + i}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`)).join("");
-    const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      `<numFmts count="${fmtKeys.length}">${numFmts}</numFmts>` +
-      '<fonts count="2"><font><sz val="10"/><name val="Aptos Narrow"/><family val="2"/></font><font><b/><sz val="10"/><name val="Aptos Narrow"/><family val="2"/></font></fonts>' +
-      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
-      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
-      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-      `<cellXfs count="${fmtKeys.length + 2}">${xfs}</cellXfs>` +
-      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
-      "</styleSheet>";
-    const lastCol = colLetter(Math.max(0, headers.length - 1));
-    const cols = headers.length ? "<cols>" + headers.map((_, i) => {
-      const w = Math.max(8, Math.min(80, Math.round(((widthsPx && widthsPx[i]) || 150) / 7)));
-      return `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`;
-    }).join("") + "</cols>" : "";
-    const out = [];
-    const strCell = (ref, v, s) => {
-      const t = String(v == null ? "" : v).slice(0, XLSX_MAX_TEXT);
-      return `<c r="${ref}" t="inlineStr"${s ? ` s="${s}"` : ""}><is><t xml:space="preserve">${xmlEsc(t)}</t></is></c>`;
-    };
-    out.push('<row r="1">' + headers.map((h, i) => strCell(colLetter(i) + "1", h, 1)).join("") + "</row>");
-    rowsData.forEach((cells, ri) => {
-      const r = ri + 2;
-      const xml = [];
-      cells.forEach((cell, ci) => {
-        if (!cell) return;
-        const ref = colLetter(ci) + r;
-        if (cell.t === "n" && isFinite(cell.v)) xml.push(`<c r="${ref}" s="${styleIndex[cell.cls] || 0}"><v>${cell.v}</v></c>`);
-        else if (cell.v !== "" && cell.v != null) xml.push(strCell(ref, cell.v, 0));
-      });
-      out.push(`<row r="${r}">${xml.join("")}</row>`);
-    });
-    const sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      `<dimension ref="A1:${lastCol}${rowsData.length + 1}"/>` +
-      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>' +
-      '<sheetFormatPr defaultRowHeight="15"/>' + cols +
-      `<sheetData>${out.join("")}</sheetData>` +
-      "</worksheet>";
-    const safeName = xmlEsc(String(sheetName || "Sheet1").replace(/[\\\/\?\*\[\]:]/g, " ").slice(0, 31) || "Sheet1");
-    const files = [
-      { name: "[Content_Types].xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
-      { name: "_rels/.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
-      { name: "xl/workbook.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${safeName}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
-      { name: "xl/_rels/workbook.xml.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
-      { name: "xl/styles.xml", data: styles },
-      { name: "xl/worksheets/sheet1.xml", data: sheet }
-    ];
-    return zipStore(files);
+  function secondsFromMillisish(raw) {
+    const n = Number(String(raw == null ? "" : raw).trim());
+    if (!isFinite(n) || !String(raw).trim() || String(raw).trim() === "0") return null;
+    if (n >= 1000 && n % 1000 === 0) return n / 1000;
+    if (n > 86400 * 1000) return Math.round(n / 1000);
+    return n;
   }
   let dbPromise = null;
   function db() {
@@ -2074,25 +1907,10 @@
       }
       return tbody.querySelector(`td[data-r="${ed.ri}"][data-c="${ed.ci}"]`);
     }
-    function savedEditorPos() {
-      try {
-        const v = JSON.parse(localStorage.getItem(LS_EDITOR_POS) || "null");
-        return v && isFinite(v.left) && isFinite(v.top) ? v : null;
-      } catch (_) { return null; }
-    }
     function positionEditor() {
       if (!editing || !editing.panel) return;
       const a = editorAnchor(editing);
       const p = editing.panel;
-      const pos = savedEditorPos();
-      if (pos) {
-        p.style.visibility = "visible";
-        if (!p.style.width) p.style.width = "320px";
-        const w = p.offsetWidth, h = p.offsetHeight;
-        p.style.left = Math.max(4, Math.min(pos.left, window.innerWidth - w - 4)) + "px";
-        p.style.top = Math.max(4, Math.min(pos.top, window.innerHeight - h - 4)) + "px";
-        return;
-      }
       if (!a) { p.style.visibility = "hidden"; return; }
       const r = a.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) { p.style.visibility = "hidden"; return; }
@@ -2123,47 +1941,14 @@
       const panel = el("div", { style: `position:fixed;z-index:1000006;background:#fff;border:2px solid ${accent};border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.35);padding:6px;box-sizing:border-box;max-height:300px;overflow-y:auto;visibility:hidden;` + FONT });
       panel.dataset.nxEditor = "1";
       panel.addEventListener("mousedown", (e) => e.stopPropagation());
-      //##> EDITOR POSITION: The editor can be dragged by its header so it doesn't cover nearby cells. The spot is
-      //##> saved in this browser and used for every edit after that. Double-clicking the header puts it back
-      //##> over the cell being edited.
-      const single = !prose && isSingleField(f);
-      const head = el("div", { style: "display:flex;flex-direction:column;gap:1px;margin:0 2px 5px;cursor:move;user-select:none;", title: "Drag to move this box. Double-click to put it back over the cell." });
-      const headTop = el("div", { style: "display:flex;align-items:flex-start;gap:6px;" });
-      headTop.appendChild(el("span", { style: "font-size:12px;font-weight:700;color:#111827;flex:1;min-width:0;white-space:normal;word-break:break-word;line-height:1.3;" }, baseHeader(f)));
-      headTop.appendChild(el("span", { style: "font-size:12px;color:#9ca3af;flex-shrink:0;line-height:1.3;" }, "\u2725"));
-      head.appendChild(headTop);
-      head.appendChild(el("span", { style: "font-size:10px;color:#6b7280;" }, prose ? "Enter saves \u00B7 Shift+Enter new line \u00B7 Esc cancels" : (single ? "One value only \u00B7 Enter saves \u00B7 Esc cancels" : "Enter saves \u00B7 Tab adds a line \u00B7 Esc cancels")));
-      head.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        const r0 = panel.getBoundingClientRect();
-        const dx = e.clientX - r0.left, dy = e.clientY - r0.top;
-        const keep = document.activeElement;
-        const move = (ev) => {
-          panel.style.left = Math.max(4, Math.min(ev.clientX - dx, window.innerWidth - panel.offsetWidth - 4)) + "px";
-          panel.style.top = Math.max(4, Math.min(ev.clientY - dy, window.innerHeight - panel.offsetHeight - 4)) + "px";
-        };
-        const up = () => {
-          document.removeEventListener("mousemove", move);
-          document.removeEventListener("mouseup", up);
-          try { localStorage.setItem(LS_EDITOR_POS, JSON.stringify({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) })); } catch (_) {}
-          if (keep && panel.contains(keep)) keep.focus();
-        };
-        document.addEventListener("mousemove", move);
-        document.addEventListener("mouseup", up);
-      });
-      head.addEventListener("dblclick", () => {
-        try { localStorage.removeItem(LS_EDITOR_POS); } catch (_) {}
-        positionEditor();
-        const t = ed.newInputs[ed.newInputs.length - 1] || ed.input;
-        if (t) t.focus();
-      });
+      const head = el("div", { style: "display:flex;align-items:center;gap:6px;font-size:10px;color:#6b7280;margin:0 2px 5px;" });
+      head.appendChild(el("span", { style: "font-weight:700;color:#111827;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, baseHeader(f)));
+      head.appendChild(el("span", {}, prose ? "Enter saves \u00B7 Shift+Enter new line \u00B7 Esc cancels" : "Enter saves \u00B7 Tab adds a line \u00B7 Esc cancels"));
       panel.appendChild(head);
       const openIss = S.settings.showFlags ? cellIssues(row, f) : [];
       if (openIss.length) panel.appendChild(el("div", { style: "font-size:11px;color:#b91c1c;background:#fef2f2;border-radius:4px;padding:4px 6px;margin:0 0 5px;line-height:1.4;" }, openIss.map((i) => "\u26A0 " + i.message).join("\n")));
-      const ed = { rowId: row.id, field: f, ri: opts.ri, ci: opts.ci, where: opts.where || "grid", panel, tagId: opts.tagId || null, prose, single, delim, orig: raw, tokens: [], newInputs: [], input: null };
+      const ed = { rowId: row.id, field: f, ri: opts.ri, ci: opts.ci, where: opts.where || "grid", panel, tagId: opts.tagId || null, prose, delim, orig: raw, tokens: [], newInputs: [], input: null };
       const keyHandler = (e, inp) => {
-        if (isNavShortcut(e)) { e.preventDefault(); e.stopPropagation(); shortcutNav(e.key === "ArrowLeft" ? -1 : 1); return; }
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); return; }
         if (e.key === "Enter" && !(prose && e.shiftKey)) {
           e.preventDefault(); e.stopPropagation();
@@ -2173,7 +1958,7 @@
         if (e.key === "Tab") {
           e.preventDefault(); e.stopPropagation();
           if (e.shiftKey) { finishEditor("left"); return; }
-          if (prose || single || !inp.value.trim()) { finishEditor("right"); return; }
+          if (prose || !inp.value.trim()) { finishEditor("right"); return; }
           const emptyNew = ed.newInputs.find((x) => x !== inp && !x.value.trim());
           if (emptyNew) { emptyNew.focus(); return; }
           addNewLine(true);
@@ -2194,8 +1979,7 @@
         plusBtn.onclick = () => addNewLine(true);
         plusRow.appendChild(plusBtn);
         const lineStyle = "flex:1;min-width:0;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:4px;padding:4px 8px;font-size:12px;outline:none;color:#111827;background:#f9fafb;" + FONT;
-        //##> ZERO CELLS: A 0 placeholder isn't listed as a value, so whatever the user types replaces it.
-        splitTokens(raw, delim).filter((v) => !isZeroish(v)).forEach((v, i) => {
+        splitTokens(raw, delim).forEach((v, i) => {
           const wrap = el("div", { style: "display:flex;align-items:center;gap:4px;border-radius:4px;" });
           const inp = el("input", { type: "text", value: v, style: lineStyle, title: "Click to change this value" });
           inp.addEventListener("focus", () => { inp.style.background = "#fff"; inp.style.borderColor = "#93c5fd"; });
@@ -2248,9 +2032,9 @@
         }
         panel.appendChild(list);
         panel.appendChild(newWrap);
-        if (!single) panel.appendChild(plusRow);
-        const first = single && ed.tokens.length ? null : addNewLine(false);
-        ed.input = first || ed.tokens[ed.tokens.length - 1].input;
+        panel.appendChild(plusRow);
+        const first = addNewLine(false);
+        ed.input = first;
         ed.addNewLine = addNewLine;
       }
       editing = ed;
@@ -2260,7 +2044,7 @@
       if (ed.where === "strip") renderStrip();
       positionEditor();
       let focusEl = ed.input;
-      if (!prose && (single || editorPrefCaret() === "last") && ed.tokens.length) focusEl = ed.tokens[ed.tokens.length - 1].input;
+      if (!prose && editorPrefCaret() === "last" && ed.tokens.length) focusEl = ed.tokens[ed.tokens.length - 1].input;
       focusEl.focus();
       try { const n = focusEl.value.length; focusEl.setSelectionRange(n, n); } catch (_) {}
     }
@@ -2293,7 +2077,7 @@
         keys.add(k);
         kept.push(v);
       }
-      const unchanged = kept.join(ed.delim) === splitTokens(ed.orig, ed.delim).filter((v) => !isZeroish(v)).join(ed.delim);
+      const unchanged = kept.join(ed.delim) === splitTokens(ed.orig, ed.delim).join(ed.delim);
       return { value: unchanged ? ed.orig : kept.join(ed.delim), dupes };
     }
     //##> TYPED EDITS: When a user saves an edit in a Date, Currency, or Number column, new values are put into
@@ -2329,7 +2113,7 @@
       const ci = visFields().indexOf(ed.field);
       if (ri >= 0 && ci >= 0) startEdit(ri, ci, { tagId: ed.tagId });
     }
-    async function askBadValues(ed, norm) {
+    async function askBadValues(ed, norm, after) {
       const list = norm.bad.map((b) => `"${b}"`).join(", ");
       const typeName = TYPE_LABELS[norm.type] || norm.type;
       const r = await dialog({
@@ -2340,6 +2124,7 @@
         buttons: [{ label: "Edit Again", value: "edit", primary: true }, { label: "Keep It", value: "keep" }, { label: "Remove It", value: "remove" }]
       });
       if (r.checked) { S.formatAllow[ed.field] = true; scheduleSave(); }
+      if (closed) return;
       if (r.value === "remove") {
         const badKeys = new Set(norm.bad.map(tokenKey));
         const kept = splitTokens(norm.value, ed.delim).filter((x) => !badKeys.has(tokenKey(x)));
@@ -2347,34 +2132,11 @@
         tsCache = null;
         renderRows();
         if (tsActive) renderStrip();
-        return "go";
+        if (after) after();
+        return;
       }
-      return r.value === "keep" ? "go" : "edit";
-    }
-    //##> SAVE CHECKS: After an edit is saved, the cell is checked against its column's checks. If anything
-    //##> fails, a popup lists the problems right away with Edit Again, Keep It, or Ignore. Timestamp tags
-    //##> aren't marked complete until it's answered.
-    async function askIssues(ed) {
-      if (!S.settings.showFlags) return "go";
-      const row = rows.find((r) => r.id === ed.rowId);
-      if (!row) return "go";
-      issueCache = null;
-      const iss = cellIssues(row, ed.field);
-      if (!iss.length) return "go";
-      const r = await dialog({
-        title: `Possible issue in ${baseHeader(ed.field)}`,
-        danger: true,
-        message: iss.map((i) => "\u26A0 " + i.message).join("\n"),
-        buttons: [{ label: "Edit Again", value: "edit", primary: true }, { label: "Keep It", value: "keep", title: "Keep the value. The cell stays flagged." }, { label: "Ignore", value: "ignore", title: "Keep the value and stop flagging these problems in this cell." }]
-      });
-      if (r.value === "ignore") {
-        for (const i of iss) S.issueIgnore.items[i.key] = true;
-        scheduleSave();
-        invalidateIssues();
-        renderRows();
-        if (tsActive) renderStrip();
-      }
-      return r.value === "edit" ? "edit" : "go";
+      if (r.value === "keep") { if (after) after(); return; }
+      reopenEditor(ed);
     }
     function commitEdit(after) {
       if (!editing) return false;
@@ -2386,21 +2148,14 @@
       const changed = applyEdit(ed.rowId, ed.field, norm.value);
       renderRows();
       if (ed.where === "strip") { stripExpanded = false; renderStrip(); }
-      const needBad = norm.bad.length && !S.formatAllow[ed.field];
-      if (!needBad && !ev.dupes.length && !changed) {
-        if (after) after();
+      if (norm.bad.length && !S.formatAllow[ed.field]) {
+        askBadValues(ed, norm, after);
         return changed;
       }
-      (async () => {
-        if (needBad && (await askBadValues(ed, norm)) === "edit") { if (!closed) reopenEditor(ed); return; }
-        if (closed) return;
-        if (ev.dupes.length) {
-          await dialog({ title: "Already in this field", message: `${ev.dupes.length === 1 ? `"${ev.dupes[0]}" is` : ev.dupes.map((d) => `"${d}"`).join(", ") + " are"} already in ${baseHeader(ed.field)}, so ${ev.dupes.length === 1 ? "it wasn't" : "they weren't"} added again.` });
-        }
-        if (closed) return;
-        if (changed && (await askIssues(ed)) === "edit") { if (!closed) reopenEditor(ed); return; }
-        if (!closed && after) after();
-      })();
+      if (ev.dupes.length) {
+        dialog({ title: "Already in this field", message: `${ev.dupes.length === 1 ? `"${ev.dupes[0]}" is` : ev.dupes.map((d) => `"${d}"`).join(", ") + " are"} already in ${baseHeader(ed.field)}, so ${ev.dupes.length === 1 ? "it wasn't" : "they weren't"} added again.` });
+      }
+      if (after) after();
       return changed;
     }
     function cancelEdit() {
@@ -2736,25 +2491,14 @@
     modal.appendChild(card);
     document.body.appendChild(modal);
     document.body.appendChild(stickyClose);
+    instrBody.appendChild(el("div", {}, "1. Build your prompt: open the PromptBuilder below, paste all of it into a new CoPilot chat, describe your job at the bottom under \"Input from Analyst\", and work through its questions until it hands you a finished prompt."));
+    instrBody.appendChild(el("div", {}, "2. Run your batches: send each transcript batch file with that prompt in its own fresh CoPilot chat."));
+    instrBody.appendChild(el("div", {}, "3. Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. Rows are added to the grid as you go."));
+    instrBody.appendChild(el("div", {}, "4. Metadata from Nexidia is added using your primary key (Trans_Id by default). If your columns look like Nexidia's, you'll be asked whether to merge them. Adjust duplicates, delimiters, and highlights in Unpack Settings."));
+    instrBody.appendChild(el("div", {}, "5. Review your rows and play calls. To fix a value, switch On Click to Edit Field and click the cell. If your outputs have timestamps, use Play All Timestamps to work through them one at a time. Use Save Session to keep a copy you can load later and keep working."));
+    instrBody.appendChild(el("div", {}, "6. When you're finished, click Export to Excel to save your work to an Excel sheet."));
     const promptBtn = el("button", { style: btnStyle("#1d4ed8", "margin-top:6px;") }, "View PromptBuilder");
-    //##> REPORT INSTRUCTIONS: A report can replace the Instructions steps and the prompt button with its own
-    //##> (preset.instructions, preset.promptUrl, preset.promptLabel). Steps are numbered automatically.
-    function promptInfo() {
-      const p = S.preset || {};
-      const url = p.promptUrl || PROMPT_URL;
-      const label = p.promptLabel || "PromptBuilder";
-      const file = (url.split("/").pop() || "Prompt.txt").split("?")[0];
-      return { url, label, file };
-    }
-    function renderInstructions() {
-      instrBody.innerHTML = "";
-      const steps = S.preset && Array.isArray(S.preset.instructions) && S.preset.instructions.length ? S.preset.instructions : DEFAULT_STEPS;
-      steps.forEach((t, i) => instrBody.appendChild(el("div", {}, `${i + 1}. ${t}`)));
-      const pi = promptInfo();
-      promptBtn.textContent = S.preset && S.preset.promptLabel ? pi.label : "View PromptBuilder";
-      instrBody.appendChild(promptBtn);
-    }
-    renderInstructions();
+    instrBody.appendChild(promptBtn);
     function setInstructions(open) {
       instrBody.style.display = open ? "block" : "none";
       instrHead.textContent = (open ? "\u25BE" : "\u25B8") + " Instructions";
@@ -2766,8 +2510,7 @@
       const panel = el("div", { style: "position:fixed;top:70px;right:24px;width:480px;max-width:92vw;height:70vh;background:#fff;border:1px solid #d1d5db;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.3);z-index:1000010;display:flex;flex-direction:column;padding:14px;" + FONT });
       panel.dataset.unpackPrompt = "1";
       const head = el("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:8px;" });
-      const pi = promptInfo();
-      head.appendChild(el("div", { style: "font-size:14px;font-weight:700;color:#111827;flex:1;" }, pi.label));
+      head.appendChild(el("div", { style: "font-size:14px;font-weight:700;color:#111827;flex:1;" }, "PromptBuilder"));
       const copyBtn = el("button", { style: btnStyle("#22c55e", "color:#16a34a;") }, "Copy");
       const dlBtn = el("button", { style: btnStyle("#6366f1") }, "Download");
       const xBtn = el("button", { style: btnStyle("#9ca3af", "color:#374151;") }, "Close");
@@ -2782,18 +2525,18 @@
       xBtn.onclick = () => panel.remove();
       let text = "";
       try {
-        const res = await fetch(pi.url + (pi.url.includes("?") ? "&" : "?") + "v=" + Date.now(), { credentials: "omit", cache: "no-store" });
+        const res = await fetch(PROMPT_URL + "?v=" + Date.now(), { credentials: "omit", cache: "no-store" });
         if (!res.ok) throw new Error(res.status);
         text = await res.text();
         ta.value = text;
       } catch (_) {
-        ta.value = `The ${pi.label} couldn't be loaded. Check your connection and try again.`;
+        ta.value = "The PromptBuilder couldn't be loaded. Check your connection and try again.";
       }
       copyBtn.onclick = () => {
         if (!text) return;
-        navigator.clipboard.writeText(text).then(() => toast(pi.label + " copied")).catch(() => { ta.select(); document.execCommand("copy"); toast(pi.label + " copied"); });
+        navigator.clipboard.writeText(text).then(() => toast("PromptBuilder copied")).catch(() => { ta.select(); document.execCommand("copy"); toast("PromptBuilder copied"); });
       };
-      dlBtn.onclick = () => { if (text) downloadText(pi.file, text); };
+      dlBtn.onclick = () => { if (text) downloadText("PromptBuilder.txt", text); };
     }
     function renderNotices() {
       noticeWrap.innerHTML = "";
@@ -3329,14 +3072,8 @@
     function isUnique(f) {
       return membersOf(f).some((m) => S.checks[m] && S.checks[m].unique);
     }
-    //##> ONE VALUE ONLY: A column marked single (Attributes, or single: true from a report) holds one value.
-    //##> The editor won't offer an extra line once a value is there, and a cell that still ends up with
-    //##> stacked values (from a paste) is flagged.
-    function isSingleField(f) {
-      return membersOf(f).some((m) => m.startsWith("j:") && colById(m.slice(2)) && colById(m.slice(2)).single);
-    }
     function hasChecks(f) {
-      return f !== "__conf__" && (isUnique(f) || isSingleField(f) || rulesFor(f).length > 0);
+      return f !== "__conf__" && (isUnique(f) || rulesFor(f).length > 0);
     }
     function checkTokenBlank(f, t) {
       if (isEmptyValue(t) || /^0+$/.test(String(t).trim())) return true;
@@ -3344,7 +3081,12 @@
       return false;
     }
     function liveTokens(row, f) {
-      return cellParts(row, f).tokens.filter((t) => !checkTokenBlank(f, t));
+      const delim = delimFor(f);
+      const out = [];
+      for (const t of cellParts(row, f).tokens) {
+        for (const v of splitTokens(t, delim)) if (!checkTokenBlank(f, v)) out.push(v);
+      }
+      return out;
     }
     function dupMap(f) {
       const ic = ensureIssueCache();
@@ -3455,10 +3197,6 @@
       if (hasChecks(f)) {
         const header = baseHeader(f);
         const live = liveTokens(row, f);
-        if (live.length > 1 && isSingleField(f) && !S.issueIgnore.rules[f + "|single"]) {
-          const custom = presetMessage("single");
-          out.push({ key: issueKey(row.id, f, "single", live.join("|")), rowId: row.id, field: f, ruleId: "single", token: "", message: custom ? fillMessage(custom, live.join(", "), header) : `${header} should only have one value. It has ${live.length}: ${live.join(", ")}.` });
-        }
         for (const r of rulesFor(f)) {
           if (S.issueIgnore.rules[f + "|" + r.id]) continue;
           if (r.type === "required") {
@@ -3579,8 +3317,8 @@
       const ri = view.findIndex((r) => r.id === iss.rowId);
       info.appendChild(el("div", { style: "font-size:11px;color:#991b1b;font-weight:700;" }, `Issue ${review.pos + 1} of ${n} \u00B7 Row ${ri + 1} \u00B7 ${baseHeader(iss.field)}${iss.token ? ` \u00B7 "${iss.token}"` : ""}`));
       info.appendChild(el("div", { style: "font-size:12px;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", title: iss.message }, iss.message));
-      reviewBar.appendChild(b("\u25C0", "Previous issue (Ctrl+\u2190)", () => { review.pos = (review.pos - 1 + n) % n; goToIssue(); }));
-      reviewBar.appendChild(b("\u25B6", "Next issue (Ctrl+\u2192)", () => { review.pos = (review.pos + 1) % n; goToIssue(); }));
+      reviewBar.appendChild(b("\u25C0", "Previous issue", () => { review.pos = (review.pos - 1 + n) % n; goToIssue(); }));
+      reviewBar.appendChild(b("\u25B6", "Next issue", () => { review.pos = (review.pos + 1) % n; goToIssue(); }));
       reviewBar.appendChild(info);
       reviewBar.appendChild(b("Fix", "Open this field to change it. The flag clears once the value is fixed.", fixIssue, true));
       reviewBar.appendChild(b("Ignore Item", "Stop flagging this value in this cell.", () => { S.issueIgnore.items[iss.key] = true; scheduleSave(); invalidateIssues(); }));
@@ -3718,9 +3456,6 @@
           pop.appendChild(resetA);
         }
       }
-      const singleCb = el("input", { type: "checkbox", checked: !!c.single });
-      singleCb.onchange = () => { c.single = singleCb.checked; refreshAll(); };
-      pop.appendChild(el("label", { style: "display:flex;align-items:center;gap:6px;font-size:12px;color:#111827;margin:0 0 10px;cursor:pointer;", title: "The editor won't add a second line once a value is there, and cells with more than one value get flagged." }, singleCb, "Only one value per cell"));
       const chkB = el("button", { style: btnStyle("#dc2626", "color:#b91c1c;padding:3px 8px;font-size:11px;margin-bottom:10px;") }, "Checks (duplicates and rules)...");
       chkB.onclick = () => { closePopovers(); openChecks(rootOf("j:" + c.id)); };
       pop.appendChild(chkB);
@@ -4200,7 +3935,7 @@
     function tagHost() {
       return {
         exitLabel: "Exit Timestamps",
-        hint: "Enter saves the field and marks the tag complete. Tab adds another value. Ctrl+\u2190 and Ctrl+\u2192 move between tags. Drag the edit box by its header to move it. Click the row above to see more of the grid.",
+        hint: "Enter saves the field and marks the tag complete. Tab adds another value. Click the row above to see more of the grid.",
         onActiveTag(tag, item) {
           if (item) activeSmid = item.smid;
           const ri = view.findIndex((r) => r.id === tag.rowId);
@@ -4295,7 +4030,6 @@
       if (!pt || !pt._openPlayerPane) return null;
       playerCtrl = pt._openPlayerPane(card, (reg) => { stopPlayer = reg; }, {
         initialHeight: height,
-        shortcuts: false,
         settings: playerConfig(),
         getMaxHeight: availPlayerHeight,
         onHeightChange: (px) => {
@@ -4677,34 +4411,7 @@
       if (editedCells.length) items.push({ label: `Revert Edited Cells (${editedCells.length})`, run: () => revertEdits(editedCells) });
       menu(e.clientX, e.clientY, items);
     });
-    //##> SHORTCUTS: Ctrl+Left / Ctrl+Right step back and forth one item: the previous or next issue while the
-    //##> review bar is open, otherwise the previous or next tag (timestamp mode) or call (regular playback).
-    //##> Inside the editor they replace the usual jump-by-word; Ctrl+Shift+arrows still select words.
-    function isNavShortcut(e) {
-      return (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight");
-    }
-    function shortcutNav(dir) {
-      if (review && review.queue.length) {
-        if (editing) commitEdit();
-        const n = review.queue.length;
-        review.pos = (review.pos + dir + n) % n;
-        goToIssue();
-        return true;
-      }
-      if (playerCtrl) {
-        if (editing && !tsActive) commitEdit();
-        const btn = dir < 0 ? playerCtrl.els.prevNavBtn : playerCtrl.els.nextNavBtn;
-        if (btn && btn.style.display !== "none") { btn.click(); return true; }
-      }
-      return false;
-    }
     function onKey(e) {
-      if (isNavShortcut(e) && !closed) {
-        const a = document.activeElement;
-        const typing = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable);
-        if (!typing && !document.querySelector("[data-nx-dialog]") && shortcutNav(e.key === "ArrowLeft" ? -1 : 1)) e.preventDefault();
-        return;
-      }
       if ((e.ctrlKey || e.metaKey) && e.key === "c" && S.grid.clickMode === "select" && cellSel.size) {
         const a = document.activeElement;
         if (a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT") && a.selectionStart !== a.selectionEnd) return;
@@ -4753,7 +4460,10 @@
       p.loadCall(smid, rowLabel(row), undefined, null);
       renderRows();
     }
-    //##> EXCEL EXPORT: Unpacked columns export as text by default so long identifiers like
+    function escHtml(s) {
+      return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    //##> EXCEL EXPORT: Unpacked columns export as text (x:str) by default so long identifiers like
     //##> User to User never turn into scientific notation. Only columns positively typed as Date,
     //##> Number, or Currency export as real Excel values. Metadata columns follow the same date,
     //##> duration, hold, and sentiment formatting as export.js. Merged cells with stacked values
@@ -4761,9 +4471,9 @@
     //##> hidden automatically are left out.
     function exportCell(row, f) {
       const raw = cellRaw(row, f);
-      const str = (v) => ({ t: "s", v });
-      const num = (v, cls) => ({ t: "n", v: Number(v), cls });
-      if (!raw) return null;
+      const str = (v) => '<td x:str="' + escHtml(v) + '">' + escHtml(v) + "</td>";
+      const num = (v, cls) => '<td class="' + cls + '" x:num="' + v + '">' + v + "</td>";
+      if (!raw) return "<td></td>";
       if (f === "__conf__") return num(raw, "int");
       if (f.startsWith("m:")) {
         if (getEdit(row, f)) return str(raw);
@@ -4772,8 +4482,8 @@
           const d = new Date(raw);
           if (!isNaN(d.getTime())) return num(d.getTime() / 86400000 + 25569, "dt");
         }
-        if (k === "mediafileduration") { const sec = msToSeconds(raw); if (sec !== null) return num(Math.round(sec) / 86400, "dur"); }
-        if (k === "udfint4") { const sec = msToSeconds(raw); if (sec !== null) return num(Math.round(sec), "int"); }
+        if (k === "mediafileduration") { const sec = secondsFromMillisish(raw); if (sec !== null) return num(sec / 86400, "dur"); }
+        if (k === "udfint4") { const sec = secondsFromMillisish(raw); if (sec !== null) return num(Math.round(sec), "int"); }
         if ((k === "sentimentscore" || k === "overallsentimentscore") && isFinite(Number(raw))) return num(Number(raw), "dec2");
         return str(raw);
       }
@@ -4798,24 +4508,49 @@
       }
       return str(raw);
     }
-    function exportName() {
-      const label = S.preset && S.preset.label ? S.preset.label.replace(/[\\/:*?"<>|]+/g, "-").trim() : "";
-      return (label ? label + " " : "nexidia_unpacked_") + stamp() + ".xlsx";
-    }
     function doExcelExport(list) {
       if (!list.length) { toast("No rows to export.", "#6b7280"); return; }
-      const fields = exportFields();
-      const headers = fields.map((f) => headerOf(f));
-      const data = list.map((r) => fields.map((f) => exportCell(r, f)));
-      let blob;
-      try { blob = buildXlsx(S.preset && S.preset.label ? S.preset.label : "Unpacked", headers, data, fields.map((f) => getColWidth(f))); }
-      catch (e) { console.error(e); dialog({ title: "Export failed", danger: true, message: "The Excel file couldn't be built: " + (e.message || e) }); return; }
-      const url = URL.createObjectURL(blob);
-      const a = el("a", { href: url, download: exportName() });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      const fields = visFields().filter((f) => !(tsTempShown && f === tsTempShown));
+      const cssText = [
+        "table{border-collapse:collapse}",
+        'td,th{padding:4px 8px;font-family:"Aptos Narrow","Aptos",Calibri,Arial,sans-serif;font-size:10pt;text-align:left;vertical-align:bottom;white-space:nowrap;border:none}',
+        "th{font-weight:700}",
+        '.dt{mso-number-format:"m\\/d\\/yyyy\\ h\\:mm"}',
+        '.d{mso-number-format:"m\\/d\\/yyyy"}',
+        '.dur{mso-number-format:"h\\:mm\\:ss"}',
+        '.int{mso-number-format:"0"}',
+        '.dec2{mso-number-format:"0.00"}',
+        '.cur{mso-number-format:"\\$\\#\\,\\#\\#0\\.00"}',
+        '.cur0{mso-number-format:"\\$\\#\\,\\#\\#0"}',
+        '.dec2c{mso-number-format:"\\#\\,\\#\\#0\\.00"}',
+        '.thou{mso-number-format:"\\#\\,\\#\\#0"}',
+        '.dpad{mso-number-format:"mm\\/dd\\/yyyy"}',
+        '.d2{mso-number-format:"m\\/d\\/yy"}',
+        '.dpad2{mso-number-format:"mm\\/dd\\/yy"}',
+        '.diso{mso-number-format:"yyyy\\-mm\\-dd"}',
+        ".gen{mso-number-format:General}"
+      ].join("");
+      const head = "<tr>" + fields.map((f) => "<th>" + escHtml(headerOf(f)) + "</th>").join("") + "</tr>";
+      const bodyRows = list.map((r) => "<tr>" + fields.map((f) => exportCell(r, f)).join("") + "</tr>").join("\n");
+      const html = '<?mso-application progid="Excel.Sheet"?>' +
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="utf-8"/><style>' + cssText + "</style>" +
+        "<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Unpacked</x:Name>" +
+        "<x:WorksheetOptions><x:FreezePanes/><x:FrozenNoSplit/><x:SplitHorizontal>1</x:SplitHorizontal>" +
+        "<x:TopRowBottomPane>1</x:TopRowBottomPane><x:ActivePane>2</x:ActivePane>" +
+        "</x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>" +
+        "</head><body><table>" + head + bodyRows + "</table></body></html>";
+      const name = "nexidia_unpacked_" + stamp() + ".xls";
+      if (xls && xls.downloadExcelFile) xls.downloadExcelFile(name, html);
+      else {
+        const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = el("a", { href: url, download: name });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
     }
     async function chooseScope() {
       if (!selected.size) return view;
@@ -5237,7 +4972,6 @@
     })();
     function updateTitle() {
       titleEl.textContent = S.preset && S.preset.label ? "Unpack CoPilot Outputs: " + S.preset.label : "Unpack CoPilot Outputs";
-      renderInstructions();
     }
     function presetAliases(c) {
       const out = [];
@@ -5262,29 +4996,10 @@
         ce.rules.push({ id: "p" + i + "_" + f.replace(/[^A-Za-z0-9]/g, ""), type: r.type, a: r.a == null ? "" : String(r.a), b: r.b == null ? "" : String(r.b), message: r.message || "", source: "report" });
       });
     }
-    //##> REPORT SETUP: Reports can also hand Unpack their extra settings through the shared value
-    //##> "unpackReportSetup" right before dispatching, so they arrive even if the report hub only forwards the
-    //##> options it already knows. Column settings in it are matched by column header or key, and anything the
-    //##> dispatch options already carry wins. Unpack clears the value once it's read.
-    function readReportSetup(p) {
-      const setup = api.getShared("unpackReportSetup");
-      api.setShared("unpackReportSetup", null);
-      if (!setup || typeof setup !== "object") return p;
-      const out = Object.assign({}, setup, p);
-      for (const k of ["instructions", "promptUrl", "promptLabel", "timestampUse", "checkMessages", "label"]) if (out[k] == null && setup[k] != null) out[k] = setup[k];
-      const extra = setup.columns || {};
-      const lookup = (c) => extra[c.header] || extra[c.key] || null;
-      out.columns = (p.columns || []).map((c) => {
-        const x = c && c.type !== "meta" ? lookup(c) : (c ? extra[c.header] : null);
-        return x ? Object.assign({}, x, c) : c;
-      });
-      return out;
-    }
     function applyPreload(p) {
-      p = readReportSetup(p);
       S = newState();
       S.settings.primaryKey = p.primaryKey || "Trans_Id";
-      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null, checkMessages: p.checkMessages || null, instructions: Array.isArray(p.instructions) ? p.instructions.slice() : null, promptUrl: p.promptUrl || null, promptLabel: p.promptLabel || null };
+      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null, checkMessages: p.checkMessages || null };
       const order = [];
       const merges = [];
       for (const c of (p.columns || [])) {
@@ -5303,7 +5018,7 @@
         if (aliases.some((a) => taken.has(a.toLowerCase()))) continue;
         const id = "c" + (S.nextColId++);
         const presetType = TYPES.some(([v]) => v === c.dataType) ? c.dataType : "auto";
-        S.columns.push({ id, source: c.key || c.header, header: c.header || c.key, aliases, type: presetType, format: c.format || "", single: !!c.single, detected: "text", nullEq: {} });
+        S.columns.push({ id, source: c.key || c.header, header: c.header || c.key, aliases, type: presetType, format: c.format || "", detected: "text", nullEq: {} });
         presetChecks("j:" + id, c);
         if (c.mergeInto) merges.push({ source: "j:" + id, target: "m:" + c.mergeInto });
         else order.push("j:" + id);
