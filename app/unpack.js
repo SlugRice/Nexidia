@@ -1,4 +1,4 @@
-//[Last Update: 9:02 PM 11/9/2026]
+//[Last Update: 12:40 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -21,7 +21,7 @@
   //##> same thing but don't look alike.
   const FUZZY_MIN_LENGTH = 6;
   const FUZZY_MAX_DISTANCE = 2;
-  const KNOWN_PAIRS = [["notes", "summary"]];
+  const KNOWN_PAIRS = [["notes", "summary"], ["tin", "providertaxid"], ["tin", "taxid"], ["providertaxid", "taxid"]];
   const ROW_HEIGHT = 28;
   const BUFFER_ROWS = 20;
   const DEFAULT_COL_W = 150;
@@ -29,10 +29,18 @@
   const COL1_W = 44;
   const PLAY_COL_W = 28;
   const EDIT_COLOR = "#f97316";
-  const TS_PLAYER_HEIGHT = "33vh";
-  const GRID_PLAYER_HEIGHT = "50vh";
   const COMPLETE_DELAY_MS = 2000;
-  const PLAYER_DEFAULTS = { showAllEvents: false, stageFields: ["agentName", "recordedDateTime"], tagEditCaret: "end", tagUnhide: false, tsUse: {} };
+  const PLAYER_DEFAULTS = { showAllEvents: false, stageFields: ["agentName", "recordedDateTime"], tagEditCaret: "newline", tagUnhide: false, tsUse: {} };
+  //##> PLAYER HEIGHTS: Timestamp mode and regular grid playback each remember their own player height in
+  //##> this browser, saved whenever the user drags the player's top edge. Timestamp mode defaults to filling
+  //##> everything under the toolbar, which hides the grid until the player is dragged down.
+  const LS_TS_HEIGHT = "nexidia_unpack_ts_height";
+  const LS_GRID_HEIGHT = "nexidia_unpack_grid_height";
+  const LS_ALL_DONE = "nexidia_unpack_all_done";
+  const STRIP_ROW_H = 26;
+  const STRIP_ROWS_COLLAPSED = 2;
+  const STRIP_ROWS_EXPANDED_ABOVE = 4;
+  const STRIP_ROWS_EXPANDED_BELOW = 5;
   //##> TIMESTAMP DETECTION: A column is a timestamp field if any value looks like Label@MM:SS, if it's a
   //##> CoPilot column where every value is a plain MM:SS (or H:MM:SS), or if its name contains "timestamp".
   //##> Plain MM:SS in Nexidia columns (like Duration) never counts.
@@ -289,6 +297,146 @@
     }
     return { status: "ok", objects, dups };
   }
+  //##> FORMATS: Date, Currency, and Number columns can have a display format. A column's format comes from,
+  //##> in order: the user's choice in Attributes, the report's column setup, or a pattern learned from the
+  //##> values (zero values are ignored). Learning waits for FORMAT_MIN_SAMPLES values and needs
+  //##> FORMAT_MIN_SHARE of them to agree, so early mixed values don't lock anything in. Formatting is applied
+  //##> when the grid is built, so the original pasted values are never changed. Values that can't be read
+  //##> as the column's type are left exactly as they came in.
+  const FORMATS = {
+    date: [["M/D/YYYY", "4/30/2026"], ["MM/DD/YYYY", "04/30/2026"], ["M/D/YY", "4/30/26"], ["MM/DD/YY", "04/30/26"], ["YYYY-MM-DD", "2026-04-30"]],
+    currency: [["$#,##0.00", "$25,444.00"], ["$#,##0", "$25,444"], ["#,##0.00", "25,444.00"], ["0.00", "25444.00"]],
+    number: [["#,##0", "25,444"], ["0", "25444"]]
+  };
+  const BUILTIN_CHECKS = {
+    npi: { label: "NPI: 10 digits starting with 1", names: ["npi", "providernpi", "npinumber"], test: (v) => /^1\d{9}$/.test(v.replace(/\s/g, "")), message: "NPIs should be 10 digits starting with 1." },
+    tin: { label: "TIN: 9 digits (leading zeros count)", names: ["tin", "providertaxid", "taxid", "providertin", "taxidnumber"], test: (v) => /^\d{9}$/.test(v.replace(/[\s-]/g, "")), message: "TINs should be 9 digits. Leading zeros count." }
+  };
+  const CHECK_TYPES = [["required", "Required (not blank)"], ["length", "Character count"], ["range", "Value range"], ["contains", "Contains"], ["notContains", "Doesn't contain"], ["startsWith", "Starts with"], ["endsWith", "Ends with"], ["allowed", "One of a list"], ["npi", "NPI format"], ["tin", "TIN format"], ["pattern", "Pattern (reports only)"]];
+  const FORMAT_MIN_SAMPLES = 3;
+  const FORMAT_MIN_SHARE = 0.8;
+  function isZeroish(t) {
+    return /^\(?-?\$?\s*-?0+(\.0+)?\)?$/.test(String(t == null ? "" : t).trim());
+  }
+  function daysIn(y, mo) {
+    return new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  }
+  function parseDateToken(t) {
+    const s = String(t == null ? "" : t).trim();
+    let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/);
+    let p = null;
+    if (m) {
+      let y = Number(m[3]);
+      if (m[3].length === 2) y += 2000;
+      p = { y, mo: Number(m[1]), d: Number(m[2]), padM: m[1].length === 2, padD: m[2].length === 2, yLen: m[3].length, iso: false };
+    } else {
+      m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ][\d:.]+Z?)?$/);
+      if (m) p = { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]), padM: true, padD: true, yLen: 4, iso: true };
+    }
+    if (!p) return null;
+    if (p.mo < 1 || p.mo > 12 || p.d < 1 || p.d > daysIn(p.y, p.mo) || p.y < 1900 || p.y > 2100) return null;
+    return p;
+  }
+  function parseMoneyToken(t) {
+    let s = String(t == null ? "" : t).trim();
+    if (!s) return null;
+    let neg = false;
+    if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1).trim(); }
+    if (s.startsWith("-")) { neg = !neg; s = s.slice(1).trim(); }
+    const dollar = s.startsWith("$");
+    if (dollar) s = s.slice(1).trim();
+    if (s.startsWith("-")) { neg = !neg; s = s.slice(1).trim(); }
+    if (!/^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(s)) return null;
+    const commas = s.includes(",");
+    const dot = s.indexOf(".");
+    const decimals = dot === -1 ? 0 : s.length - dot - 1;
+    const n = Number(s.replace(/,/g, ""));
+    if (!isFinite(n)) return null;
+    return { n: neg ? -n : n, abs: n, dollar, commas, decimals, intPart: (dot === -1 ? s : s.slice(0, dot)).replace(/,/g, ""), fracPart: dot === -1 ? "" : s.slice(dot + 1), leadingZero: /^0\d/.test(s.replace(/,/g, "")) };
+  }
+  function tokenStyles(type, tok) {
+    if (type === "date") {
+      const p = parseDateToken(tok);
+      if (!p) return null;
+      if (p.iso) return ["YYYY-MM-DD"];
+      const big = p.mo >= 10 && p.d >= 10;
+      const padded = (p.padM && p.mo < 10) || (p.padD && p.d < 10);
+      const pads = big ? ["M/D", "MM/DD"] : (padded ? ["MM/DD"] : ["M/D"]);
+      return pads.map((x) => x + (p.yLen === 2 ? "/YY" : "/YYYY"));
+    }
+    const p = parseMoneyToken(tok);
+    if (!p) return null;
+    if (type === "currency") {
+      return FORMATS.currency.map(([f]) => f).filter((f) => {
+        const hasDollar = f.startsWith("$");
+        const hasCommas = f.includes(",");
+        const decs = f.endsWith(".00") ? 2 : 0;
+        if (hasDollar !== p.dollar) return false;
+        if (p.abs >= 1000 && hasCommas !== p.commas) return false;
+        return decs === 2 ? p.decimals > 0 : p.decimals === 0;
+      });
+    }
+    if (type === "number") {
+      if (p.dollar) return null;
+      return p.abs >= 1000 ? [p.commas ? "#,##0" : "0"] : ["#,##0", "0"];
+    }
+    return null;
+  }
+  function learnFormat(type, tokens) {
+    if (!FORMATS[type]) return null;
+    const real = tokens.filter((t) => !isZeroish(t));
+    if (real.length < FORMAT_MIN_SAMPLES) return null;
+    const counts = new Map();
+    for (const t of real) {
+      const st = tokenStyles(type, t);
+      if (!st) continue;
+      for (const s of st) counts.set(s, (counts.get(s) || 0) + 1);
+    }
+    let best = null, bestN = 0;
+    for (const [f] of FORMATS[type]) {
+      const n = counts.get(f) || 0;
+      if (n > bestN) { best = f; bestN = n; }
+    }
+    if (!best || bestN < FORMAT_MIN_SAMPLES || bestN / real.length < FORMAT_MIN_SHARE) return null;
+    return best;
+  }
+  function groupThousands(intStr) {
+    return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  function formatValue(type, style, tok) {
+    if (type === "date") {
+      const p = parseDateToken(tok);
+      if (!p) return null;
+      if (!style) return String(tok).trim();
+      const pad = (n) => (n < 10 ? "0" + n : String(n));
+      if (style === "YYYY-MM-DD") return `${p.y}-${pad(p.mo)}-${pad(p.d)}`;
+      const padded = style.startsWith("MM");
+      const yr = style.endsWith("/YY") ? pad(p.y % 100) : String(p.y);
+      return `${padded ? pad(p.mo) : p.mo}/${padded ? pad(p.d) : p.d}/${yr}`;
+    }
+    const p = parseMoneyToken(tok);
+    if (!p) return null;
+    if (type === "number" && p.dollar) return null;
+    if (!style) return String(tok).trim();
+    if (type === "number") {
+      if (p.leadingZero) return String(tok).trim();
+      const intStr = style === "#,##0" ? groupThousands(String(Number(p.intPart))) : String(Number(p.intPart));
+      return (p.n < 0 ? "-" : "") + intStr + (p.fracPart ? "." + p.fracPart : "");
+    }
+    const decs = style.endsWith(".00") ? 2 : 0;
+    const fixed = p.abs.toFixed(decs);
+    const [ip, fp] = fixed.split(".");
+    const body = (style.includes(",") ? groupThousands(ip) : ip) + (fp ? "." + fp : "");
+    return (p.n < 0 ? "-" : "") + (style.startsWith("$") ? "$" : "") + body;
+  }
+  function sortNumber(raw) {
+    const s = String(raw == null ? "" : raw).trim();
+    if (!s) return null;
+    const d = parseDateToken(s);
+    if (d) return Date.UTC(d.y, d.mo - 1, d.d);
+    const m = parseMoneyToken(s);
+    return m ? m.n : null;
+  }
   //##> TYPE DETECTION: Types are inferred from the values, never from the JSONL. Re-run on every
   //##> derive, so a Boolean column that later receives a "3" drops to Number on its own. Prose is
   //##> decided by the first 10 values (3+ spaces, majority). Categorical waits for 100+ values.
@@ -301,12 +449,13 @@
     if (values.every((v) => v === "0" || v === "1")) return "boolean";
     const toks = [];
     for (const v of values) for (const t of splitTokens(v, INCOMING_DELIM)) toks.push(t);
-    const real = toks.filter((t) => t !== "0");
+    const real = toks.filter((t) => !isZeroish(t));
     if (real.length) {
-      if (real.every((t) => /^\$-?[\d,]+(\.\d+)?$/.test(t))) return "currency";
-      if (real.every((t) => /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(t) || /^\d{4}-\d{2}-\d{2}/.test(t))) return "date";
+      const money = real.map(parseMoneyToken);
+      if (money.every(Boolean) && money.filter((m) => m.dollar).length * 2 >= real.length) return "currency";
+      if (real.every((t) => parseDateToken(t))) return "date";
       if (real.every((t) => /^[A-Za-z]{0,2}\d{7,}[A-Za-z]?$/.test(t) || /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(t))) return "identifier";
-      if (real.every((t) => /^-?\d+(\.\d+)?$/.test(t))) return "number";
+      if (money.every((m) => m && !m.dollar)) return money.some((m) => m.leadingZero) ? "identifier" : "number";
     }
     if (values.length >= 100) {
       const distinct = new Set(values.map((v) => v.toLowerCase())).size;
@@ -401,18 +550,6 @@
     if (n > 86400 * 1000) return Math.round(n / 1000);
     return n;
   }
-  function parseLooseDate(raw) {
-    const s = String(raw || "").trim();
-    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-    if (m) {
-      let y = Number(m[3]);
-      if (y < 100) y += 2000;
-      return { y, mo: Number(m[1]), d: Number(m[2]) };
-    }
-    m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (m) return { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
-    return null;
-  }
   let dbPromise = null;
   function db() {
     if (!dbPromise) {
@@ -441,6 +578,7 @@
     return new Promise((resolve) => {
       let cb = null, input = null;
       const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000020;display:flex;align-items:center;justify-content:center;" + FONT });
+      overlay.dataset.nxDialog = "1";
       const box = el("div", { style: `background:#fff;width:${opts.width || 440}px;max-width:94vw;max-height:84vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);` });
       const finish = (value) => { overlay.remove(); resolve({ value, checked: cb ? cb.checked : false, input: input ? input.value : null }); };
       if (opts.title) box.appendChild(el("div", { style: `font-size:15px;font-weight:700;color:${opts.danger ? "#b91c1c" : "#111827"};margin-bottom:10px;` }, opts.title));
@@ -515,7 +653,9 @@
       autoMeta: true,
       unpackImmediately: true,
       multiTop: false,
-      hideWorkedTs: true
+      hideWorkedTs: true,
+      showFlags: true,
+      checkOnExport: true
     };
   }
   function newState() {
@@ -544,6 +684,10 @@
       tsGroupsOff: [],
       tagState: {},
       tsAutoHidden: {},
+      formatAllow: {},
+      checks: {},
+      checkOff: {},
+      issueIgnore: { items: {}, rules: {} },
       pending: [{ text: "", error: "" }],
       notices: [],
       suppress: {},
@@ -666,7 +810,9 @@
       }
       body.appendChild(section("Edit Fields Workflow"));
       body.appendChild(line(label("After a tag is marked complete", "Jump: go straight to the next tag. Keep Playing: let the call play until it reaches the next tag."), select([["jump", "Jump to the next tag"], ["continue", "Keep playing"]], draft.tagAfterComplete || "jump", (v) => { draft.tagAfterComplete = v; })));
-      body.appendChild(line(label("When a field opens for editing", "End of text: the cursor goes after what's already there, so you can add to it. Select all: typing replaces what's there."), select([["end", "Cursor at the end of the text"], ["select", "Select all (typing replaces it)"]], draft.tagEditCaret || "end", (v) => { draft.tagEditCaret = v; })));
+      body.appendChild(line(label("When a field opens for editing", "Start on a new line: the cursor waits on an empty line under the existing values, ready for a new one. Start on the last value: the cursor goes to the end of the last value already in the field."), select([["newline", "Start on a new line"], ["last", "Start on the last value"]], draft.tagEditCaret === "last" ? "last" : "newline", (v) => { draft.tagEditCaret = v; })));
+      const doneSel = select([["ask", "Ask me"], ["exit", "Exit editing mode"], ["stay", "Stay in timestamp mode"]], allDonePref(), (v) => { try { localStorage.setItem(LS_ALL_DONE, v); } catch (_) {} });
+      body.appendChild(line(label("When every timestamp is complete", "What happens once the last timestamp is marked complete. This one is saved in this browser, not just this session."), doneSel));
       body.appendChild(line(label("Pause automatically", "Pause playback near the next tag (using the Timestamp Buffer on the General tab) or near the end of the call while you're still editing."), check(draft.tagAutoPause !== false, (v) => { draft.tagAutoPause = v; })));
       body.appendChild(line(label("Also pause for incomplete tags", "Pause near the next tag whenever the current tag isn't marked complete, even if you aren't editing."), check(!!draft.tagPauseIncomplete, (v) => { draft.tagPauseIncomplete = v; })));
       body.appendChild(line(label("Unhide hidden columns while their tag is active", "If a tag's column is hidden, show it while that tag is active, then hide it again."), check(!!draft.tagUnhide, (v) => { draft.tagUnhide = v; })));
@@ -812,7 +958,33 @@
           if (!isEmptyValue(v) && vals.has(id)) vals.get(id).push(String(v).trim());
         }
       }
-      for (const c of S.columns) c.detected = detectType(vals.get(c.id) || []);
+      for (const c of S.columns) {
+        const v = vals.get(c.id) || [];
+        c.detected = detectType(v);
+        const t = effType(c);
+        if (FORMATS[t]) {
+          const toks = [];
+          for (const x of v) for (const y of splitTokens(x, INCOMING_DELIM)) toks.push(y);
+          c.learned = learnFormat(t, toks);
+        } else c.learned = null;
+      }
+    }
+    function colFormat(c) {
+      if (!c) return null;
+      const t = effType(c);
+      if (!FORMATS[t] || c.format === "none") return null;
+      if (c.format && FORMATS[t].some(([f]) => f === c.format)) return c.format;
+      return c.learned || null;
+    }
+    function formatTokens(c, toks) {
+      const t = effType(c);
+      const style = colFormat(c);
+      if (!style || !toks.length) return toks;
+      return dedupeTokens(toks.map((x) => {
+        if (isZeroish(x)) return x;
+        const f = formatValue(t, style, x);
+        return f === null ? x : f;
+      }));
     }
     function resolveValues(c, raw) {
       const s = S.settings;
@@ -933,6 +1105,7 @@
       out.sort((a, b) => rank(a) - rank(b) || a.seq - b.seq);
       rows = out;
       tsCache = null;
+      issueCache = null;
       syncConfidenceField(s.combine && s.showConfidence && rows.some((r) => r.count > 1));
     }
     function delimFor(f) {
@@ -961,7 +1134,7 @@
       if (row.bcache[f]) return row.bcache[f];
       let own;
       if (f === "__conf__") own = [String(row.count)];
-      else if (f.startsWith("j:")) own = row.tok[f.slice(2)] || [];
+      else if (f.startsWith("j:")) own = formatTokens(colById(f.slice(2)), row.tok[f.slice(2)] || []);
       else if (f.startsWith("m:")) own = metaOwn(row, f.slice(2));
       else own = [];
       const inbound = depth < 50 ? S.merges.filter((m) => m.target === f) : [];
@@ -1024,6 +1197,7 @@
     function clearRowCaches() {
       for (const r of rows) { r.cache = {}; r.bcache = {}; }
       tsCache = null;
+      invalidateIssues();
     }
     function addNotice(kind, text, id) {
       S.notices = S.notices.filter((n) => n.id !== id);
@@ -1383,6 +1557,12 @@
       if (!Array.isArray(next.tsGroupsOff)) next.tsGroupsOff = [];
       if (!next.tagState || typeof next.tagState !== "object") next.tagState = {};
       if (!next.tsAutoHidden || typeof next.tsAutoHidden !== "object") next.tsAutoHidden = {};
+      if (!next.formatAllow || typeof next.formatAllow !== "object") next.formatAllow = {};
+      if (!next.checks || typeof next.checks !== "object") next.checks = {};
+      if (!next.checkOff || typeof next.checkOff !== "object") next.checkOff = {};
+      if (!next.issueIgnore || typeof next.issueIgnore !== "object") next.issueIgnore = { items: {}, rules: {} };
+      if (!next.issueIgnore.items) next.issueIgnore.items = {};
+      if (!next.issueIgnore.rules) next.issueIgnore.rules = {};
       if (!next.suppress || typeof next.suppress !== "object") next.suppress = {};
       if (!keepId) { next.sessionId = newState().sessionId; next.createdAt = Date.now(); }
       S = next;
@@ -1654,6 +1834,7 @@
       }
       row.cache = {};
       tsCache = null;
+      invalidateIssues();
       scheduleSave();
       return true;
     }
@@ -1704,77 +1885,347 @@
       if (left < visLeft) tableWrap.scrollLeft = left - frozenW();
       else if (left + w > tableWrap.scrollLeft + tableWrap.clientWidth) tableWrap.scrollLeft = left + w - tableWrap.clientWidth;
     }
+    //##> STACKED EDITOR: Editing opens a panel that floats over the cell (in the grid or the row strip). Every
+    //##> value already in the cell gets its own line, split on the column's delimiter, and the user types new
+    //##> values on empty lines below. Nobody has to type delimiters. While typing, existing values that match
+    //##> move to the top and light up. Saving drops any new value that's already in the field and says so.
+    //##> Prose columns get a single text box instead. editing.where is "grid" or "strip".
+    function tokenKey(v) {
+      return String(v == null ? "" : v).trim().toLowerCase().replace(/\s+/g, " ");
+    }
+    function editorPrefCaret() {
+      return unpackPref("tagEditCaret") === "last" ? "last" : "newline";
+    }
+    function editorAnchor(ed) {
+      if (!ed) return null;
+      if (ed.where === "strip") {
+        if (!stripBox) return null;
+        for (const td of stripBox.querySelectorAll("td[data-field]")) {
+          if (td.dataset.rowid === ed.rowId && td.dataset.field === ed.field) return td;
+        }
+        return null;
+      }
+      return tbody.querySelector(`td[data-r="${ed.ri}"][data-c="${ed.ci}"]`);
+    }
+    function positionEditor() {
+      if (!editing || !editing.panel) return;
+      const a = editorAnchor(editing);
+      const p = editing.panel;
+      if (!a) { p.style.visibility = "hidden"; return; }
+      const r = a.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) { p.style.visibility = "hidden"; return; }
+      p.style.visibility = "visible";
+      const w = Math.min(440, Math.max(r.width + 2, 260));
+      p.style.width = w + "px";
+      let left = Math.min(r.left - 1, window.innerWidth - w - 8);
+      left = Math.max(8, left);
+      p.style.left = left + "px";
+      const h = p.offsetHeight;
+      let top = r.top - 1;
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.bottom + 1 - h);
+      p.style.top = top + "px";
+    }
+    function closeEditorPanel(ed) {
+      if (ed && ed.panel) { try { ed.panel.remove(); } catch (_) {} }
+    }
+    function openEditor(row, f, opts) {
+      opts = opts || {};
+      if (!row || !f) return;
+      if (f === "__conf__") { toast("Confidence is calculated and can't be edited.", "#6b7280"); return; }
+      if (editing) commitEdit();
+      const c = f.startsWith("j:") ? colById(f.slice(2)) : null;
+      const prose = !!(c && isProse(c));
+      const delim = delimFor(f);
+      const raw = cellRaw(row, f);
+      const accent = opts.tagId ? "#ef4444" : "#f59e0b";
+      const panel = el("div", { style: `position:fixed;z-index:1000006;background:#fff;border:2px solid ${accent};border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.35);padding:6px;box-sizing:border-box;max-height:300px;overflow-y:auto;visibility:hidden;` + FONT });
+      panel.dataset.nxEditor = "1";
+      panel.addEventListener("mousedown", (e) => e.stopPropagation());
+      const head = el("div", { style: "display:flex;align-items:center;gap:6px;font-size:10px;color:#6b7280;margin:0 2px 5px;" });
+      head.appendChild(el("span", { style: "font-weight:700;color:#111827;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, baseHeader(f)));
+      head.appendChild(el("span", {}, prose ? "Enter saves \u00B7 Shift+Enter new line \u00B7 Esc cancels" : "Enter saves \u00B7 Tab adds a line \u00B7 Esc cancels"));
+      panel.appendChild(head);
+      const openIss = S.settings.showFlags ? cellIssues(row, f) : [];
+      if (openIss.length) panel.appendChild(el("div", { style: "font-size:11px;color:#b91c1c;background:#fef2f2;border-radius:4px;padding:4px 6px;margin:0 0 5px;line-height:1.4;" }, openIss.map((i) => "\u26A0 " + i.message).join("\n")));
+      const ed = { rowId: row.id, field: f, ri: opts.ri, ci: opts.ci, where: opts.where || "grid", panel, tagId: opts.tagId || null, prose, delim, orig: raw, tokens: [], newInputs: [], input: null };
+      const keyHandler = (e, inp) => {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); return; }
+        if (e.key === "Enter" && !(prose && e.shiftKey)) {
+          e.preventDefault(); e.stopPropagation();
+          finishEditor(e.shiftKey ? "up" : "down");
+          return;
+        }
+        if (e.key === "Tab") {
+          e.preventDefault(); e.stopPropagation();
+          if (e.shiftKey) { finishEditor("left"); return; }
+          if (prose || !inp.value.trim()) { finishEditor("right"); return; }
+          const emptyNew = ed.newInputs.find((x) => x !== inp && !x.value.trim());
+          if (emptyNew) { emptyNew.focus(); return; }
+          addNewLine(true);
+        }
+      };
+      if (prose) {
+        const ta = el("textarea", { rows: 4, style: "width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:4px;padding:6px 8px;font-size:12px;resize:vertical;outline:none;color:#111827;" + FONT });
+        ta.value = raw;
+        ta.addEventListener("keydown", (e) => keyHandler(e, ta));
+        panel.appendChild(ta);
+        ed.input = ta;
+      } else {
+        const list = el("div", { style: "display:flex;flex-direction:column;gap:3px;" });
+        const newWrap = el("div", { style: "display:flex;flex-direction:column;gap:3px;margin-top:3px;" });
+        const plusRow = el("div", { style: "display:flex;justify-content:flex-start;margin-top:4px;" });
+        const plusBtn = el("button", { type: "button", title: "Add another value (same as Tab)", style: "border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:4px;font-size:11px;padding:2px 10px;cursor:pointer;" }, "+ Add value");
+        plusBtn.addEventListener("mousedown", (e) => e.preventDefault());
+        plusBtn.onclick = () => addNewLine(true);
+        plusRow.appendChild(plusBtn);
+        const lineStyle = "flex:1;min-width:0;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:4px;padding:4px 8px;font-size:12px;outline:none;color:#111827;background:#f9fafb;" + FONT;
+        splitTokens(raw, delim).forEach((v, i) => {
+          const wrap = el("div", { style: "display:flex;align-items:center;gap:4px;border-radius:4px;" });
+          const inp = el("input", { type: "text", value: v, style: lineStyle, title: "Click to change this value" });
+          inp.addEventListener("focus", () => { inp.style.background = "#fff"; inp.style.borderColor = "#93c5fd"; });
+          inp.addEventListener("blur", () => { inp.style.background = "#f9fafb"; inp.style.borderColor = "#e5e7eb"; });
+          inp.addEventListener("keydown", (e) => keyHandler(e, inp));
+          const x = el("button", { type: "button", title: "Remove this value", style: "border:0;background:transparent;color:#9ca3af;font-size:14px;cursor:pointer;padding:0 4px;line-height:1;" }, "\u00D7");
+          x.addEventListener("mousedown", (e) => e.preventDefault());
+          const tok = { orig: v, input: inp, wrap, removed: false, order: i };
+          x.onclick = () => removeToken(tok);
+          wrap.append(inp, x);
+          list.appendChild(wrap);
+          ed.tokens.push(tok);
+        });
+        function addNewLine(focus) {
+          const wrap = el("div", { style: "display:flex;align-items:center;gap:4px;" });
+          const inp = el("input", { type: "text", placeholder: ed.tokens.length || ed.newInputs.length ? "Add a value..." : "Type a value...", style: "flex:1;min-width:0;box-sizing:border-box;border:1px solid #fcd34d;border-radius:4px;padding:4px 8px;font-size:12px;outline:none;color:#111827;background:#fffbeb;" + FONT });
+          inp.addEventListener("keydown", (e) => keyHandler(e, inp));
+          inp.addEventListener("input", () => rankMatches(inp.value));
+          inp.addEventListener("focus", () => rankMatches(inp.value));
+          wrap.appendChild(inp);
+          wrap.appendChild(el("span", { style: "width:22px;flex-shrink:0;" }));
+          newWrap.appendChild(wrap);
+          ed.newInputs.push(inp);
+          if (focus) { inp.focus(); setTimeout(positionEditor, 0); }
+          return inp;
+        }
+        function rankMatches(q) {
+          const k = tokenKey(q);
+          const live = ed.tokens.filter((t) => !t.removed);
+          for (const t of live) {
+            const tk = tokenKey(t.input.value);
+            t.score = !k ? 0 : (tk === k ? 3 : (tk.startsWith(k) ? 2 : (tk.includes(k) ? 1 : 0)));
+            t.wrap.style.background = t.score === 3 ? "#fde68a" : (t.score ? "#fef9c3" : "");
+            t.wrap.title = t.score === 3 ? "Already in this field" : "";
+          }
+          const ordered = live.slice().sort((a, b) => (b.score || 0) - (a.score || 0) || a.order - b.order);
+          for (const t of ordered) list.appendChild(t.wrap);
+        }
+        async function removeToken(tok) {
+          if (!S.suppress.tokenDelete) {
+            const r = await dialog({ title: "Remove this value?", message: `"${tok.input.value || tok.orig}" will be taken out of ${baseHeader(f)}. You can still press Esc to cancel everything before saving.`, checkbox: "Don't ask me again this session", buttons: [{ label: "Remove", value: true, primary: true }, { label: "Cancel", value: false }] });
+            if (!r.value) { tok.input.focus(); return; }
+            if (r.checked) S.suppress.tokenDelete = true;
+          }
+          tok.removed = true;
+          tok.wrap.remove();
+          const target = ed.newInputs[0];
+          if (target) target.focus();
+          positionEditor();
+        }
+        panel.appendChild(list);
+        panel.appendChild(newWrap);
+        panel.appendChild(plusRow);
+        const first = addNewLine(false);
+        ed.input = first;
+        ed.addNewLine = addNewLine;
+      }
+      editing = ed;
+      document.body.appendChild(panel);
+      if (ed.where === "grid") scrollCellIntoView(opts.ri, opts.ci, !!opts.center);
+      renderRows();
+      if (ed.where === "strip") renderStrip();
+      positionEditor();
+      let focusEl = ed.input;
+      if (!prose && editorPrefCaret() === "last" && ed.tokens.length) focusEl = ed.tokens[ed.tokens.length - 1].input;
+      focusEl.focus();
+      try { const n = focusEl.value.length; focusEl.setSelectionRange(n, n); } catch (_) {}
+    }
     function startEdit(ri, ci, opts) {
       opts = opts || {};
       const vf = visFields();
       const row = view[ri], f = vf[ci];
       if (!row || !f) return;
-      if (f === "__conf__") { toast("Confidence is calculated and can't be edited.", "#6b7280"); return; }
-      if (editing) commitEdit();
-      const value = cellRaw(row, f);
-      const input = el("input", { type: "text", style: `width:100%;height:100%;box-sizing:border-box;border:2px solid ${opts.tagId ? "#ef4444" : "#f59e0b"};border-radius:2px;padding:2px 8px;font-size:11px;outline:none;background:#fffbeb;color:#111827;` + FONT });
-      input.value = value;
-      editing = { rowId: row.id, field: f, ri, ci, input, orig: value, tagId: opts.tagId || null };
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault(); e.stopPropagation();
-          if (editing && editing.tagId) finishTagEdit();
-          else moveEdit(e.shiftKey ? -1 : 1, 0);
-        } else if (e.key === "Tab") {
-          e.preventDefault(); e.stopPropagation();
-          if (editing && editing.tagId) finishTagEdit();
-          else moveEdit(0, e.shiftKey ? -1 : 1);
-        } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
-      });
-      input.addEventListener("mousedown", (e) => e.stopPropagation());
-      scrollCellIntoView(ri, ci, !!opts.center);
-      renderRows();
-      input.focus();
-      const end = input.value.length;
-      try {
-        if (opts.select) input.setSelectionRange(0, end);
-        else input.setSelectionRange(end, end);
-      } catch (_) {}
+      openEditor(row, f, Object.assign({}, opts, { where: "grid", ri, ci }));
     }
-    function commitEdit() {
+    function editorValue(ed) {
+      if (ed.prose) return { value: ed.input.value, dupes: [] };
+      const kept = [];
+      const keys = new Set();
+      for (const t of ed.tokens) {
+        if (t.removed) continue;
+        const v = t.input.value.trim();
+        if (!v) continue;
+        const k = tokenKey(v);
+        if (keys.has(k)) continue;
+        keys.add(k);
+        kept.push(v);
+      }
+      const dupes = [];
+      for (const inp of ed.newInputs) {
+        const v = inp.value.trim();
+        if (!v) continue;
+        const k = tokenKey(v);
+        if (keys.has(k)) { dupes.push(v); continue; }
+        keys.add(k);
+        kept.push(v);
+      }
+      const unchanged = kept.join(ed.delim) === splitTokens(ed.orig, ed.delim).join(ed.delim);
+      return { value: unchanged ? ed.orig : kept.join(ed.delim), dupes };
+    }
+    //##> TYPED EDITS: When a user saves an edit in a Date, Currency, or Number column, new values are put into
+    //##> the column's format (04/30/26 becomes 4/30/2026). A new value that can't be read as that type gets a
+    //##> popup: Keep It, Remove It, or Edit Again, with a box to allow values like that in the column for the
+    //##> rest of the session (S.formatAllow). Values that were already in the cell are never questioned.
+    function normalizeEdit(ed, value) {
+      if (ed.prose || !ed.field.startsWith("j:")) return { value, bad: [] };
+      const c = colById(ed.field.slice(2));
+      const t = effType(c);
+      if (!FORMATS[t]) return { value, bad: [] };
+      const style = colFormat(c);
+      const before = new Set(splitTokens(ed.orig, ed.delim).map(tokenKey));
+      const out = [];
+      const bad = [];
+      for (const tok of splitTokens(value, ed.delim)) {
+        if (isZeroish(tok) || before.has(tokenKey(tok))) { out.push(tok); continue; }
+        const f = formatValue(t, style, tok);
+        if (f === null) { bad.push(tok); out.push(tok); }
+        else out.push(f);
+      }
+      const joined = dedupeTokens(out).join(ed.delim);
+      return { value: joined === splitTokens(ed.orig, ed.delim).join(ed.delim) ? ed.orig : joined, bad, type: t };
+    }
+    function reopenEditor(ed) {
+      const row = rows.find((r) => r.id === ed.rowId);
+      if (!row) return;
+      if (ed.where === "strip" && tsActive && stripRowId === ed.rowId) {
+        openEditor(row, ed.field, { where: "strip", tagId: ed.tagId });
+        return;
+      }
+      const ri = view.findIndex((r) => r.id === ed.rowId);
+      const ci = visFields().indexOf(ed.field);
+      if (ri >= 0 && ci >= 0) startEdit(ri, ci, { tagId: ed.tagId });
+    }
+    async function askBadValues(ed, norm, after) {
+      const list = norm.bad.map((b) => `"${b}"`).join(", ");
+      const typeName = TYPE_LABELS[norm.type] || norm.type;
+      const r = await dialog({
+        title: "Value doesn't match this column",
+        danger: true,
+        message: `Cannot enter ${list} into a [${typeName}] field type.\n\n${baseHeader(ed.field)} is set up as ${typeName}. You can keep it anyway, take it out, or go back and fix it.`,
+        checkbox: `Allow values like this in ${baseHeader(ed.field)} for the rest of this session`,
+        buttons: [{ label: "Edit Again", value: "edit", primary: true }, { label: "Keep It", value: "keep" }, { label: "Remove It", value: "remove" }]
+      });
+      if (r.checked) { S.formatAllow[ed.field] = true; scheduleSave(); }
+      if (closed) return;
+      if (r.value === "remove") {
+        const badKeys = new Set(norm.bad.map(tokenKey));
+        const kept = splitTokens(norm.value, ed.delim).filter((x) => !badKeys.has(tokenKey(x)));
+        applyEdit(ed.rowId, ed.field, kept.join(ed.delim));
+        tsCache = null;
+        renderRows();
+        if (tsActive) renderStrip();
+        if (after) after();
+        return;
+      }
+      if (r.value === "keep") { if (after) after(); return; }
+      reopenEditor(ed);
+    }
+    function commitEdit(after) {
       if (!editing) return false;
-      const { rowId, field, input } = editing;
+      const ed = editing;
       editing = null;
-      const changed = applyEdit(rowId, field, input.value);
+      closeEditorPanel(ed);
+      const ev = editorValue(ed);
+      const norm = normalizeEdit(ed, ev.value);
+      const changed = applyEdit(ed.rowId, ed.field, norm.value);
       renderRows();
+      if (ed.where === "strip") { stripExpanded = false; renderStrip(); }
+      if (norm.bad.length && !S.formatAllow[ed.field]) {
+        askBadValues(ed, norm, after);
+        return changed;
+      }
+      if (ev.dupes.length) {
+        dialog({ title: "Already in this field", message: `${ev.dupes.length === 1 ? `"${ev.dupes[0]}" is` : ev.dupes.map((d) => `"${d}"`).join(", ") + " are"} already in ${baseHeader(ed.field)}, so ${ev.dupes.length === 1 ? "it wasn't" : "they weren't"} added again.` });
+      }
+      if (after) after();
       return changed;
     }
     function cancelEdit() {
       if (!editing) return;
+      const ed = editing;
       editing = null;
+      closeEditorPanel(ed);
       renderRows();
+      if (ed.where === "strip") renderStrip();
     }
     function moveEdit(dr, dc) {
       if (!editing) return;
       const { ri, ci } = editing;
-      commitEdit();
       const nr = ri + dr, nc = ci + dc;
-      if (nr < 0 || nr >= view.length || nc < 0 || nc >= visFields().length) return;
-      startEdit(nr, nc);
+      commitEdit(() => {
+        if (nr < 0 || nr >= view.length || nc < 0 || nc >= visFields().length) return;
+        startEdit(nr, nc);
+      });
+    }
+    function finishEditor(dir) {
+      if (!editing) return;
+      if (editing.tagId) { finishTagEdit(); return; }
+      if (editing.where === "grid") {
+        if (dir === "down") moveEdit(1, 0);
+        else if (dir === "up") moveEdit(-1, 0);
+        else if (dir === "right") moveEdit(0, 1);
+        else if (dir === "left") moveEdit(0, -1);
+        else commitEdit();
+        return;
+      }
+      commitEdit();
     }
     function finishTagEdit() {
       if (!editing) return;
       const tagId = editing.tagId;
-      commitEdit();
-      if (playerCtrl && tagId) playerCtrl.completeTag(tagId, { delay: COMPLETE_DELAY_MS });
+      commitEdit(() => { if (playerCtrl && tagId) playerCtrl.completeTag(tagId, { delay: COMPLETE_DELAY_MS }); });
     }
     document.addEventListener("mousedown", onOutsideEdit, true);
     function onOutsideEdit(e) {
+      const t = e.target;
+      const inDialog = t && t.closest && t.closest("[data-nx-dialog]");
+      if (stripExpanded && stripBox && !stripBox.contains(t) && !inDialog && !(editing && editing.panel && editing.panel.contains(t))) {
+        stripExpanded = false;
+        setTimeout(renderStrip, 0);
+      }
       if (!editing) return;
-      if (editing.input.contains(e.target)) return;
-      if (editing.tagId && playerCtrl && playerCtrl.els && playerCtrl.els.pane.contains(e.target)) {
-        const keep = editing.input;
-        setTimeout(() => { if (editing && editing.input === keep && keep.isConnected) keep.focus(); }, 0);
+      if (editing.panel && editing.panel.contains(t)) return;
+      if (inDialog) return;
+      if (stripBox && stripBox.contains(t)) return;
+      if (editing.tagId && playerCtrl && playerCtrl.els && playerCtrl.els.pane.contains(t)) {
+        const keep = editing.panel;
+        setTimeout(() => {
+          if (editing && editing.panel === keep && keep.isConnected && !keep.contains(document.activeElement)) {
+            const target = editing.newInputs && editing.newInputs.length ? editing.newInputs[editing.newInputs.length - 1] : editing.input;
+            if (target) target.focus();
+          }
+        }, 0);
         return;
       }
       const wasTag = editing.tagId;
       commitEdit();
       if (wasTag && playerCtrl) playerCtrl.resumeFromEdit();
+    }
+    window.addEventListener("resize", onWinResize, { passive: true });
+    function onWinResize() {
+      positionEditor();
+      if (tsActive && playerCtrl && !playerCtrl.isMinimized()) {
+        const max = availPlayerHeight();
+        if (playerCtrl.els.pane.offsetHeight > max) playerCtrl.setHeight(max + "px");
+      }
     }
     //##> MERGE POPUP: Pairs are worked top to bottom. Each pair's choice is simulated before the next
     //##> pair is drawn, so if Member_Id is merged into Member ID, a later Member ID / MemberID pair shows
@@ -1999,7 +2450,9 @@
     const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
     const sheetInput = el("input", { type: "file", accept: ".xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
     const sessionInput = el("input", { type: "file", accept: ".txt,.json", style: "display:none;" });
-    [titleEl, menuBtn, rowCountEl, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportTranscriptsBtn, saveSessionBtn, loadSessionBtn, resetBtn, clickModeBtn, exportSlot, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
+    const issuesBtn = el("button", { style: btnStyle("#dc2626", "color:#b91c1c;display:none;"), title: "Step through cells that didn't pass their checks." }, "");
+    const reviewBar = el("div", { style: "display:none;align-items:center;gap:6px;padding:6px 12px;background:#fef2f2;border-bottom:1px solid #fecaca;flex-wrap:wrap;" });
+    [titleEl, menuBtn, rowCountEl, issuesBtn, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportTranscriptsBtn, saveSessionBtn, loadSessionBtn, resetBtn, clickModeBtn, exportSlot, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
     const bannerWrap = el("div", { style: "display:none;padding:8px 16px;background:#fffbeb;border-bottom:1px solid #fde68a;" });
     const topPanel = el("div", { style: "padding:8px 16px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;gap:6px;" });
     const instrHead = el("div", { style: "font-size:12px;font-weight:600;color:#1d4ed8;cursor:pointer;user-select:none;" }, "\u25B8 Instructions");
@@ -2026,6 +2479,7 @@
     table.appendChild(tbody);
     tableWrap.appendChild(table);
     tableWrap.appendChild(emptyEl);
+    gridWrap.appendChild(reviewBar);
     gridWrap.appendChild(tableWrap);
     body.appendChild(colPanel);
     body.appendChild(gridWrap);
@@ -2231,7 +2685,8 @@
       const cellLower = cell.toLowerCase();
       const val = (rule.value || "").trim().toLowerCase();
       const val2 = (rule.value2 || "").trim().toLowerCase();
-      const numCell = Number(cell), numVal = Number(rule.value), numVal2 = Number(rule.value2);
+      const sn = sortNumber(cell), sv = sortNumber(rule.value), sv2 = sortNumber(rule.value2);
+      const numCell = sn === null ? NaN : sn, numVal = sv === null ? NaN : sv, numVal2 = sv2 === null ? NaN : sv2;
       const num = cell !== "" && !isNaN(numCell);
       switch (rule.op) {
         case "hideempty": return !cellIsBlank(row, field);
@@ -2273,8 +2728,8 @@
           for (const { field, dir } of sorts) {
             const va = cellRaw(a, field), vb = cellRaw(b, field);
             if (va === vb) continue;
-            const na = Number(va), nb = Number(vb);
-            if (va !== "" && vb !== "" && !isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+            const na = sortNumber(va), nb = sortNumber(vb);
+            if (na !== null && nb !== null && na !== nb) return (na - nb) * dir;
             return va < vb ? -dir : dir;
           }
           return 0;
@@ -2303,6 +2758,8 @@
       rebuildColPanel();
       renderNotices();
       updateTsBtn();
+      syncPlayerView();
+      invalidateIssues();
       scheduleSave();
     }
     function rerender() {
@@ -2313,7 +2770,14 @@
       renderRows();
       rebuildColPanel();
       updateTsBtn();
+      syncPlayerView();
+      invalidateIssues();
       scheduleSave();
+    }
+    function syncPlayerView() {
+      if (!playerCtrl) return;
+      if (tsActive) renderStrip();
+      if (playerCtrl.refreshTags) playerCtrl.refreshTags();
     }
     function updateCounts() {
       rowCountEl.textContent = view.length.toLocaleString() + " of " + rows.length.toLocaleString() + " rows";
@@ -2498,6 +2962,7 @@
         items.push({ label: "Attributes...", run: () => openAttributes(colById(field.slice(2)), x, y) });
       }
       if (field !== "__conf__") {
+        items.push({ label: "Checks...", run: () => openChecks(field) });
         items.push({ label: "Merge Column...", run: () => openMergeFor(field) });
         if (S.merges.some((m) => m.target === field)) items.push({ label: "Unmerge...", run: () => openUnmerge(field) });
         const pkc = pkCandidateFor(field);
@@ -2545,6 +3010,419 @@
       refreshAll();
       runMergeDetection();
     }
+    //##> CHECKS: Columns can be checked for problems. Each column can flag duplicate values (compared across
+    //##> the whole column, with stacked values counted separately) and can have rules (required, character
+    //##> count, value range, contains, starts/ends with, one of a list, pattern, NPI, TIN). Rules come from the
+    //##> user (Checks... in the column menu) or from a report's column setup, and every stacked value is checked
+    //##> on its own. NPI and TIN rules turn on by themselves for columns with those names. Rules set on a column
+    //##> keep working after it's merged into another. Zero placeholders count as blank. Flagged cells get a red
+    //##> corner and a soft red fill. Export offers to step through them first (the review bar). Ignored items and
+    //##> rules are kept in S.issueIgnore and saved with the session.
+    let issueCache = null;
+    let issueSyncTimer = null;
+    let review = null;
+    function invalidateIssues() {
+      issueCache = null;
+      if (issueSyncTimer) return;
+      issueSyncTimer = setTimeout(() => {
+        issueSyncTimer = null;
+        if (closed) return;
+        updateIssuesBtn();
+        if (review) syncReview();
+      }, 0);
+    }
+    function ensureIssueCache() {
+      if (!issueCache) issueCache = { cells: new Map(), dups: new Map(), rules: new Map() };
+      return issueCache;
+    }
+    function groupNames(f) {
+      const out = [];
+      for (const m of membersOf(f)) {
+        out.push(baseHeader(m));
+        if (m.startsWith("j:")) {
+          const c = colById(m.slice(2));
+          if (c) out.push(c.source, ...c.aliases);
+        } else if (m.startsWith("m:")) out.push(m.slice(2));
+      }
+      return out.map(normName).filter(Boolean);
+    }
+    function checkEntry(f) {
+      if (!S.checks[f]) S.checks[f] = { unique: false, rules: [] };
+      return S.checks[f];
+    }
+    function builtinsFor(f) {
+      const names = groupNames(f);
+      return Object.keys(BUILTIN_CHECKS).filter((k) => BUILTIN_CHECKS[k].names.some((n) => names.includes(n)));
+    }
+    function rulesFor(f) {
+      const ic = ensureIssueCache();
+      if (ic.rules.has(f)) return ic.rules.get(f);
+      const out = [];
+      for (const k of builtinsFor(f)) {
+        const id = "b:" + k;
+        if (!S.checkOff[f + "|" + id]) out.push({ id, type: k, builtin: true, source: "built-in" });
+      }
+      for (const m of membersOf(f)) {
+        const ce = S.checks[m];
+        if (ce && Array.isArray(ce.rules)) for (const r of ce.rules) out.push(r);
+      }
+      ic.rules.set(f, out);
+      return out;
+    }
+    function isUnique(f) {
+      return membersOf(f).some((m) => S.checks[m] && S.checks[m].unique);
+    }
+    function hasChecks(f) {
+      return f !== "__conf__" && (isUnique(f) || rulesFor(f).length > 0);
+    }
+    function checkTokenBlank(f, t) {
+      if (isEmptyValue(t) || /^0+$/.test(String(t).trim())) return true;
+      if (f.startsWith("j:")) return isBlank(colById(f.slice(2)), t);
+      return false;
+    }
+    function liveTokens(row, f) {
+      return cellParts(row, f).tokens.filter((t) => !checkTokenBlank(f, t));
+    }
+    function dupMap(f) {
+      const ic = ensureIssueCache();
+      if (ic.dups.has(f)) return ic.dups.get(f);
+      const m = new Map();
+      for (const r of rows) {
+        for (const t of liveTokens(r, f)) {
+          const k = tokenKey(t);
+          if (!m.has(k)) m.set(k, []);
+          const list = m.get(k);
+          if (!list.includes(r.id)) list.push(r.id);
+        }
+      }
+      ic.dups.set(f, m);
+      return m;
+    }
+    function presetMessage(type) {
+      const pm = S.preset && S.preset.checkMessages;
+      return pm && pm[type] ? String(pm[type]) : "";
+    }
+    function fillMessage(msg, tok, header) {
+      return String(msg).replace(/\{value\}/g, tok == null ? "" : tok).replace(/\{column\}/g, header);
+    }
+    function describeRule(r, header) {
+      const a = r.a == null ? "" : String(r.a).trim(), b = r.b == null ? "" : String(r.b).trim();
+      switch (r.type) {
+        case "required": return `${header} shouldn't be blank.`;
+        case "length":
+          if (a && b && a === b) return `${header} should be exactly ${a} characters.`;
+          if (a && b) return `${header} should be between ${a} and ${b} characters.`;
+          if (a) return `${header} should be at least ${a} characters.`;
+          return `${header} should be at most ${b} characters.`;
+        case "range":
+          if (a && b) return `${header} should be between ${a} and ${b}.`;
+          if (a) return `${header} should be at least ${a}.`;
+          return `${header} should be at most ${b}.`;
+        case "contains": return `${header} should contain "${a}".`;
+        case "notContains": return `${header} shouldn't contain "${a}".`;
+        case "startsWith": return `${header} should start with "${a}".`;
+        case "endsWith": return `${header} should end with "${a}".`;
+        case "allowed": return `${header} should be one of: ${splitList(a).join(", ")}.`;
+        case "pattern": return `${header} doesn't match the expected format.`;
+        default: return BUILTIN_CHECKS[r.type] ? BUILTIN_CHECKS[r.type].message : `${header} has a problem.`;
+      }
+    }
+    function splitList(s) {
+      return String(s == null ? "" : s).split(/[;,\n]/).map((x) => x.trim()).filter(Boolean);
+    }
+    function ruleMessage(r, header, tok) {
+      const custom = r.message || presetMessage(r.type);
+      return fillMessage(custom || describeRule(r, header), tok, header);
+    }
+    function ruleFails(r, tok) {
+      const t = String(tok).trim();
+      const low = t.toLowerCase();
+      const a = r.a == null ? "" : String(r.a).trim(), b = r.b == null ? "" : String(r.b).trim();
+      switch (r.type) {
+        case "length": {
+          const n = t.length;
+          if (a && n < Number(a)) return true;
+          if (b && n > Number(b)) return true;
+          return false;
+        }
+        case "range": {
+          const v = sortNumber(t);
+          if (v === null) return true;
+          const lo = a ? sortNumber(a) : null, hi = b ? sortNumber(b) : null;
+          if (lo !== null && v < lo) return true;
+          if (hi !== null && v > hi) return true;
+          return false;
+        }
+        case "contains": return !!a && !low.includes(a.toLowerCase());
+        case "notContains": return !!a && low.includes(a.toLowerCase());
+        case "startsWith": return !!a && !low.startsWith(a.toLowerCase());
+        case "endsWith": return !!a && !low.endsWith(a.toLowerCase());
+        case "allowed": {
+          const list = splitList(a).map((x) => x.toLowerCase());
+          return list.length > 0 && !list.includes(low);
+        }
+        case "pattern": {
+          if (!a) return false;
+          let re;
+          try { re = new RegExp("^(?:" + a + ")$", "i"); } catch (_) { return false; }
+          return !re.test(t);
+        }
+        default:
+          if (BUILTIN_CHECKS[r.type]) return !BUILTIN_CHECKS[r.type].test(t);
+          return false;
+      }
+    }
+    function rowNumberText(ids) {
+      const nums = ids.map((id) => view.findIndex((r) => r.id === id)).filter((i) => i >= 0).map((i) => i + 1).sort((x, y) => x - y);
+      const hidden = ids.length - nums.length;
+      const parts = [];
+      if (nums.length) parts.push((nums.length === 1 ? "row " : "rows ") + (nums.length > 6 ? nums.slice(0, 6).join(", ") + ", and " + (nums.length - 6) + " more" : nums.join(", ")));
+      if (hidden) parts.push(hidden === 1 ? "a row that's filtered out" : hidden + " rows that are filtered out");
+      return parts.join(" and ");
+    }
+    function issueKey(rowId, f, ruleId, tok) {
+      return rowId + "|" + f + "|" + ruleId + "|" + tokenKey(tok);
+    }
+    function cellIssues(row, f) {
+      if (!row || !f || f === "__conf__") return [];
+      const ic = ensureIssueCache();
+      const ck = row.id + "|" + f;
+      if (ic.cells.has(ck)) return ic.cells.get(ck);
+      const out = [];
+      if (hasChecks(f)) {
+        const header = baseHeader(f);
+        const live = liveTokens(row, f);
+        for (const r of rulesFor(f)) {
+          if (S.issueIgnore.rules[f + "|" + r.id]) continue;
+          if (r.type === "required") {
+            if (!live.length) out.push({ key: issueKey(row.id, f, r.id, ""), rowId: row.id, field: f, ruleId: r.id, token: "", message: ruleMessage(r, header, "") });
+            continue;
+          }
+          for (const t of live) if (ruleFails(r, t)) out.push({ key: issueKey(row.id, f, r.id, t), rowId: row.id, field: f, ruleId: r.id, token: t, message: ruleMessage(r, header, t) });
+        }
+        if (isUnique(f) && !S.issueIgnore.rules[f + "|dup"]) {
+          const m = dupMap(f);
+          for (const t of live) {
+            const ids = m.get(tokenKey(t)) || [];
+            if (ids.length < 2) continue;
+            const others = ids.filter((id) => id !== row.id);
+            const custom = presetMessage("duplicate");
+            const msg = custom ? fillMessage(custom, t, header) : `"${t}" is a duplicate. It also appears in ${rowNumberText(others)}.`;
+            out.push({ key: issueKey(row.id, f, "dup", t), rowId: row.id, field: f, ruleId: "dup", token: t, message: msg });
+          }
+        }
+      }
+      const kept = out.filter((i) => !S.issueIgnore.items[i.key]);
+      ic.cells.set(ck, kept);
+      return kept;
+    }
+    function computeIssues(list, fields) {
+      const out = [];
+      const fs = fields.filter(hasChecks);
+      if (!fs.length) return out;
+      for (const row of list) for (const f of fs) for (const i of cellIssues(row, f)) out.push(i);
+      return out;
+    }
+    function exportFields() {
+      return visFields().filter((f) => !(tsTempShown && f === tsTempShown));
+    }
+    function flagMarker(iss) {
+      const hit = el("span", { style: "position:absolute;bottom:0;left:0;width:12px;height:12px;z-index:2;cursor:help;", title: iss.map((i) => i.message).join("\n") });
+      hit.appendChild(el("span", { style: "position:absolute;bottom:0;left:0;width:0;height:0;border-bottom:8px solid #dc2626;border-right:8px solid transparent;" }));
+      return hit;
+    }
+    function updateIssuesBtn() {
+      if (!S.settings.showFlags) { issuesBtn.style.display = "none"; return; }
+      const n = computeIssues(view, exportFields()).length;
+      issuesBtn.style.display = n ? "" : "none";
+      issuesBtn.textContent = `\u26A0 ${n.toLocaleString()} possible issue${n === 1 ? "" : "s"}`;
+    }
+    //##> REVIEW BAR: Works like Excel's Find. It holds a queue of issues for the rows and columns being looked
+    //##> at. Fixing a value clears its issue by itself; Skip sends the current one to the back of the queue.
+    function openReview(list, exportList) {
+      if (editing) commitEdit();
+      if (tsActive) exitTimestamps(true);
+      const ids = new Set(list.map((r) => r.id));
+      review = { ids, exportList: exportList || null, queue: [], pos: 0, map: new Map(), current: null };
+      reviewBar.style.display = "flex";
+      syncReview(true);
+    }
+    function closeReview() {
+      review = null;
+      reviewBar.style.display = "none";
+      reviewBar.innerHTML = "";
+      renderRows();
+    }
+    function reviewRows() {
+      return view.filter((r) => review.ids.has(r.id));
+    }
+    function syncReview(jump) {
+      if (!review) return;
+      const fresh = computeIssues(reviewRows(), exportFields());
+      const map = new Map(fresh.map((i) => [i.key, i]));
+      const cur = review.queue[review.pos];
+      const q = review.queue.filter((k) => map.has(k));
+      for (const i of fresh) if (!q.includes(i.key)) q.push(i.key);
+      review.queue = q;
+      review.map = map;
+      if (cur && q.includes(cur)) review.pos = q.indexOf(cur);
+      if (review.pos >= q.length) review.pos = 0;
+      renderReview();
+      if (jump || review.current !== q[review.pos]) goToIssue();
+    }
+    function goToIssue() {
+      if (!review) return;
+      const key = review.queue[review.pos];
+      review.current = key || null;
+      const iss = key ? review.map.get(key) : null;
+      if (iss) {
+        const ri = view.findIndex((r) => r.id === iss.rowId);
+        const ci = visFields().indexOf(iss.field);
+        if (ri >= 0 && ci >= 0) scrollCellIntoView(ri, ci, true);
+      }
+      renderRows();
+      renderReview();
+    }
+    function fixIssue() {
+      const iss = review && review.map.get(review.queue[review.pos]);
+      if (!iss) return;
+      const ri = view.findIndex((r) => r.id === iss.rowId);
+      const ci = visFields().indexOf(iss.field);
+      if (ri < 0 || ci < 0) return;
+      startEdit(ri, ci);
+    }
+    function renderReview() {
+      if (!review) return;
+      reviewBar.innerHTML = "";
+      const n = review.queue.length;
+      const b = (t, tip, fn, primary) => {
+        const x = el("button", { type: "button", title: tip || "", style: primary ? "padding:4px 10px;border-radius:6px;border:0;background:#dc2626;color:#fff;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;" : "padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;background:#fff;color:#b91c1c;font-size:12px;cursor:pointer;flex-shrink:0;" }, t);
+        x.addEventListener("mousedown", (e) => e.preventDefault());
+        x.onclick = fn;
+        return x;
+      };
+      if (!n) {
+        reviewBar.appendChild(el("div", { style: "flex:1;font-size:12px;font-weight:700;color:#15803d;" }, "\u2713 No issues left to review."));
+        if (review.exportList) reviewBar.appendChild(b("Export to Excel", "Export now", () => { const l = review.exportList; closeReview(); doExcelExport(l); }, true));
+        reviewBar.appendChild(b("Close", "Close the review", closeReview));
+        return;
+      }
+      const iss = review.map.get(review.queue[review.pos]);
+      const info = el("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;" });
+      const ri = view.findIndex((r) => r.id === iss.rowId);
+      info.appendChild(el("div", { style: "font-size:11px;color:#991b1b;font-weight:700;" }, `Issue ${review.pos + 1} of ${n} \u00B7 Row ${ri + 1} \u00B7 ${baseHeader(iss.field)}${iss.token ? ` \u00B7 "${iss.token}"` : ""}`));
+      info.appendChild(el("div", { style: "font-size:12px;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", title: iss.message }, iss.message));
+      reviewBar.appendChild(b("\u25C0", "Previous issue", () => { review.pos = (review.pos - 1 + n) % n; goToIssue(); }));
+      reviewBar.appendChild(b("\u25B6", "Next issue", () => { review.pos = (review.pos + 1) % n; goToIssue(); }));
+      reviewBar.appendChild(info);
+      reviewBar.appendChild(b("Fix", "Open this field to change it. The flag clears once the value is fixed.", fixIssue, true));
+      reviewBar.appendChild(b("Ignore Item", "Stop flagging this value in this cell.", () => { S.issueIgnore.items[iss.key] = true; scheduleSave(); invalidateIssues(); }));
+      reviewBar.appendChild(b("Ignore Rule", `Stop flagging this rule in ${baseHeader(iss.field)} for this session.`, () => { S.issueIgnore.rules[iss.field + "|" + iss.ruleId] = true; scheduleSave(); invalidateIssues(); }));
+      reviewBar.appendChild(b("Skip", "Come back to this one after the others.", () => {
+        const k = review.queue.splice(review.pos, 1)[0];
+        review.queue.push(k);
+        if (review.pos >= review.queue.length) review.pos = 0;
+        goToIssue();
+      }));
+      if (review.exportList) reviewBar.appendChild(b("Export Anyway", "Export now without fixing the rest. Flags aren't included in the export.", () => { const l = review.exportList; closeReview(); doExcelExport(l); }));
+      reviewBar.appendChild(b("\u2715", "Close the review", closeReview));
+    }
+    function reviewCellKey() {
+      if (!review || !review.current) return null;
+      const iss = review.map.get(review.current);
+      return iss ? iss.rowId + "|" + iss.field : null;
+    }
+    function openChecks(f) {
+      if (!f || f === "__conf__") return;
+      const header = baseHeader(f);
+      const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000016;display:flex;align-items:center;justify-content:center;" + FONT });
+      overlay.dataset.nxDialog = "1";
+      const box = el("div", { style: "background:#fff;width:560px;max-width:95vw;max-height:88vh;overflow-y:auto;border-radius:12px;padding:20px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      const section = (t) => el("div", { style: "font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;" }, t);
+      const changed = () => { issueCache = null; scheduleSave(); };
+      function render() {
+        box.innerHTML = "";
+        box.appendChild(el("div", { style: "font-size:16px;font-weight:700;color:#111827;" }, "Checks: " + header));
+        box.appendChild(el("div", { style: "font-size:12px;color:#6b7280;margin-top:3px;" }, "Cells that don't pass get a red corner. You'll be offered a review of them before exporting. Stacked values are checked one at a time, and 0 counts as blank."));
+        box.appendChild(section("Duplicates"));
+        const uq = el("input", { type: "checkbox", checked: isUnique(f) });
+        uq.onchange = () => {
+          if (uq.checked) checkEntry(f).unique = true;
+          else for (const m of membersOf(f)) if (S.checks[m]) S.checks[m].unique = false;
+          changed();
+        };
+        box.appendChild(el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;" }, uq, "Flag values that appear in more than one row"));
+        const bis = builtinsFor(f);
+        if (bis.length) {
+          box.appendChild(section("Standard Checks"));
+          for (const k of bis) {
+            const id = "b:" + k;
+            const cb = el("input", { type: "checkbox", checked: !S.checkOff[f + "|" + id] });
+            cb.onchange = () => { if (cb.checked) delete S.checkOff[f + "|" + id]; else S.checkOff[f + "|" + id] = true; changed(); };
+            box.appendChild(el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;cursor:pointer;margin:4px 0;", title: "Turned on because this column is named " + header + "." }, cb, BUILTIN_CHECKS[k].label));
+          }
+        }
+        box.appendChild(section("Rules"));
+        const own = [];
+        for (const m of membersOf(f)) {
+          const ce = S.checks[m];
+          if (ce && Array.isArray(ce.rules)) ce.rules.forEach((r) => own.push({ m, r }));
+        }
+        if (!own.length) box.appendChild(el("div", { style: "font-size:12px;color:#9ca3af;" }, "No rules yet."));
+        for (const { m, r } of own) {
+          const row = el("div", { style: "display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:5px;" });
+          const txt = el("div", { style: "flex:1;min-width:0;" });
+          txt.appendChild(el("div", { style: "font-size:12px;color:#111827;font-weight:600;" }, (CHECK_TYPES.find(([v]) => v === r.type) || [0, r.type])[1] + (r.a ? `: ${r.a}` : "") + (r.b ? ` to ${r.b}` : "")));
+          txt.appendChild(el("div", { style: "font-size:11px;color:#6b7280;" }, ruleMessage(r, header, "")));
+          const tag = el("span", { style: `font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px;flex-shrink:0;${r.source === "report" ? "background:#ede9fe;color:#6d28d9;" : "background:#dcfce7;color:#15803d;"}` }, r.source === "report" ? "Report" : "You");
+          const x = el("button", { type: "button", title: "Remove this rule", style: "border:0;background:transparent;color:#9ca3af;font-size:15px;cursor:pointer;" }, "\u00D7");
+          x.onclick = () => { S.checks[m].rules = S.checks[m].rules.filter((y) => y !== r); changed(); render(); };
+          row.append(txt, tag, x);
+          box.appendChild(row);
+        }
+        box.appendChild(section("Add a Rule"));
+        const form = el("div", { style: "display:flex;flex-direction:column;gap:6px;" });
+        const typeSel = el("select", { style: "padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+        for (const [v, l] of CHECK_TYPES) if (v !== "pattern") typeSel.appendChild(el("option", { value: v }, l));
+        const inA = el("input", { type: "text", style: "flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+        const inB = el("input", { type: "text", style: "flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+        const inRow = el("div", { style: "display:flex;gap:6px;" }, inA, inB);
+        const msgIn = el("input", { type: "text", placeholder: "Message to show (optional). Use {value} to include the value.", style: "padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+        const err = el("div", { style: "font-size:11px;color:#b91c1c;min-height:14px;" });
+        const syncForm = () => {
+          const t = typeSel.value;
+          const two = t === "length" || t === "range";
+          const none = t === "required" || BUILTIN_CHECKS[t];
+          inRow.style.display = none ? "none" : "flex";
+          inB.style.display = two ? "" : "none";
+          inA.placeholder = t === "length" ? "Min characters" : t === "range" ? "Min value" : t === "allowed" ? "Allowed values, separated by ; or ," : "Text";
+          inB.placeholder = t === "length" ? "Max characters" : "Max value";
+          err.textContent = "";
+        };
+        typeSel.onchange = syncForm;
+        syncForm();
+        const addB = el("button", { type: "button", style: "align-self:flex-start;" + PRIMARY_BTN }, "Add Rule");
+        addB.onclick = () => {
+          const t = typeSel.value;
+          const a = inA.value.trim(), b = inB.value.trim();
+          if ((t === "length" || t === "range") && !a && !b) { err.textContent = "Enter a minimum, a maximum, or both."; return; }
+          if (t === "length" && ((a && !/^\d+$/.test(a)) || (b && !/^\d+$/.test(b)))) { err.textContent = "Character counts have to be whole numbers."; return; }
+          if (t === "range" && ((a && sortNumber(a) === null) || (b && sortNumber(b) === null))) { err.textContent = "Use numbers, amounts, or dates for the range."; return; }
+          if (!(t === "required" || BUILTIN_CHECKS[t] || t === "length" || t === "range") && !a) { err.textContent = "Enter the text to check for."; return; }
+          checkEntry(f).rules.push({ id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), type: t, a, b, message: msgIn.value.trim(), source: "user" });
+          changed();
+          render();
+        };
+        form.append(typeSel, inRow, msgIn, err, addB);
+        box.appendChild(form);
+        const done = el("button", { style: "width:100%;margin-top:16px;" + PLAIN_BTN }, "Done");
+        done.onclick = () => { overlay.remove(); refreshAll(); };
+        box.appendChild(done);
+      }
+      render();
+    }
     function openAttributes(c, x, y) {
       if (!c) return;
       const pop = popover(null, 260, x, y);
@@ -2553,8 +3431,29 @@
       const sel = el("select", { style: "width:100%;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:10px;box-sizing:border-box;" });
       for (const [v, l] of TYPES) sel.appendChild(el("option", { value: v }, v === "auto" ? `${l} (${TYPE_LABELS[c.detected] || c.detected})` : l));
       sel.value = c.type;
-      sel.onchange = () => { c.type = sel.value; refreshAll(); };
+      sel.onchange = () => { c.type = sel.value; refreshAll(); openAttributes(c, x, y); };
       pop.appendChild(sel);
+      const t = effType(c);
+      if (FORMATS[t]) {
+        const fmtLabel = (f) => { const hit = FORMATS[t].find(([k]) => k === f); return hit ? `${hit[0]} (${hit[1]})` : f; };
+        pop.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Format"));
+        const fs = el("select", { style: "width:100%;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;margin-bottom:4px;box-sizing:border-box;" });
+        fs.appendChild(el("option", { value: "" }, `Auto (${c.learned ? fmtLabel(c.learned) : "no pattern yet"})`));
+        for (const [f] of FORMATS[t]) fs.appendChild(el("option", { value: f }, fmtLabel(f)));
+        fs.appendChild(el("option", { value: "none" }, "Leave as entered"));
+        fs.value = c.format && (c.format === "none" || FORMATS[t].some(([f]) => f === c.format)) ? c.format : "";
+        fs.onchange = () => { c.format = fs.value; refreshAll(); };
+        pop.appendChild(fs);
+        pop.appendChild(el("div", { style: "font-size:10px;color:#9ca3af;margin-bottom:10px;line-height:1.4;" }, "Values are shown and exported in this format. The original values are kept underneath, so this can be changed any time."));
+        if (S.formatAllow["j:" + c.id]) {
+          const resetA = el("button", { style: btnStyle("#9ca3af", "color:#374151;padding:3px 8px;font-size:11px;margin-bottom:10px;") }, "Ask again about values that don't match");
+          resetA.onclick = () => { delete S.formatAllow["j:" + c.id]; resetA.remove(); scheduleSave(); };
+          pop.appendChild(resetA);
+        }
+      }
+      const chkB = el("button", { style: btnStyle("#dc2626", "color:#b91c1c;padding:3px 8px;font-size:11px;margin-bottom:10px;") }, "Checks (duplicates and rules)...");
+      chkB.onclick = () => { closePopovers(); openChecks(rootOf("j:" + c.id)); };
+      pop.appendChild(chkB);
       pop.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Treat as blank (affects filters and duplicate voting, never changes the data)"));
       pop.appendChild(el("label", { style: "display:flex;align-items:center;gap:6px;font-size:12px;color:#9ca3af;margin:3px 0;" }, el("input", { type: "checkbox", checked: true, disabled: true }), "Empty"));
       for (const [k, l] of NULL_EQ) {
@@ -2805,25 +3704,240 @@
         rebuildColPanel();
       }
     }
+    //##> TIMESTAMP LAYOUT: In timestamp mode the banner, instructions, paste box, and sort bar are tucked away
+    //##> and the player fills the space under the toolbar. The grid is still there underneath; dragging the
+    //##> player down reveals it. Everything comes back when timestamp mode ends.
+    function setTsLayout(on) {
+      for (const n of [bannerWrap, topPanel, sortBar]) {
+        if (on) {
+          if (n.dataset.tsPrev === undefined) n.dataset.tsPrev = n.style.display || "";
+          n.style.display = "none";
+        } else if (n.dataset.tsPrev !== undefined) {
+          n.style.display = n.dataset.tsPrev;
+          delete n.dataset.tsPrev;
+        }
+      }
+      if (!on) renderBanner();
+    }
+    function availPlayerHeight() {
+      return Math.max(200, card.clientHeight - toolbar.offsetHeight - 2);
+    }
+    function savedHeight(key) {
+      try {
+        const n = parseInt(localStorage.getItem(key), 10);
+        return isFinite(n) && n >= 200 ? n : null;
+      } catch (_) { return null; }
+    }
+    function playerHeightFor(mode) {
+      const max = availPlayerHeight();
+      const saved = savedHeight(mode === "ts" ? LS_TS_HEIGHT : LS_GRID_HEIGHT);
+      if (saved) return Math.min(saved, max) + "px";
+      return (mode === "ts" ? max : Math.round(card.clientHeight * 0.5)) + "px";
+    }
+    function allDonePref() {
+      try {
+        const v = localStorage.getItem(LS_ALL_DONE);
+        return v === "exit" || v === "stay" ? v : "ask";
+      } catch (_) { return "ask"; }
+    }
+    function rowNumberOf(rowId) {
+      const i = view.findIndex((r) => r.id === rowId);
+      return i >= 0 ? i + 1 : 0;
+    }
+    function rowTitle(row) {
+      const n = row ? rowNumberOf(row.id) : 0;
+      const tid = row ? ((row.meta && getFV(row.meta, TRANS_FIELD)) || row.key || "") : "";
+      return { title: n ? `Row ${n}` : "Row (filtered out)", tip: tid ? `Trans_Id ${tid}` : "" };
+    }
+    //##> ROW STRIP: A slice of the grid shown inside the player in timestamp mode: the header, the active row,
+    //##> and two faded rows above and below. All visible columns are there and it scrolls sideways, starting
+    //##> centered on the active tag's field. Clicking it opens to about ten rows; clicking away or saving
+    //##> closes it. In Edit Fields mode the active row's cells open the stacked editor; Navigation is read-only.
+    let stripWrap = null;
+    let stripBox = null;
+    let stripExpanded = false;
+    let stripRowId = null;
+    let stripTarget = null;
+    let stripTagId = null;
+    let stripEditable = false;
+    let stripCentered = null;
+    function stripCollapsedHeight() {
+      return STRIP_ROW_H * (STRIP_ROWS_COLLAPSED * 2 + 2) + 14;
+    }
+    function buildStrip() {
+      if (stripWrap) return stripWrap;
+      stripWrap = el("div", { style: `position:relative;height:${stripCollapsedHeight()}px;background:#0f172a;border-top:1px solid #1e293b;` });
+      stripBox = el("div", { style: `position:absolute;left:0;right:0;top:0;height:${stripCollapsedHeight()}px;overflow:auto;background:#fff;transition:height .25s ease, box-shadow .25s ease;` + FONT });
+      stripWrap.appendChild(stripBox);
+      stripBox.addEventListener("mousedown", onStripMouseDown);
+      return stripWrap;
+    }
+    function onStripMouseDown(e) {
+      if (e.button !== 0) return;
+      const td = e.target.closest ? e.target.closest("td[data-field]") : null;
+      if (td && stripEditable && S.grid.clickMode === "edit") {
+        const isActiveRow = td.dataset.rowid === stripRowId;
+        if (isActiveRow || stripExpanded) {
+          e.preventDefault();
+          const row = rows.find((r) => r.id === td.dataset.rowid);
+          const f = td.dataset.field;
+          if (editing && editing.rowId === td.dataset.rowid && editing.field === f) return;
+          const tagId = isActiveRow && f === stripTarget ? stripTagId : null;
+          const prevTag = editing && editing.tagId;
+          openEditor(row, f, { where: "strip", tagId });
+          if (prevTag && !tagId && playerCtrl) playerCtrl.resumeFromEdit();
+          return;
+        }
+      }
+      if (!stripExpanded) {
+        e.preventDefault();
+        stripExpanded = true;
+        renderStrip();
+      }
+    }
+    function renderStrip() {
+      if (!stripBox) return;
+      const keepLeft = stripBox.scrollLeft;
+      const fullH = stripExpanded ? STRIP_ROW_H * (STRIP_ROWS_EXPANDED_ABOVE + STRIP_ROWS_EXPANDED_BELOW + 2) + 14 : stripCollapsedHeight();
+      stripBox.style.height = fullH + "px";
+      stripBox.style.boxShadow = stripExpanded ? "0 12px 24px rgba(0,0,0,.45)" : "none";
+      stripBox.innerHTML = "";
+      const ri = view.findIndex((r) => r.id === stripRowId);
+      if (ri < 0) {
+        stripBox.appendChild(el("div", { style: "padding:14px;font-size:12px;color:#6b7280;" }, stripRowId ? "This row isn't showing on the grid right now (it may be filtered out)." : "No row selected."));
+        return;
+      }
+      const above = stripExpanded ? STRIP_ROWS_EXPANDED_ABOVE : STRIP_ROWS_COLLAPSED;
+      const below = stripExpanded ? STRIP_ROWS_EXPANDED_BELOW : STRIP_ROWS_COLLAPSED;
+      const from = Math.max(0, ri - above);
+      const to = Math.min(view.length - 1, ri + below);
+      const vf = visFields();
+      const tbl = el("table", { style: "border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:11px;" });
+      tbl.style.width = (COL1_W + vf.reduce((n, f) => n + getColWidth(f), 0)) + "px";
+      const hr = el("tr", {});
+      hr.appendChild(el("th", { style: `position:sticky;top:0;left:0;z-index:3;width:${COL1_W}px;min-width:${COL1_W}px;background:#f1f5f9;border-bottom:1px solid #e5e7eb;font-size:10px;color:#64748b;height:${STRIP_ROW_H}px;` }, "#"));
+      for (const f of vf) {
+        const w = getColWidth(f);
+        const isTarget = f === stripTarget;
+        hr.appendChild(el("th", { title: groupLabel(f), style: `position:sticky;top:0;z-index:2;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;padding:0 8px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;height:${STRIP_ROW_H}px;border-bottom:1px solid #e5e7eb;background:${isTarget ? "#fee2e2" : "#f8fafc"};color:${isTarget ? "#b91c1c" : "#374151"};font-weight:${isTarget ? 700 : 600};` }, headerOf(f)));
+      }
+      const thead2 = el("thead", {});
+      thead2.appendChild(hr);
+      tbl.appendChild(thead2);
+      const tb = el("tbody", {});
+      for (let i = from; i <= to; i++) {
+        const row = view[i];
+        const dist = Math.abs(i - ri);
+        const opacity = dist === 0 ? 1 : Math.max(0.2, stripExpanded ? 1 - dist * 0.13 : 1 - dist * 0.38);
+        const active = dist === 0;
+        const bg = active ? "#fffbeb" : "#fff";
+        const tr = el("tr", { style: `height:${STRIP_ROW_H}px;opacity:${opacity};` });
+        tr.appendChild(el("td", { style: `position:sticky;left:0;z-index:1;width:${COL1_W}px;min-width:${COL1_W}px;text-align:right;padding:0 6px;font-size:10px;font-weight:${active ? 700 : 400};color:${active ? "#b45309" : "#9ca3af"};background:${active ? "#fef3c7" : "#f8fafc"};border-bottom:1px solid #f1f5f9;` }, String(i + 1)));
+        for (const f of vf) {
+          const w = getColWidth(f);
+          const text = cellText(row, f);
+          const isTarget = active && f === stripTarget;
+          const isEd = editing && editing.where === "strip" && editing.rowId === row.id && editing.field === f;
+          const td = el("td", { title: text, style: `position:relative;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #f1f5f9;color:#111827;background:${bg};${(isTarget || isEd) ? `outline:2px solid ${isEd && !editing.tagId ? "#f59e0b" : "#ef4444"};outline-offset:-2px;` : ""}${stripEditable && (active || stripExpanded) && S.grid.clickMode === "edit" ? "cursor:text;" : "cursor:pointer;"}` }, text);
+          td.dataset.rowid = row.id;
+          td.dataset.field = f;
+          if (getEdit(row, f)) td.appendChild(editMarker(row, f));
+          const sIss = S.settings.showFlags ? cellIssues(row, f) : [];
+          if (sIss.length) { td.appendChild(flagMarker(sIss)); if (!isTarget && !isEd) td.style.background = active ? "#fee2e2" : "#fef2f2"; }
+          tr.appendChild(td);
+        }
+        tb.appendChild(tr);
+      }
+      tbl.appendChild(tb);
+      stripBox.appendChild(tbl);
+      const centerKey = stripRowId + "|" + stripTarget;
+      if (stripTarget && stripCentered !== centerKey) {
+        stripCentered = centerKey;
+        const ci = vf.indexOf(stripTarget);
+        if (ci >= 0) {
+          let left = COL1_W;
+          for (let k = 0; k < ci; k++) left += getColWidth(vf[k]);
+          const w = getColWidth(stripTarget);
+          stripBox.scrollLeft = Math.max(0, left - COL1_W - (stripBox.clientWidth - COL1_W - w) / 2);
+        }
+      } else {
+        stripBox.scrollLeft = keepLeft;
+      }
+      if (stripExpanded) {
+        const activeTr = tb.children[ri - from];
+        if (activeTr) stripBox.scrollTop = Math.max(0, activeTr.offsetTop - STRIP_ROW_H * 3);
+      }
+      if (editing && editing.where === "strip") setTimeout(positionEditor, 0);
+    }
+    function setStripFocus(rowId, target, tagId, editable) {
+      stripRowId = rowId;
+      stripTarget = target || null;
+      stripTagId = tagId || null;
+      stripEditable = !!editable;
+      stripExpanded = false;
+      buildStrip();
+      if (playerCtrl && stripWrap.parentNode !== playerCtrl.els.workspaceSlot) playerCtrl.setWorkspace(stripWrap);
+      renderStrip();
+    }
     function focusTag(tag) {
       const target = fieldForLabel(tag.label);
       tag.target = target;
+      const row = rows.find((r) => r.id === tag.rowId);
       const ri = view.findIndex((r) => r.id === tag.rowId);
-      const ci = visFields().indexOf(target);
-      if (ri < 0 || ci < 0) return null;
+      if (!row || ri < 0 || !target || !isVis(target)) return null;
       if (S.grid.clickMode !== "edit") setClickMode("edit");
-      startEdit(ri, ci, { tagId: tag.id, select: unpackPref("tagEditCaret") === "select", center: true });
+      setStripFocus(tag.rowId, target, tag.id, true);
+      const ci = visFields().indexOf(target);
+      if (ci >= 0) scrollCellIntoView(ri, ci, true);
+      openEditor(row, target, { where: "strip", tagId: tag.id });
       return null;
+    }
+    let tsItems = [];
+    let tsDonePrompted = false;
+    function editTagsAllDone() {
+      let n = 0;
+      for (const it of tsItems) {
+        for (const t of it.timestamps) {
+          if (t.kind !== "edit" || t.hidden || S.tsGroupsOff.includes(t.group)) continue;
+          n++;
+          if (!t.complete) return false;
+        }
+      }
+      return n > 0;
+    }
+    async function checkAllDone() {
+      if (!tsActive) return;
+      if (!editTagsAllDone()) { tsDonePrompted = false; return; }
+      if (tsDonePrompted) return;
+      tsDonePrompted = true;
+      const pref = allDonePref();
+      let leave = pref === "exit";
+      if (pref === "ask") {
+        const r = await dialog({
+          title: "All Timestamps Complete",
+          message: "Every timestamp has been marked complete. Exit editing mode?\n\nYou'll go back to the grid. The player stays open at its normal size, and you can still play any call.",
+          checkbox: "Always do this",
+          buttons: [{ label: "Yes", value: true, primary: true }, { label: "No", value: false }]
+        });
+        leave = !!r.value;
+        if (r.checked) { try { localStorage.setItem(LS_ALL_DONE, leave ? "exit" : "stay"); } catch (_) {} }
+      }
+      if (leave && tsActive) {
+        exitTimestamps();
+        setClickMode("select");
+      }
     }
     function tagHost() {
       return {
         exitLabel: "Exit Timestamps",
+        hint: "Enter saves the field and marks the tag complete. Tab adds another value. Click the row above to see more of the grid.",
         onActiveTag(tag, item) {
           if (item) activeSmid = item.smid;
           const ri = view.findIndex((r) => r.id === tag.rowId);
           if (tag.kind !== "edit") {
             restoreTempShown(null);
             if (editing && editing.tagId) commitEdit();
+            setStripFocus(tag.rowId, fieldForLabel(tag.label), null, false);
             if (ri >= 0) scrollCellIntoView(ri, 0, true);
             renderRows();
             return null;
@@ -2833,12 +3947,14 @@
           restoreTempShown(target);
           if (!target) {
             if (editing && editing.tagId) commitEdit();
+            setStripFocus(tag.rowId, null, tag.id, true);
             if (ri >= 0) scrollCellIntoView(ri, 0, true);
             renderRows();
             return { text: "(No matching column)" };
           }
           if (ri < 0) {
             if (editing && editing.tagId) commitEdit();
+            setStripFocus(tag.rowId, target, tag.id, true);
             renderRows();
             return {
               text: "(Row Filtered Out)",
@@ -2860,6 +3976,7 @@
               rebuildColPanel();
             } else {
               if (editing && editing.tagId) commitEdit();
+              setStripFocus(tag.rowId, null, tag.id, true);
               scrollCellIntoView(ri, 0, true);
               renderRows();
               return {
@@ -2880,7 +3997,9 @@
           else delete S.tagState[tag.id];
           scheduleSave();
           renderRows();
+          renderStrip();
           checkWorked(tag.group, false);
+          checkAllDone();
         },
         isEditing(tag) {
           if (!editing) return false;
@@ -2890,11 +4009,13 @@
         onGroupsChange(groups) {
           S.tsGroupsOff = groups.filter((g) => !g.enabled).map((g) => g.id);
           scheduleSave();
+          checkAllDone();
         },
         onExit() { exitTimestamps(); }
       };
     }
-    function ensurePlayer(height) {
+    function ensurePlayer(mode) {
+      const height = playerHeightFor(mode);
       if (playerCtrl) {
         if (playerCtrl.restore) playerCtrl.restore();
         if (playerCtrl.setHeight) playerCtrl.setHeight(height);
@@ -2905,11 +4026,18 @@
       playerCtrl = pt._openPlayerPane(card, (reg) => { stopPlayer = reg; }, {
         initialHeight: height,
         settings: playerConfig(),
+        getMaxHeight: availPlayerHeight,
+        onHeightChange: (px) => {
+          const max = availPlayerHeight();
+          try { localStorage.setItem(tsActive ? LS_TS_HEIGHT : LS_GRID_HEIGHT, String(Math.min(px, max))); } catch (_) {}
+          positionEditor();
+        },
         onClosed: () => {
           playerCtrl = null;
           stopPlayer = null;
           activeSmid = null;
-          if (tsActive) { tsActive = false; restoreTempShown(null); updateTsBtn(); }
+          if (editing && editing.where === "strip") cancelEdit();
+          if (tsActive) { tsActive = false; restoreTempShown(null); setTsLayout(false); updateTsBtn(); }
           if (!closed) renderRows();
         }
       });
@@ -2934,17 +4062,23 @@
         if (!tags.length) continue;
         const smid = row.meta ? getFV(row.meta, "sourceMediaId") : "";
         if (!smid) { unlinked++; continue; }
-        items.push({ key: row.key, smid, displayLabel: row.key || rowLabel(row), row: row.meta || {}, rowId: row.id, timestamps: tags });
+        const rowRef = row;
+        items.push({ key: row.key, smid, displayLabel: row.key || rowLabel(row), row: row.meta || {}, rowId: row.id, timestamps: tags, titleFn: () => rowTitle(rows.find((r) => r.id === rowRef.id) || rowRef) });
       }
       if (!items.length) {
         dialog({ title: "No calls to play", message: unlinked ? "The rows with timestamps aren't linked to calls yet. Add Nexidia Metadata first." : "None of the rows showing on the grid have timestamps. Check your filters." });
         return;
       }
       const prevRow = keepPos && tsActive && playerCtrl && playerCtrl.getActiveTag && playerCtrl.getActiveTag() ? playerCtrl.getActiveTag().rowId : null;
-      const p = ensurePlayer(TS_PLAYER_HEIGHT);
-      if (!p) { toast("Media Player isn't loaded.", "#6b7280"); return; }
       setInstructions(false);
       tsActive = true;
+      setTsLayout(true);
+      const p = ensurePlayer("ts");
+      if (!p) { tsActive = false; setTsLayout(false); toast("Media Player isn't loaded.", "#6b7280"); return; }
+      tsItems = items;
+      tsDonePrompted = editTagsAllDone();
+      buildStrip();
+      p.setWorkspace(stripWrap);
       if (groups.some((g) => g.kind === "edit" && g.enabled)) setClickMode("edit");
       p.setPlaylist(items, { host: tagHost(), groups });
       let start = prevRow ? items.findIndex((it) => it.rowId === prevRow) : -1;
@@ -2954,14 +4088,32 @@
       updateTsBtn();
       if (unlinked) toast(`${unlinked} row${unlinked === 1 ? " has" : "s have"} timestamps but no linked call, so ${unlinked === 1 ? "it was" : "they were"} skipped.`, "#d97706");
     }
+    function gridNavFor(idx) {
+      return {
+        items: view.map((r) => ({ row: r.meta || {}, titleFn: () => rowTitle(r) })),
+        currentIndex: idx >= 0 ? idx : 0,
+        onNavigate: (i) => { const t = view[i]; if (t) triggerPlay(t); }
+      };
+    }
     function exitTimestamps(quiet) {
       if (!tsActive) return;
-      if (editing && editing.tagId) commitEdit();
+      if (editing) commitEdit();
+      const lastRowId = stripRowId;
       tsActive = false;
+      tsItems = [];
+      stripRowId = null;
+      stripExpanded = false;
       restoreTempShown(null);
+      setTsLayout(false);
       if (playerCtrl) {
+        playerCtrl.setWorkspace(null);
         playerCtrl.clearPlaylist();
-        playerCtrl.setHeight(GRID_PLAYER_HEIGHT);
+        playerCtrl.setHeight(playerHeightFor("grid"));
+        const idx = view.findIndex((r) => r.id === lastRowId);
+        if (idx >= 0) {
+          playerCtrl.setGridNav(gridNavFor(idx));
+          if (playerCtrl.refreshTags) playerCtrl.refreshTags();
+        }
       }
       updateTsBtn();
       if (!quiet) renderRows();
@@ -3094,9 +4246,8 @@
         selAll.checked = view.length > 0 && view.every((r) => selected.has(r.id));
         selAll.indeterminate = selected.size > 0 && !selAll.checked;
       }
-      const hadFocus = editing && document.activeElement === editing.input;
-      const caret = hadFocus ? [editing.input.selectionStart, editing.input.selectionEnd] : null;
       tbody.innerHTML = "";
+      const revKey = reviewCellKey();
       const span = vf.length + frozenCount();
       if (range.start > 0) {
         const sp = el("tr", {});
@@ -3141,24 +4292,19 @@
           const w = getColWidth(field);
           const isEditing = editing && editing.rowId === row.id && editing.field === field;
           const edited = !!getEdit(row, field);
-          if (isEditing) {
-            editing.ri = ri;
-            editing.ci = ci;
-            const td = el("td", { style: `padding:0;border-bottom:1px solid #f1f5f9;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;` });
-            td.dataset.r = String(ri);
-            td.dataset.c = String(ci);
-            td.appendChild(editing.input);
-            tr.appendChild(td);
-            return;
-          }
+          if (isEditing && editing.where === "grid") { editing.ri = ri; editing.ci = ci; }
           const display = cellText(row, field);
-          const hl = cellHl(row, field);
+          const iss = S.settings.showFlags ? cellIssues(row, field) : [];
+          const hl = cellHl(row, field) || (iss.length ? "#fef2f2" : null);
           const cSel = selectMode && cellSel.has(ri + "," + ci);
           const td = el("td", { style: `position:relative;padding:4px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:${w}px;min-width:${w}px;max-width:${w}px;box-sizing:border-box;height:${ROW_HEIGHT}px;${selectMode ? "cursor:cell;" : (editMode ? "cursor:text;" : "")}${cSel ? "background:#dbeafe;outline:1px solid #93c5fd;outline-offset:-1px;" : (hl ? "background:" + hl + ";" : "")}`, title: display }, display);
           td.dataset.r = String(ri);
           td.dataset.c = String(ci);
           if (hl) td.dataset.hl = hl;
+          if (isEditing) { td.style.outline = `2px solid ${editing.tagId ? "#ef4444" : "#f59e0b"}`; td.style.outlineOffset = "-2px"; }
+          else if (revKey && revKey === row.id + "|" + field) { td.style.outline = "2px solid #dc2626"; td.style.outlineOffset = "-2px"; }
           if (edited) td.appendChild(editMarker(row, field));
+          if (iss.length) td.appendChild(flagMarker(iss));
           tr.appendChild(td);
         });
         tr.addEventListener("click", (e) => {
@@ -3172,10 +4318,7 @@
         sp.appendChild(el("td", { colSpan: span, style: `height:${(view.length - range.end) * ROW_HEIGHT}px;padding:0;border:0;` }));
         tbody.appendChild(sp);
       }
-      if (editing && editing.input.isConnected && hadFocus && document.activeElement !== editing.input) {
-        editing.input.focus();
-        try { editing.input.setSelectionRange(caret[0], caret[1]); } catch (_) {}
-      }
+      if (editing && editing.where === "grid") positionEditor();
     }
     function updateCellHighlights() {
       tbody.querySelectorAll("td[data-r]").forEach((td) => {
@@ -3222,7 +4365,6 @@
       if (!td) return;
       const r = Number(td.dataset.r), c = Number(td.dataset.c);
       if (S.grid.clickMode === "edit") {
-        if (editing && editing.input.contains(e.target)) return;
         e.preventDefault();
         const prevTag = editing && editing.tagId;
         startEdit(r, c);
@@ -3305,15 +4447,11 @@
       const smid = row.meta ? getFV(row.meta, "sourceMediaId") : "";
       if (!smid) { toast("No call is linked to this row yet. Add Nexidia Metadata first.", "#6b7280"); return; }
       if (tsActive) exitTimestamps(true);
-      const p = ensurePlayer(GRID_PLAYER_HEIGHT);
+      const p = ensurePlayer("grid");
       if (!p) { window.open(PLAYER_URL(smid), "_blank"); return; }
       activeSmid = smid;
       const idx = view.indexOf(row);
-      p.setGridNav({
-        items: view.map((r) => ({ row: r.meta || {} })),
-        currentIndex: idx >= 0 ? idx : 0,
-        onNavigate: (i) => { const t = view[i]; if (t) triggerPlay(t); }
-      });
+      p.setGridNav(gridNavFor(idx));
       p.loadCall(smid, rowLabel(row), undefined, null);
       renderRows();
     }
@@ -3347,13 +4485,21 @@
       const c = colById(f.slice(2));
       const t = effType(c);
       if (t === "date") {
-        const d = parseLooseDate(raw);
-        if (d) return num(Date.UTC(d.y, d.mo - 1, d.d) / 86400000 + 25569, "d");
+        const d = parseDateToken(raw);
+        if (d) {
+          const style = colFormat(c);
+          const cls = style === "MM/DD/YYYY" ? "dpad" : style === "YYYY-MM-DD" ? "diso" : style === "M/D/YY" ? "d2" : style === "MM/DD/YY" ? "dpad2" : "d";
+          return num(Date.UTC(d.y, d.mo - 1, d.d) / 86400000 + 25569, cls);
+        }
       }
-      if (t === "number" && /^-?\d+(\.\d+)?$/.test(raw) && raw.replace(/[-.]/g, "").length < 15) return num(raw, "gen");
-      if (t === "currency" && /^\$?-?[\d,]+(\.\d+)?$/.test(raw)) {
-        const n = Number(raw.replace(/[$,]/g, ""));
-        if (isFinite(n)) return num(n, "cur");
+      const style = colFormat(c);
+      if (t === "number") {
+        const m = parseMoneyToken(raw);
+        if (m && !m.dollar && !m.leadingZero && m.intPart.length < 15) return num(String(m.n), style === "#,##0" ? (m.decimals ? "gen" : "thou") : "gen");
+      }
+      if (t === "currency") {
+        const m = parseMoneyToken(raw);
+        if (m) return num(String(m.n), style === "$#,##0" ? "cur0" : (style === "#,##0.00" ? "dec2c" : (style === "0.00" ? "dec2" : "cur")));
       }
       return str(raw);
     }
@@ -3370,6 +4516,13 @@
         '.int{mso-number-format:"0"}',
         '.dec2{mso-number-format:"0.00"}',
         '.cur{mso-number-format:"\\$\\#\\,\\#\\#0\\.00"}',
+        '.cur0{mso-number-format:"\\$\\#\\,\\#\\#0"}',
+        '.dec2c{mso-number-format:"\\#\\,\\#\\#0\\.00"}',
+        '.thou{mso-number-format:"\\#\\,\\#\\#0"}',
+        '.dpad{mso-number-format:"mm\\/dd\\/yyyy"}',
+        '.d2{mso-number-format:"m\\/d\\/yy"}',
+        '.dpad2{mso-number-format:"mm\\/dd\\/yy"}',
+        '.diso{mso-number-format:"yyyy\\-mm\\-dd"}',
         ".gen{mso-number-format:General}"
       ].join("");
       const head = "<tr>" + fields.map((f) => "<th>" + escHtml(headerOf(f)) + "</th>").join("") + "</tr>";
@@ -3403,7 +4556,20 @@
     async function exportExcel() {
       if (editing) commitEdit();
       const list = await chooseScope();
-      if (list) doExcelExport(list);
+      if (!list) return;
+      if (S.settings.checkOnExport) {
+        const n = computeIssues(list, exportFields()).length;
+        if (n) {
+          const r = await dialog({
+            title: `There ${n === 1 ? "is 1 possible issue" : `are ${n.toLocaleString()} possible issues`}.`,
+            message: `Do you want to review ${n === 1 ? "it" : "them"} before exporting? Flags and highlights aren't included in the export either way.`,
+            buttons: [{ label: "Review", value: "review", primary: true }, { label: "Export Anyway", value: "export" }, { label: "Cancel", value: null }]
+          });
+          if (!r.value) return;
+          if (r.value === "review") { openReview(list, list); return; }
+        }
+      }
+      doExcelExport(list);
     }
     async function exportTranscripts() {
       const list = await chooseScope();
@@ -3576,6 +4742,18 @@
       if (fieldPolicies.length) box.appendChild(line(label("Saved choices for single fields", info("Fields where you picked \"Always do this for this field.\" Clear them to be asked again.")), clearFieldPol));
       const revertCb = el("input", { type: "checkbox", checked: !S.suppress.revertConfirm });
       box.appendChild(line(label("Confirm before reverting an edit"), revertCb));
+      box.appendChild(section("Checks"));
+      const flagsCb = el("input", { type: "checkbox", checked: d.showFlags !== false });
+      box.appendChild(line(label("Flag cells that fail their checks", info("Show a red corner on cells that are duplicates or don't meet a column's rules. Set checks from a column's menu, under Checks.")), flagsCb));
+      const expCb = el("input", { type: "checkbox", checked: d.checkOnExport !== false });
+      box.appendChild(line(label("Offer a review before exporting", info("When flagged cells are in what you're exporting, ask whether to step through them first.")), expCb));
+      const ignN = Object.keys(S.issueIgnore.items).length + Object.keys(S.issueIgnore.rules).length;
+      let clearIgn = false;
+      if (ignN) {
+        const ignB = el("button", { style: btnStyle("#9ca3af", "color:#374151;padding:4px 10px;font-size:11px;") }, `Clear ${ignN} ignored item${ignN === 1 ? "" : "s"}`);
+        ignB.onclick = () => { clearIgn = true; ignB.disabled = true; ignB.textContent = "Will clear on Apply"; };
+        box.appendChild(line(label("Ignored items and rules", info("Items and rules you chose to ignore during a review. Clear them to be flagged again.")), ignB));
+      }
       box.appendChild(section("Timestamps"));
       const hideWorkedCb = el("input", { type: "checkbox", checked: d.hideWorkedTs !== false });
       box.appendChild(line(label("Hide timestamp columns once every tag is worked", info("When every tag in a timestamp column is marked complete, that column is hidden so it isn't exported. You can always bring it back with Show / Hide Columns.")), hideWorkedCb));
@@ -3588,7 +4766,7 @@
       box.appendChild(line(label("Player settings for this session", info("How calls are named, which details show with each call, and playback options. Changes made here are saved with this session only.")), playerBtn));
       if (S.columns.length) {
         box.appendChild(section("Column Types"));
-        box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Auto Detect reads the values as they come in. Prose columns use the Prose rules above; everything else uses the Basic rules."));
+        box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Auto Detect reads the values as they come in. Prose columns use the Prose rules above; everything else uses the Basic rules. Date, Currency, and Number formats are set in each column's Attributes menu."));
         for (const c of S.columns) {
           const sel = el("select", { style: "padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:210px;" });
           for (const [v, l] of TYPES) sel.appendChild(el("option", { value: v }, v === "auto" ? `${l} (${TYPE_LABELS[c.detected] || c.detected})` : l));
@@ -3636,6 +4814,9 @@
         d.showConfidence = confCb.checked;
         d.autoMeta = autoCb.checked;
         d.hideWorkedTs = hideWorkedCb.checked;
+        d.showFlags = flagsCb.checked;
+        d.checkOnExport = expCb.checked;
+        if (clearIgn) S.issueIgnore = { items: {}, rules: {} };
         const pkChanged = d.primaryKey !== S.settings.primaryKey;
         const autoTurnedOn = d.autoMeta && !S.settings.autoMeta;
         const hideTurnedOn = d.hideWorkedTs && !S.settings.hideWorkedTs;
@@ -3704,6 +4885,7 @@
     }
     function teardown() {
       closed = true;
+      if (editing) closeEditorPanel(editing);
       editing = null;
       tsActive = false;
       clearTimeout(saveTimer);
@@ -3712,6 +4894,8 @@
       closePopovers();
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onOutsideEdit, true);
+      window.removeEventListener("resize", onWinResize);
+      document.querySelectorAll("[data-nx-editor]").forEach((p) => p.remove());
       document.querySelectorAll("[data-unpack-prompt]").forEach((p) => p.remove());
       try { modal.remove(); } catch (_) {}
       try { stickyClose.remove(); } catch (_) {}
@@ -3748,6 +4932,7 @@
     importSheetBtn.onclick = () => sheetInput.click();
     sheetInput.onchange = () => { const f = sheetInput.files && sheetInput.files[0]; sheetInput.value = ""; if (f) importSpreadsheet(f); };
     exportExcelBtn.onclick = () => exportExcel();
+    issuesBtn.onclick = () => openReview(view, null);
     playTsBtn.onclick = () => startTimestamps(false);
     exportTranscriptsBtn.onclick = () => exportTranscripts();
     saveSessionBtn.onclick = () => { if (!S.entries.length) { toast("Nothing to save yet.", "#6b7280"); return; } saveSessionFile(); };
@@ -3791,10 +4976,25 @@
       }
       return out;
     }
+    //##> REPORT CHECKS: A report column can include unique: true and checks: [{ type, a, b, message }]. Types
+    //##> match the Checks menu (required, length, range, contains, notContains, startsWith, endsWith, allowed,
+    //##> pattern, npi, tin). Pattern is a regular expression that has to match the whole value. Messages can use
+    //##> {value} and {column}. The report can also pass checkMessages: { npi, tin, duplicate, ... } to replace
+    //##> the default message for a type.
+    function presetChecks(f, c) {
+      const list = Array.isArray(c.checks) ? c.checks : [];
+      if (!c.unique && !list.length) return;
+      const ce = checkEntry(f);
+      if (c.unique) ce.unique = true;
+      list.forEach((r, i) => {
+        if (!r || !CHECK_TYPES.some(([v]) => v === r.type)) return;
+        ce.rules.push({ id: "p" + i + "_" + f.replace(/[^A-Za-z0-9]/g, ""), type: r.type, a: r.a == null ? "" : String(r.a), b: r.b == null ? "" : String(r.b), message: r.message || "", source: "report" });
+      });
+    }
     function applyPreload(p) {
       S = newState();
       S.settings.primaryKey = p.primaryKey || "Trans_Id";
-      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null };
+      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null, checkMessages: p.checkMessages || null };
       const order = [];
       const merges = [];
       for (const c of (p.columns || [])) {
@@ -3804,6 +5004,7 @@
             S.metaHeaders[c.field] = c.header || c.field;
             order.push("m:" + c.field);
           }
+          presetChecks("m:" + c.field, c);
           continue;
         }
         const aliases = presetAliases(c);
@@ -3811,7 +5012,9 @@
         const taken = aliasMap();
         if (aliases.some((a) => taken.has(a.toLowerCase()))) continue;
         const id = "c" + (S.nextColId++);
-        S.columns.push({ id, source: c.key || c.header, header: c.header || c.key, aliases, type: c.dataType || "auto", detected: "text", nullEq: {} });
+        const presetType = TYPES.some(([v]) => v === c.dataType) ? c.dataType : "auto";
+        S.columns.push({ id, source: c.key || c.header, header: c.header || c.key, aliases, type: presetType, format: c.format || "", detected: "text", nullEq: {} });
+        presetChecks("j:" + id, c);
         if (c.mergeInto) merges.push({ source: "j:" + id, target: "m:" + c.mergeInto });
         else order.push("j:" + id);
       }
