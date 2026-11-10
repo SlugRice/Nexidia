@@ -1,4 +1,4 @@
-//[Last Update: 9:02 PM 11/9/2026]
+//[Last Update: 12:19 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
 const api = window.NEXIDIA_TOOLS;
@@ -315,11 +315,11 @@ function openSettingsDialog(config, onApplied) {
   renderAll();
 }
 /* ───────────────────── BUILD PLAYER PANE ───────────────────── */
-function buildPlayerPane(gridCard, initialHeight) {
+function buildPlayerPane(gridCard, initialHeight, unbounded) {
   ensurePlayerStyles();
   const DEFAULT_H = initialHeight || "85vh";
   const pane = el("div", {
-    style: `height:${DEFAULT_H};min-height:200px;max-height:95vh;border-top:1px solid #e5e7eb;background:#111827;display:flex;flex-direction:column;position:relative;flex-shrink:0;font-family:Segoe UI,Arial,sans-serif;`
+    style: `height:${DEFAULT_H};min-height:200px;max-height:${unbounded ? "none" : "95vh"};border-top:1px solid #e5e7eb;background:#111827;display:flex;flex-direction:column;position:relative;flex-shrink:0;font-family:Segoe UI,Arial,sans-serif;`
   });
   const handle = el("div", {
     style: "height:6px;cursor:ns-resize;background:#1f2937;border-bottom:1px solid #374151;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:4px;"
@@ -517,13 +517,26 @@ function buildPlayerPane(gridCard, initialHeight) {
   });
   transcriptOuter.appendChild(transcriptBar);
   transcriptOuter.appendChild(transcriptPane);
+  const workspaceSlot = el("div", { style: "display:none;flex-shrink:0;position:relative;z-index:4;" });
+  const lower = el("div", { style: "display:flex;flex:1;min-height:0;overflow:hidden;" });
+  const taskCol = el("div", {
+    style: "display:none;width:320px;min-width:260px;flex-shrink:0;background:#0b1220;border-left:1px solid #1e293b;border-top:1px solid #1e293b;padding:12px;box-sizing:border-box;overflow-y:auto;flex-direction:column;gap:10px;"
+  });
+  taskCol.appendChild(el("div", { style: "font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;" }, "Current Task"));
+  const taskBody = el("div", { style: "display:flex;flex-direction:column;gap:10px;" });
+  const taskBtns = el("div", { style: "display:flex;flex-direction:column;gap:8px;" });
+  const taskHint = el("div", { style: "font-size:11px;color:#64748b;line-height:1.5;" });
+  taskCol.append(taskBody, taskBtns, taskHint);
+  lower.appendChild(transcriptOuter);
+  lower.appendChild(taskCol);
   mainCol.appendChild(titleBar);
   mainCol.appendChild(navBar);
   mainCol.appendChild(tagInfo);
   mainCol.appendChild(timelineWrap);
   mainCol.appendChild(controls);
   mainCol.appendChild(searchBar);
-  mainCol.appendChild(transcriptOuter);
+  mainCol.appendChild(workspaceSlot);
+  mainCol.appendChild(lower);
   body.appendChild(sidebarWrap);
   body.appendChild(mainCol);
   pane.appendChild(handle);
@@ -542,7 +555,8 @@ function buildPlayerPane(gridCard, initialHeight) {
     showAllEventsLabel, showAllEventsCb,
     searchBar, searchInput, searchCount, searchPrevBtn, searchNextBtn, searchCloseBtn,
     autoScrollCb, copyTxBtn,
-    transcriptPane
+    transcriptPane, transcriptOuter,
+    workspaceSlot, lower, taskCol, taskBody, taskBtns, taskHint, titleBar
   };
 }
 /* ───────────────────── DRAW TIMELINE ───────────────────── */
@@ -594,7 +608,7 @@ function openPlayerPane(gridCard, onClose, options) {
   const opts = options || {};
   let configuredHeight = opts.initialHeight || "85vh";
   const settingsConfig = opts.settings || null;
-  const els = buildPlayerPane(gridCard, opts.initialHeight);
+  const els = buildPlayerPane(gridCard, opts.initialHeight, typeof opts.getMaxHeight === "function");
   let settings = resolveSettings(settingsConfig);
   let audio = null;
   let audioCtx = null;
@@ -648,16 +662,32 @@ function openPlayerPane(gridCard, onClose, options) {
   /* ── Resize handle ── */
   let dragging = false, startY = 0, startH = 0;
   els.handle.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
     dragging = true; startY = e.clientY; startH = els.pane.offsetHeight;
     document.body.style.userSelect = "none";
   });
+  function maxPaneHeight() {
+    if (typeof opts.getMaxHeight === "function") {
+      const m = Number(opts.getMaxHeight());
+      if (isFinite(m) && m > 0) return Math.max(200, m);
+    }
+    return window.innerHeight * 0.95;
+  }
   const onDocMouseMove = (e) => {
     if (!dragging) return;
-    const newH = Math.max(200, Math.min(window.innerHeight * 0.95, startH + (startY - e.clientY)));
+    const newH = Math.max(200, Math.min(maxPaneHeight(), startH + (startY - e.clientY)));
     els.pane.style.height = newH + "px";
   };
   const onDocMouseUp = () => {
-    if (dragging) { dragging = false; document.body.style.userSelect = ""; }
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.userSelect = "";
+    configuredHeight = els.pane.offsetHeight + "px";
+    if (typeof opts.onHeightChange === "function") {
+      try { opts.onHeightChange(els.pane.offsetHeight); } catch (e) { console.error(e); }
+    }
+    refreshPinsAndTimeline();
   };
   document.addEventListener("mousemove", onDocMouseMove);
   document.addEventListener("mouseup", onDocMouseUp);
@@ -762,7 +792,36 @@ function openPlayerPane(gridCard, onClose, options) {
     if (!row) return "";
     return settings.stageFields.filter((f) => f !== settings.nameField).map((f) => fieldValue(row, f)).filter(Boolean).join(" \u00B7 ");
   }
+  //##> ITEM TITLES: A playlist or grid item can carry titleFn() returning { title, tip }. When it does, that
+  //##> replaces the Name calls by field everywhere the call is named (header, Calls tab, Tags tab), so a
+  //##> module like Unpack can show live row numbers instead of long ids.
+  function itemTitle(item, fallback) {
+    if (item && typeof item.titleFn === "function") {
+      try {
+        const t = item.titleFn();
+        if (t && t.title) return { title: String(t.title), tip: t.tip ? String(t.tip) : "" };
+      } catch (e) { console.error(e); }
+    }
+    const name = callName(item && item.row, fallback);
+    return { title: name, tip: "" };
+  }
+  function currentItemRef() {
+    if (playlist && playlist[playlistIdx] && playlist[playlistIdx].smid === currentSmid) return playlist[playlistIdx];
+    if (!playlist && gridNav && gridNav.items) return gridNav.items[gridNav.currentIndex] || null;
+    return null;
+  }
   function renderCallHeader() {
+    const ref = currentItemRef();
+    if (ref && typeof ref.titleFn === "function") {
+      const t = itemTitle(ref, currentLabel);
+      const details = callDetails(currentRow);
+      els.callTitle.textContent = t.title;
+      els.callTitle.title = t.tip || t.title;
+      els.callSub.textContent = details;
+      els.callSub.title = details;
+      minimizedTitle.textContent = details ? `${t.title} \u00B7 ${details}` : t.title;
+      return;
+    }
     const name = callName(currentRow, currentLabel) || (currentSmid ? `SMID ${currentSmid}` : "No call loaded");
     const details = callDetails(currentRow);
     els.callTitle.textContent = name;
@@ -1051,12 +1110,73 @@ function openPlayerPane(gridCard, onClose, options) {
     els.exitTagsBtn.style.display = tagHost ? "" : "none";
     if (tagHost && tagHost.exitLabel) els.exitTagsBtn.textContent = tagHost.exitLabel;
     renderTagInfo(act);
+    renderCallHeader();
     refreshPinsAndTimeline();
     buildSidebar();
   }
   els.exitTagsBtn.onclick = () => {
     if (tagHost && typeof tagHost.onExit === "function") tagHost.onExit();
   };
+  //##> TASK CARD: When a module drives tag playback (tagHost), the active-tag info, Mark Complete, Replay Tag,
+  //##> and the paused message move out of the crowded center into a card on the right of the transcript.
+  //##> They move back to their normal spots when tag playback ends.
+  let taskMode = false;
+  const homeSpots = {
+    tagInfo: () => els.timelineWrap.parentNode.insertBefore(els.tagInfo, els.timelineWrap),
+    replayBtn: () => els.prevNavBtn.parentNode.appendChild(els.replayBtn),
+    markBtn: () => els.prevNavBtn.parentNode.appendChild(els.markBtn),
+    pauseWrap: () => els.utilBar.insertBefore(els.pauseWrap, els.exitTagsBtn)
+  };
+  function setTaskMode(on) {
+    if (on === taskMode) return;
+    taskMode = on;
+    if (on) {
+      els.taskBody.appendChild(els.tagInfo);
+      els.taskBtns.appendChild(els.markBtn);
+      els.taskBtns.appendChild(els.replayBtn);
+      els.taskBtns.appendChild(els.pauseWrap);
+      els.tagInfo.style.flexDirection = "column";
+      els.tagInfo.style.alignItems = "flex-start";
+      els.tagInfo.style.justifyContent = "flex-start";
+      els.tagInfo.style.padding = "0";
+      els.tagInfo.style.borderBottom = "0";
+      els.tagInfo.style.background = "transparent";
+      els.pauseWrap.style.flexDirection = "column";
+      els.pauseWrap.style.alignItems = "flex-start";
+      els.markBtn.style.width = "100%";
+      els.replayBtn.style.width = "100%";
+      els.taskCol.style.display = "flex";
+    } else {
+      els.tagInfo.style.flexDirection = "";
+      els.tagInfo.style.alignItems = "center";
+      els.tagInfo.style.justifyContent = "center";
+      els.tagInfo.style.padding = "4px 12px";
+      els.tagInfo.style.borderBottom = "1px solid #1e293b";
+      els.tagInfo.style.background = "#0f172a";
+      els.pauseWrap.style.flexDirection = "";
+      els.pauseWrap.style.alignItems = "center";
+      els.markBtn.style.width = "";
+      els.replayBtn.style.width = "";
+      homeSpots.tagInfo();
+      homeSpots.replayBtn();
+      homeSpots.markBtn();
+      homeSpots.pauseWrap();
+      els.taskCol.style.display = "none";
+    }
+  }
+  function setTaskHint(text) {
+    els.taskHint.textContent = text || "";
+  }
+  function setWorkspace(node) {
+    els.workspaceSlot.innerHTML = "";
+    if (node) {
+      els.workspaceSlot.appendChild(node);
+      els.workspaceSlot.style.display = "block";
+    } else {
+      els.workspaceSlot.style.display = "none";
+    }
+    setTimeout(() => { if (!closedPlayer) refreshPinsAndTimeline(); }, 30);
+  }
   /* ── Pins / timeline helpers ── */
   function getVisiblePins() {
     const imports = importedTimestamps.filter((t) => !t.hidden && groupEnabled(t.group));
@@ -1081,7 +1201,8 @@ function openPlayerPane(gridCard, onClose, options) {
     if (!audio || !durationMs) return;
     const curMs = audio.currentTime * 1000;
     els.timeEl.textContent = `${fmtTime(curMs)} / ${fmtTime(durationMs)}`;
-    if (!seeking) els.seekBar.value = Math.round((audio.currentTime / audio.duration) * 1000);
+    const total = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : durationMs / 1000;
+    if (!seeking && total > 0) els.seekBar.value = Math.round((audio.currentTime / total) * 1000);
     updatePlayhead(els.playheadDiv, curMs, durationMs);
     syncTranscript(curMs);
   }
@@ -1160,13 +1281,13 @@ function openPlayerPane(gridCard, onClose, options) {
     if (activeTab === "tags") buildTagsTab();
     else buildCallsTab();
   }
-  function callRow(name, details, isCurrent, isAdjacent, onClick) {
+  function callRow(name, details, isCurrent, isAdjacent, onClick, tip) {
     const row = el("div", {
       style: `padding:7px 12px;cursor:pointer;border-bottom:1px solid rgba(30,41,59,0.4);background:${isCurrent ? "#1e293b" : isAdjacent ? "#111827" : "transparent"};`
     });
     row.appendChild(el("div", { style: `font-size:12px;color:${isCurrent ? "#93c5fd" : "#cbd5e1"};font-weight:${isCurrent ? "700" : "400"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` }, name));
     if (details) row.appendChild(el("div", { style: "font-size:10px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px;" }, details));
-    row.title = details ? `${name} \u00B7 ${details}` : name;
+    row.title = (tip ? tip + " \u00B7 " : "") + (details ? `${name} \u00B7 ${details}` : name);
     row.onclick = onClick;
     if (isCurrent) row.dataset.current = "1";
     return row;
@@ -1195,7 +1316,8 @@ function openPlayerPane(gridCard, onClose, options) {
         const item = playlist[i];
         const isCurrent = i === playlistIdx;
         const isAdjacent = i === playlistIdx - 1 || i === playlistIdx + 1;
-        els.sidebarList.appendChild(callRow(callName(item.row, item.displayLabel || item.key), callDetails(item.row), isCurrent, isAdjacent, () => loadPlaylistIndex(i)));
+        const it = itemTitle(item, item.displayLabel || item.key);
+        els.sidebarList.appendChild(callRow(it.title, callDetails(item.row), isCurrent, isAdjacent, () => loadPlaylistIndex(i), it.tip));
         if (!isCurrent && !isAdjacent) continue;
         if (isCurrent) {
           for (const ts of itemTags(item)) {
@@ -1223,7 +1345,8 @@ function openPlayerPane(gridCard, onClose, options) {
       for (let i = start; i < end; i++) {
         const row = items[i] && items[i].row;
         const isCurrent = i === cur;
-        els.sidebarList.appendChild(callRow(callName(row, `Call ${i + 1}`), callDetails(row), isCurrent, i === cur - 1 || i === cur + 1, () => { if (i !== gridNav.currentIndex) gridNav.onNavigate(i); }));
+        const it = itemTitle(items[i], `Call ${i + 1}`);
+        els.sidebarList.appendChild(callRow(it.title, callDetails(row), isCurrent, i === cur - 1 || i === cur + 1, () => { if (i !== gridNav.currentIndex) gridNav.onNavigate(i); }, it.tip));
         if (isCurrent && showAllEvents && currentSmid) {
           for (const evt of (eventsCache.get(currentSmid) || [])) {
             els.sidebarList.appendChild(subRow(`${evt.label || "Event"} \u2022 ${fmtTime(evt.ms)}`, null, () => { if (audio) audio.currentTime = evt.ms / 1000; }));
@@ -1293,8 +1416,13 @@ function openPlayerPane(gridCard, onClose, options) {
       const card = el("div", { style: `margin:6px 8px;border-radius:8px;background:${isActive ? "#172036" : "#0f172a"};border:1px solid ${isActive ? "#3b82f6" : "#1e293b"};overflow:hidden;` });
       if (isActive) card.dataset.current = "1";
       const head = el("div", { style: "display:flex;align-items:center;gap:6px;padding:6px 8px;cursor:pointer;border-bottom:1px solid #1e293b;" });
-      const name = callName(g.item.row, g.item.displayLabel || g.item.key);
-      head.appendChild(el("div", { style: `flex:1;min-width:0;font-size:11px;font-weight:700;color:${isActive ? "#93c5fd" : "#cbd5e1"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`, title: name }, name));
+      const it = itemTitle(g.item, g.item.displayLabel || g.item.key);
+      const name = it.title;
+      const det = callDetails(g.item.row);
+      const nameWrap = el("div", { style: "flex:1;min-width:0;", title: (it.tip ? it.tip + " \u00B7 " : "") + name + (det ? " \u00B7 " + det : "") });
+      nameWrap.appendChild(el("div", { style: `font-size:11px;font-weight:700;color:${isActive ? "#93c5fd" : "#cbd5e1"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` }, name));
+      if (det) nameWrap.appendChild(el("div", { style: "font-size:9px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, det));
+      head.appendChild(nameWrap);
       head.appendChild(el("div", { style: `font-size:10px;color:${visible.length && done === visible.length ? "#4ade80" : "#64748b"};flex-shrink:0;` }, `${done}/${visible.length} done`));
       head.onclick = () => { if (g.i !== playlistIdx) loadPlaylistIndex(g.i); };
       card.appendChild(head);
@@ -1527,7 +1655,13 @@ function openPlayerPane(gridCard, onClose, options) {
     if (els.pane.style.display !== "none") els.pane.style.height = configuredHeight;
     setTimeout(() => { if (!closedPlayer) refreshPinsAndTimeline(); }, 50);
   }
-  const onResize = () => { if (!closedPlayer) refreshPinsAndTimeline(); };
+  const onResize = () => {
+    if (closedPlayer) return;
+    if (typeof opts.getMaxHeight === "function" && els.pane.style.display !== "none" && els.pane.offsetHeight > maxPaneHeight()) {
+      els.pane.style.height = maxPaneHeight() + "px";
+    }
+    refreshPinsAndTimeline();
+  };
   window.addEventListener("resize", onResize, { passive: true });
   function closePlayer() {
     if (closedPlayer) return;
@@ -1653,6 +1787,8 @@ function openPlayerPane(gridCard, onClose, options) {
     activeTagId = null;
     activeNote = null;
     tagHost = setup.host || null;
+    setTaskMode(!!tagHost);
+    setTaskHint(tagHost && tagHost.hint ? tagHost.hint : "");
     for (const item of (playlist || [])) {
       item.timestamps = prepTags(item.timestamps);
       if (!tagHost) for (const t of item.timestamps) t.kind = "nav";
@@ -1676,6 +1812,8 @@ function openPlayerPane(gridCard, onClose, options) {
     playlist = null;
     playlistIdx = -1;
     tagHost = null;
+    setTaskMode(false);
+    setTaskHint("");
     groupList = [];
     activeTagId = null;
     activeNote = null;
@@ -1757,13 +1895,16 @@ function openPlayerPane(gridCard, onClose, options) {
     audio.volume = 1;
     audio.playbackRate = SPEEDS[speedIdx];
     updateLpCutoff(SPEEDS[speedIdx]);
+    els.timeEl.textContent = `${fmtTime(jumpToMs || 0)} / ${fmtTime(durationMs)}`;
     audio.ontimeupdate = () => {
+      updateTime();
       if (thisAudio.currentTime > 0) {
-        updateTime();
         tagTick(thisAudio.currentTime * 1000);
         if (!thisAudio.paused) skipNonTalk();
       }
     };
+    audio.onseeked = () => updateTime();
+    audio.ondurationchange = () => updateTime();
     audio.onplay = () => {
       els.playBtn.style.background = "#22c55e";
       if (pausedForTag) { pauseOverride = pausedForTag; clearPause(); }
@@ -1786,7 +1927,7 @@ function openPlayerPane(gridCard, onClose, options) {
     audio.onloadedmetadata = () => {
       if (jumpToMs) thisAudio.currentTime = jumpToMs / 1000;
       updateTime();
-      thisAudio.play().catch(() => {});
+      thisAudio.play().catch(() => { if (thisAudio === audio) setStatus("Press play to start this call."); });
     };
     setStatus("Loading data...");
     const [hitLinesResult, autoSummaryResult, transcriptResult, highlightsResult] = await Promise.allSettled([
@@ -1897,7 +2038,8 @@ function openPlayerPane(gridCard, onClose, options) {
     loadCall, stopAudio, setPlaylist, clearPlaylist, loadPlaylistIndex, setGridNav,
     completeTag, uncompleteTag, resumeFromEdit, refreshTags: updateTagUI,
     getActiveTag: () => activeTag(),
-    setHeight,
+    setHeight, setWorkspace, setTaskHint,
+    isMinimized: () => els.pane.style.display === "none",
     minimize: minimizePlayer, restore: restorePlayer, close: closePlayer,
     openSettings, refreshSettings, getSettings: () => clone(settings),
     els
