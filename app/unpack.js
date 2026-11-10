@@ -1,4 +1,4 @@
-//[Last Update: 4:11 PM 11/9/2026]
+//[Last Update: 9:02 PM 11/9/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -29,6 +29,15 @@
   const COL1_W = 44;
   const PLAY_COL_W = 28;
   const EDIT_COLOR = "#f97316";
+  const TS_PLAYER_HEIGHT = "33vh";
+  const GRID_PLAYER_HEIGHT = "50vh";
+  const COMPLETE_DELAY_MS = 2000;
+  const PLAYER_DEFAULTS = { showAllEvents: false, stageFields: ["agentName", "recordedDateTime"], tagEditCaret: "end", tagUnhide: false, tsUse: {} };
+  //##> TIMESTAMP DETECTION: A column is a timestamp field if any value looks like Label@MM:SS, if it's a
+  //##> CoPilot column where every value is a plain MM:SS (or H:MM:SS), or if its name contains "timestamp".
+  //##> Plain MM:SS in Nexidia columns (like Duration) never counts.
+  const TS_TAG_RE = /^(.*?)@\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*$/;
+  const TS_TIME_RE = /^\d{1,2}:\d{2}(?::\d{2})?$/;
   const PALETTE = ["#fde68a", "#fecaca", "#bbf7d0", "#bfdbfe", "#ddd6fe", "#fbcfe8", "#fed7aa", "#a5f3fc", "#d9f99d", "#e5e7eb"];
   const NO_FILL_STYLE = "background:linear-gradient(to top right,#fff calc(50% - 1px),#ef4444 50%,#fff calc(50% + 1px));";
   const BASIC_RULES = [["majority", "Majority Rule"], ["listDedup", "List All (deduped)"], ["listAll", "List All (not deduped)"], ["first", "Show First"], ["last", "Show Last"]];
@@ -121,6 +130,27 @@
   }
   function pairKey(a, b) {
     return [a, b].sort().join("|");
+  }
+  function timeToMs(s) {
+    const parts = String(s).split(":").map((p) => parseInt(p, 10));
+    if (parts.some((n) => isNaN(n))) return null;
+    if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+    if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+    return null;
+  }
+  function parseTsToken(tok, fallbackLabel) {
+    const t = String(tok || "").trim();
+    if (!t) return null;
+    const m = t.match(TS_TAG_RE);
+    if (m) {
+      const ms = timeToMs(m[2]);
+      return ms === null ? null : { label: m[1].trim() || fallbackLabel, ms, labeled: true };
+    }
+    if (TS_TIME_RE.test(t)) {
+      const ms = timeToMs(t);
+      return ms === null ? null : { label: fallbackLabel, ms, labeled: false };
+    }
+    return null;
   }
   //##> VALIDATION: Every pasted line is checked before anything reaches the grid. Truncation is the
   //##> known failure mode for CoPilot outputs (the response stops before the final closing bracket).
@@ -457,7 +487,7 @@
   function toast(text, color) {
     const n = el("div", { style: `position:fixed;bottom:20px;right:20px;background:${color || "#22c55e"};color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;z-index:1000030;box-shadow:0 4px 12px rgba(0,0,0,.2);transition:opacity 0.3s;` + FONT }, text);
     document.body.appendChild(n);
-    setTimeout(() => { n.style.opacity = "0"; setTimeout(() => n.remove(), 300); }, 1800);
+    setTimeout(() => { n.style.opacity = "0"; setTimeout(() => n.remove(), 300); }, 2400);
   }
   function downloadText(filename, text) {
     const blob = new Blob([text], { type: "text/plain" });
@@ -484,7 +514,8 @@
       showConfidence: false,
       autoMeta: true,
       unpackImmediately: true,
-      multiTop: false
+      multiTop: false,
+      hideWorkedTs: true
     };
   }
   function newState() {
@@ -508,6 +539,11 @@
       removed: [],
       edits: {},
       editPolicy: { all: null, fields: {} },
+      playerSettings: {},
+      tsFields: {},
+      tsGroupsOff: [],
+      tagState: {},
+      tsAutoHidden: {},
       pending: [{ text: "", error: "" }],
       notices: [],
       suppress: {},
@@ -550,6 +586,9 @@
     let newDataPending = false;
     let conflictBusy = false;
     let conflictAgain = false;
+    let tsActive = false;
+    let tsTempShown = null;
+    let tsCache = null;
     function getFV(rowObj, key) {
       if (xls && xls.getFieldValue) return xls.getFieldValue(rowObj, key);
       if (!rowObj) return "";
@@ -557,6 +596,80 @@
       const lower = String(key).toLowerCase();
       for (const k of Object.keys(rowObj)) if (k.toLowerCase() === lower && rowObj[k] !== null) return String(rowObj[k]);
       return "";
+    }
+    //##> PLAYER SETTINGS HOOK: Unpack hands the Media Player its own defaults (PLAYER_DEFAULTS) and keeps
+    //##> any player settings changed from here in S.playerSettings, so they save and load with the session.
+    //##> Timestamp field choices (Navigation / Edit Fields) live in S.tsFields and are passed through the
+    //##> player's settings as tsUse so the Unpack pane can change them.
+    function playerTool() {
+      return api.listTools().find((t) => t.id === "mediaPlayer") || null;
+    }
+    function playerConfig(startPane) {
+      return {
+        scope: "unpack",
+        label: "Unpack",
+        startPane: startPane || null,
+        defaults: PLAYER_DEFAULTS,
+        getValues: () => Object.assign({}, S.playerSettings || {}, { tsUse: Object.assign({}, S.tsFields) }),
+        onSave: (values) => {
+          const vals = Object.assign({}, values || {});
+          const before = JSON.stringify(S.tsFields);
+          S.tsFields = Object.assign({}, vals.tsUse || {});
+          delete vals.tsUse;
+          S.playerSettings = vals;
+          scheduleSave();
+          if (playerCtrl && playerCtrl.refreshSettings) playerCtrl.refreshSettings();
+          if (tsActive && before !== JSON.stringify(S.tsFields)) startTimestamps(true);
+        },
+        panes: [{ id: "unpack", label: "Unpack", render: renderUnpackPane }]
+      };
+    }
+    function unpackPref(key) {
+      const v = S.playerSettings ? S.playerSettings[key] : undefined;
+      return v === undefined ? PLAYER_DEFAULTS[key] : v;
+    }
+    function playerPref(key) {
+      const t = playerTool();
+      if (t && t.resolveSettings) return t.resolveSettings(playerConfig())[key];
+      return unpackPref(key);
+    }
+    function playerFields() {
+      const t = playerTool();
+      return t && t.settingsFields ? t.settingsFields(playerConfig()) : [];
+    }
+    function openPlayerSettings(startPane) {
+      const t = playerTool();
+      if (!t || !t.openSettings) { toast("Media Player isn't loaded.", "#6b7280"); return; }
+      t.openSettings(playerConfig(startPane));
+    }
+    function renderUnpackPane(body, draft) {
+      const section = (t) => el("div", { style: "font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;" }, t);
+      const info = (tip) => { const s = el("span", { style: "display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:700;cursor:help;margin-left:6px;flex-shrink:0;" }, "i"); s.title = tip; return s; };
+      const label = (t, tip) => { const l = el("div", { style: "font-size:13px;color:#111827;display:flex;align-items:center;font-weight:600;" }, t); if (tip) l.appendChild(info(tip)); return l; };
+      const line = (l, ctrl) => el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;" }, l, ctrl);
+      const select = (opts, val, onChange) => {
+        const s = el("select", { style: "padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;width:230px;" });
+        for (const [v, t] of opts) s.appendChild(el("option", { value: v }, t));
+        s.value = val;
+        s.onchange = () => onChange(s.value);
+        return s;
+      };
+      const check = (val, onChange) => { const c = el("input", { type: "checkbox", checked: !!val }); c.onchange = () => onChange(c.checked); return c; };
+      if (!draft.tsUse || typeof draft.tsUse !== "object") draft.tsUse = {};
+      body.appendChild(section("Timestamp Fields"));
+      const fields = detectTsFields();
+      if (!fields.length) body.appendChild(el("div", { style: "font-size:12px;color:#6b7280;" }, "No timestamp fields are on the grid yet."));
+      for (const f of fields) {
+        const cur = draft.tsUse[f] || "";
+        const opts = (cur ? [] : [["", "Not chosen yet"]]).concat([["nav", "Navigation"], ["edit", "Edit Fields"]]);
+        body.appendChild(line(label(headerOf(f), "Navigation: just for listening, like jumping to tagged points of interest. Edit Fields: for correcting or clarifying data on your sheet."), select(opts, cur, (v) => { if (v) draft.tsUse[f] = v; else delete draft.tsUse[f]; })));
+      }
+      body.appendChild(section("Edit Fields Workflow"));
+      body.appendChild(line(label("After a tag is marked complete", "Jump: go straight to the next tag. Keep Playing: let the call play until it reaches the next tag."), select([["jump", "Jump to the next tag"], ["continue", "Keep playing"]], draft.tagAfterComplete || "jump", (v) => { draft.tagAfterComplete = v; })));
+      body.appendChild(line(label("When a field opens for editing", "End of text: the cursor goes after what's already there, so you can add to it. Select all: typing replaces what's there."), select([["end", "Cursor at the end of the text"], ["select", "Select all (typing replaces it)"]], draft.tagEditCaret || "end", (v) => { draft.tagEditCaret = v; })));
+      body.appendChild(line(label("Pause automatically", "Pause playback near the next tag (using the Timestamp Buffer on the General tab) or near the end of the call while you're still editing."), check(draft.tagAutoPause !== false, (v) => { draft.tagAutoPause = v; })));
+      body.appendChild(line(label("Also pause for incomplete tags", "Pause near the next tag whenever the current tag isn't marked complete, even if you aren't editing."), check(!!draft.tagPauseIncomplete, (v) => { draft.tagPauseIncomplete = v; })));
+      body.appendChild(line(label("Unhide hidden columns while their tag is active", "If a tag's column is hidden, show it while that tag is active, then hide it again."), check(!!draft.tagUnhide, (v) => { draft.tagUnhide = v; })));
     }
     function colPrefs() {
       return api.getShared("columnPrefs") || { fields: [], headers: [] };
@@ -819,6 +932,7 @@
       const rank = (r) => (r.status === "missing" ? 0 : (r.status === "multi" && s.multiTop ? 1 : 2));
       out.sort((a, b) => rank(a) - rank(b) || a.seq - b.seq);
       rows = out;
+      tsCache = null;
       syncConfidenceField(s.combine && s.showConfidence && rows.some((r) => r.count > 1));
     }
     function delimFor(f) {
@@ -835,6 +949,9 @@
       if ((!v || v === "0") && row.over[k]) v = row.over[k];
       return v ? [v] : [];
     }
+    //##> EDITS: Stored in S.edits by row id and field, layered over the derived value at render time.
+    //##> Revert just deletes the edit. Conflicts with new data are checked only after a paste,
+    //##> spreadsheet import, or metadata lookup.
     function getEdit(row, f) {
       const r = row && S.edits[row.id];
       return r && r[f] ? r[f] : null;
@@ -906,6 +1023,7 @@
     }
     function clearRowCaches() {
       for (const r of rows) { r.cache = {}; r.bcache = {}; }
+      tsCache = null;
     }
     function addNotice(kind, text, id) {
       S.notices = S.notices.filter((n) => n.id !== id);
@@ -1056,7 +1174,7 @@
       const found = new Map();
       let failed = null;
       const list = [...keys.values()];
-      const reqFields = [...new Set(S.metaFields.concat(["sourceMediaId", TRANS_FIELD, field]))];
+      const reqFields = [...new Set(S.metaFields.concat(["sourceMediaId", TRANS_FIELD, field], playerFields()))];
       try {
         for (let i = 0; i < list.length; i += 200) {
           const chunk = list.slice(i, i + 200);
@@ -1247,6 +1365,7 @@
       downloadText("nexidia_unpack_session_" + stamp() + ".txt", sessionFile(JSON.parse(JSON.stringify(S))));
     }
     function loadSessionData(data, keepId) {
+      if (tsActive) exitTimestamps(true);
       editing = null;
       const base = newState();
       const next = Object.assign(base, data || {});
@@ -1259,6 +1378,11 @@
       if (!next.edits || typeof next.edits !== "object") next.edits = {};
       if (!next.editPolicy || typeof next.editPolicy !== "object") next.editPolicy = { all: null, fields: {} };
       if (!next.editPolicy.fields) next.editPolicy.fields = {};
+      if (!next.playerSettings || typeof next.playerSettings !== "object") next.playerSettings = {};
+      if (!next.tsFields || typeof next.tsFields !== "object") next.tsFields = {};
+      if (!Array.isArray(next.tsGroupsOff)) next.tsGroupsOff = [];
+      if (!next.tagState || typeof next.tagState !== "object") next.tagState = {};
+      if (!next.tsAutoHidden || typeof next.tsAutoHidden !== "object") next.tsAutoHidden = {};
       if (!next.suppress || typeof next.suppress !== "object") next.suppress = {};
       if (!keepId) { next.sessionId = newState().sessionId; next.createdAt = Date.now(); }
       S = next;
@@ -1270,6 +1394,7 @@
       updateMetaBtn();
       refreshAll();
       renderInput();
+      if (playerCtrl && playerCtrl.refreshSettings) playerCtrl.refreshSettings();
       scheduleSave();
     }
     async function loadSessionFile(file) {
@@ -1528,6 +1653,7 @@
         S.edits[rowId][f] = { value, base, at: Date.now() };
       }
       row.cache = {};
+      tsCache = null;
       scheduleSave();
       return true;
     }
@@ -1564,11 +1690,12 @@
       }
       return out;
     }
-    function scrollCellIntoView(ri, ci) {
+    function scrollCellIntoView(ri, ci, center) {
       const vf = visFields();
       const top = ri * ROW_HEIGHT;
       const headH = thead.offsetHeight || ROW_HEIGHT;
-      if (top < tableWrap.scrollTop) tableWrap.scrollTop = top;
+      if (center) tableWrap.scrollTop = Math.max(0, top - (tableWrap.clientHeight - headH) / 2);
+      else if (top < tableWrap.scrollTop) tableWrap.scrollTop = top;
       else if (top + ROW_HEIGHT > tableWrap.scrollTop + tableWrap.clientHeight - headH) tableWrap.scrollTop = top + ROW_HEIGHT - tableWrap.clientHeight + headH;
       let left = frozenW();
       for (let i = 0; i < ci; i++) left += getColWidth(vf[i]);
@@ -1577,27 +1704,37 @@
       if (left < visLeft) tableWrap.scrollLeft = left - frozenW();
       else if (left + w > tableWrap.scrollLeft + tableWrap.clientWidth) tableWrap.scrollLeft = left + w - tableWrap.clientWidth;
     }
-    function startEdit(ri, ci) {
+    function startEdit(ri, ci, opts) {
+      opts = opts || {};
       const vf = visFields();
       const row = view[ri], f = vf[ci];
       if (!row || !f) return;
       if (f === "__conf__") { toast("Confidence is calculated and can't be edited.", "#6b7280"); return; }
       if (editing) commitEdit();
       const value = cellRaw(row, f);
-      const input = el("input", { type: "text", style: "width:100%;height:100%;box-sizing:border-box;border:2px solid #f59e0b;border-radius:2px;padding:2px 8px;font-size:11px;outline:none;background:#fffbeb;color:#111827;" + FONT });
+      const input = el("input", { type: "text", style: `width:100%;height:100%;box-sizing:border-box;border:2px solid ${opts.tagId ? "#ef4444" : "#f59e0b"};border-radius:2px;padding:2px 8px;font-size:11px;outline:none;background:#fffbeb;color:#111827;` + FONT });
       input.value = value;
-      editing = { rowId: row.id, field: f, ri, ci, input, orig: value };
+      editing = { rowId: row.id, field: f, ri, ci, input, orig: value, tagId: opts.tagId || null };
       input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); moveEdit(e.shiftKey ? -1 : 1, 0); }
-        else if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); moveEdit(0, e.shiftKey ? -1 : 1); }
-        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
+        if (e.key === "Enter") {
+          e.preventDefault(); e.stopPropagation();
+          if (editing && editing.tagId) finishTagEdit();
+          else moveEdit(e.shiftKey ? -1 : 1, 0);
+        } else if (e.key === "Tab") {
+          e.preventDefault(); e.stopPropagation();
+          if (editing && editing.tagId) finishTagEdit();
+          else moveEdit(0, e.shiftKey ? -1 : 1);
+        } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
       });
       input.addEventListener("mousedown", (e) => e.stopPropagation());
-      scrollCellIntoView(ri, ci);
+      scrollCellIntoView(ri, ci, !!opts.center);
       renderRows();
       input.focus();
       const end = input.value.length;
-      try { input.setSelectionRange(end, end); } catch (_) {}
+      try {
+        if (opts.select) input.setSelectionRange(0, end);
+        else input.setSelectionRange(end, end);
+      } catch (_) {}
     }
     function commitEdit() {
       if (!editing) return false;
@@ -1620,11 +1757,24 @@
       if (nr < 0 || nr >= view.length || nc < 0 || nc >= visFields().length) return;
       startEdit(nr, nc);
     }
+    function finishTagEdit() {
+      if (!editing) return;
+      const tagId = editing.tagId;
+      commitEdit();
+      if (playerCtrl && tagId) playerCtrl.completeTag(tagId, { delay: COMPLETE_DELAY_MS });
+    }
     document.addEventListener("mousedown", onOutsideEdit, true);
     function onOutsideEdit(e) {
       if (!editing) return;
       if (editing.input.contains(e.target)) return;
+      if (editing.tagId && playerCtrl && playerCtrl.els && playerCtrl.els.pane.contains(e.target)) {
+        const keep = editing.input;
+        setTimeout(() => { if (editing && editing.input === keep && keep.isConnected) keep.focus(); }, 0);
+        return;
+      }
+      const wasTag = editing.tagId;
       commitEdit();
+      if (wasTag && playerCtrl) playerCtrl.resumeFromEdit();
     }
     //##> MERGE POPUP: Pairs are worked top to bottom. Each pair's choice is simulated before the next
     //##> pair is drawn, so if Member_Id is merged into Member ID, a later Member ID / MemberID pair shows
@@ -1841,8 +1991,10 @@
     const loadSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;"), title: "Load a saved copy from a previous session." }, "Load Session");
     const resetBtn = el("button", { style: btnStyle("#9ca3af", "color:#374151;") }, "Reset View");
     const clickModeBtn = el("button", { style: btnStyle("#22c55e", "color:#16a34a;") }, "On Click: Select Field");
-    const exportSlot = el("div", { style: "flex:1;min-width:170px;display:flex;justify-content:center;" });
+    const exportSlot = el("div", { style: "flex:1;min-width:170px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap;" });
     const exportExcelBtn = el("button", { style: "padding:8px 20px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(22,163,74,.35);", title: "Download the grid as an Excel sheet." }, "Export to Excel");
+    const playTsBtn = el("button", { style: "display:none;padding:8px 16px;border-radius:8px;border:0;background:#ea580c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(234,88,12,.35);", title: "Play every call that has timestamps, one tag at a time." }, "\u25B6 Play All Timestamps");
+    exportSlot.appendChild(playTsBtn);
     exportSlot.appendChild(exportExcelBtn);
     const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
     const sheetInput = el("input", { type: "file", accept: ".xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
@@ -1889,15 +2041,15 @@
     instrBody.appendChild(el("div", {}, "2. Run your batches: send each transcript batch file with that prompt in its own fresh CoPilot chat."));
     instrBody.appendChild(el("div", {}, "3. Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. Rows are added to the grid as you go."));
     instrBody.appendChild(el("div", {}, "4. Metadata from Nexidia is added using your primary key (Trans_Id by default). If your columns look like Nexidia's, you'll be asked whether to merge them. Adjust duplicates, delimiters, and highlights in Unpack Settings."));
-    instrBody.appendChild(el("div", {}, "5. Review your rows and play calls. To fix a value, switch On Click to Edit Field and click the cell. Use Save Session to keep a copy you can load later and keep working."));
+    instrBody.appendChild(el("div", {}, "5. Review your rows and play calls. To fix a value, switch On Click to Edit Field and click the cell. If your outputs have timestamps, use Play All Timestamps to work through them one at a time. Use Save Session to keep a copy you can load later and keep working."));
     instrBody.appendChild(el("div", {}, "6. When you're finished, click Export to Excel to save your work to an Excel sheet."));
     const promptBtn = el("button", { style: btnStyle("#1d4ed8", "margin-top:6px;") }, "View PromptBuilder");
     instrBody.appendChild(promptBtn);
-    instrHead.onclick = () => {
-      const open = instrBody.style.display === "none";
+    function setInstructions(open) {
       instrBody.style.display = open ? "block" : "none";
       instrHead.textContent = (open ? "\u25BE" : "\u25B8") + " Instructions";
-    };
+    }
+    instrHead.onclick = () => setInstructions(instrBody.style.display === "none");
     promptBtn.onclick = () => openPromptPanel();
     async function openPromptPanel() {
       document.querySelectorAll("[data-unpack-prompt]").forEach((p) => p.remove());
@@ -1976,7 +2128,7 @@
           }
         });
         inputWrap.appendChild(ta);
-        setTimeout(() => ta.focus(), 30);
+        setTimeout(() => { if (!tsActive) ta.focus(); }, 30);
         return;
       }
       if (!S.pending.length || S.pending[S.pending.length - 1].text) S.pending.push({ text: "", error: "" });
@@ -2150,6 +2302,7 @@
       renderRows();
       rebuildColPanel();
       renderNotices();
+      updateTsBtn();
       scheduleSave();
     }
     function rerender() {
@@ -2159,6 +2312,7 @@
       renderHeader();
       renderRows();
       rebuildColPanel();
+      updateTsBtn();
       scheduleSave();
     }
     function updateCounts() {
@@ -2212,8 +2366,9 @@
         const rowEl = el("div", { style: "display:flex;align-items:center;gap:6px;margin:4px 0;" });
         const cb = el("input", { type: "checkbox" });
         cb.checked = isVis(f);
-        cb.onchange = () => { if (editing) commitEdit(); setVis(f, cb.checked); renderHeader(); renderRows(); scheduleSave(); };
-        const labelEl = el("span", { style: `font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"}`, title: groupLabel(f) }, headerOf(f) + (hasFilter ? " (filtered)" : ""));
+        cb.onchange = () => { if (editing) commitEdit(); setVis(f, cb.checked); if (tsTempShown === f) tsTempShown = null; renderHeader(); renderRows(); scheduleSave(); };
+        const autoHid = S.tsAutoHidden[f] && !isVis(f);
+        const labelEl = el("span", { style: `font-size:11px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${hasFilter ? "color:#2563eb;font-weight:600;" : "color:#111827;"}`, title: autoHid ? "Hidden because every timestamp in it was worked. Check the box to bring it back." : groupLabel(f) }, headerOf(f) + (hasFilter ? " (filtered)" : "") + (autoHid ? " (all worked)" : ""));
         labelEl.onclick = () => openFilterPopover(f, labelEl);
         rowEl.appendChild(cb);
         rowEl.appendChild(labelEl);
@@ -2481,6 +2636,336 @@
       renderRows();
       scheduleSave();
     }
+    //##> TIMESTAMP WORKFLOW: Play All Timestamps builds a playlist from the grid's rows (in grid order) that
+    //##> have a linked call and at least one tag. Tag ids are row id + column + label + time, so their
+    //##> complete/hidden state (S.tagState) survives re-derives and Save Session. A tag's label finds its
+    //##> grid column by name, following renames and merges, every time it becomes active.
+    function cellTokens(row, f) {
+      const out = [];
+      for (const t of cellParts(row, f).tokens) for (const s of splitTokens(t, INCOMING_DELIM)) out.push(s);
+      return out;
+    }
+    function detectTsFields() {
+      if (tsCache) return tsCache;
+      const found = [];
+      for (const f of S.grid.order) {
+        if (f === "__conf__") continue;
+        const isMeta = f.startsWith("m:");
+        let labeled = false, plain = 0, other = 0;
+        for (const r of rows) {
+          for (const t of cellTokens(r, f)) {
+            if (/^0+$/.test(t)) continue;
+            const p = parseTsToken(t, "");
+            if (!p) { other++; continue; }
+            if (p.labeled) labeled = true;
+            else plain++;
+          }
+          if (labeled) break;
+        }
+        const named = normName(baseHeader(f)).includes("timestamp");
+        if (labeled || named || (!isMeta && plain > 0 && other === 0)) found.push(f);
+      }
+      tsCache = found;
+      return found;
+    }
+    function presetKind(f) {
+      const map = S.preset && S.preset.timestampUse;
+      if (!map) return null;
+      const n = normName(baseHeader(f));
+      for (const k of Object.keys(map)) if (normName(k) === n) return map[k] === "edit" ? "edit" : "nav";
+      return null;
+    }
+    function kindFor(f) {
+      return S.tsFields[f] || presetKind(f) || null;
+    }
+    function fieldForLabel(label) {
+      const n = normName(label);
+      if (!n) return null;
+      const ts = new Set(detectTsFields());
+      const cands = [];
+      for (const c of S.columns) cands.push({ f: "j:" + c.id, names: [c.header, c.source].concat(c.aliases) });
+      for (const m of S.metaFields) cands.push({ f: "m:" + m, names: [S.metaHeaders[m], m] });
+      const pick = (test) => {
+        for (const c of cands) {
+          if (!c.names.some((x) => test(normName(x)))) continue;
+          const root = rootOf(c.f);
+          if (!ts.has(root) && S.grid.order.includes(root)) return root;
+        }
+        return null;
+      };
+      return pick((x) => x === n) || pick((x) => namesMatch(x, n));
+    }
+    function tagsForRow(row, f, kind) {
+      const out = [];
+      const seen = new Set();
+      for (const t of cellTokens(row, f)) {
+        const p = parseTsToken(t, baseHeader(f));
+        if (!p) continue;
+        let id = `${row.id}|${f}|${p.label}|${p.ms}`;
+        let n = 2;
+        while (seen.has(id)) id = `${row.id}|${f}|${p.label}|${p.ms}|${n++}`;
+        seen.add(id);
+        const st = S.tagState[id] || {};
+        out.push({ id, label: p.label, ms: p.ms, group: f, groupLabel: baseHeader(f), kind, rowId: row.id, complete: !!st.complete, hidden: !!st.hidden });
+      }
+      return out;
+    }
+    function allTagsFor(f) {
+      const out = [];
+      for (const r of rows) for (const t of tagsForRow(r, f, "nav")) if (!t.hidden) out.push(t);
+      return out;
+    }
+    function checkWorked(f, quiet) {
+      if (!S.settings.hideWorkedTs || S.tsAutoHidden[f] || !isVis(f)) return false;
+      const tags = allTagsFor(f);
+      if (!tags.length || !tags.every((t) => t.complete)) return false;
+      setVis(f, false);
+      S.tsAutoHidden[f] = true;
+      renderHeader();
+      renderRows();
+      rebuildColPanel();
+      scheduleSave();
+      if (!quiet) toast(`Every tag in ${baseHeader(f)} is worked, so the column is hidden and won't be exported. Bring it back with Show / Hide Columns.`, "#0369a1");
+      return true;
+    }
+    function checkAllWorked() {
+      for (const f of detectTsFields()) checkWorked(f, false);
+    }
+    function updateTsBtn() {
+      const n = detectTsFields().length;
+      playTsBtn.style.display = n ? "" : "none";
+      playTsBtn.textContent = tsActive ? "\u21BB Restart Timestamps" : "\u25B6 Play All Timestamps";
+    }
+    function suggestKind(f) {
+      let mapped = 0, total = 0;
+      for (const r of rows.slice(0, 200)) {
+        for (const t of tagsForRow(r, f, "nav")) {
+          total++;
+          if (fieldForLabel(t.label)) mapped++;
+        }
+      }
+      return total && mapped * 2 >= total ? "edit" : "nav";
+    }
+    function askTsUsage(fields) {
+      if (fields.every((f) => kindFor(f))) {
+        for (const f of fields) if (!S.tsFields[f]) S.tsFields[f] = kindFor(f);
+        return Promise.resolve(true);
+      }
+      return new Promise((resolve) => {
+        const picks = {};
+        for (const f of fields) picks[f] = kindFor(f) || suggestKind(f);
+        const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000021;display:flex;align-items:center;justify-content:center;" + FONT });
+        const box = el("div", { style: "background:#fff;width:520px;max-width:94vw;max-height:86vh;overflow:auto;border-radius:12px;padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+        box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:6px;" }, `${fields.length} Timestamp Field${fields.length === 1 ? "" : "s"} Detected. How are you using ${fields.length === 1 ? "it" : "them"}?`));
+        box.appendChild(el("div", { style: "font-size:12px;color:#6b7280;margin-bottom:12px;" }, "You can change this later in the Media Player's settings, on the Unpack tab."));
+        const list = el("div", { style: "display:flex;flex-direction:column;gap:8px;margin-bottom:14px;" });
+        const OPTS = [
+          ["nav", "Navigation", "Select if you'll be using the timestamps just for listening purposes, such as jumping to tagged points of interest."],
+          ["edit", "Edit Fields", "Select if you'll be using the timestamps to correct or clarify data on your sheet."]
+        ];
+        const paint = () => {
+          list.querySelectorAll("button[data-f]").forEach((b) => {
+            const on = picks[b.dataset.f] === b.dataset.v;
+            b.style.background = on ? "#1d4ed8" : "#fff";
+            b.style.color = on ? "#fff" : "#1d4ed8";
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+        };
+        for (const f of fields) {
+          const row = el("div", { style: "display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;" });
+          row.appendChild(el("div", { style: "flex:1;min-width:0;font-size:13px;font-weight:600;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", title: groupLabel(f) }, baseHeader(f)));
+          for (const [v, l, tip] of OPTS) {
+            const b = el("button", { type: "button", title: tip, style: "padding:6px 12px;border-radius:8px;border:1px solid #1d4ed8;font-size:12px;font-weight:600;cursor:pointer;" }, l);
+            b.dataset.f = f;
+            b.dataset.v = v;
+            b.onclick = () => { picks[f] = v; paint(); };
+            row.appendChild(b);
+          }
+          list.appendChild(row);
+        }
+        box.appendChild(list);
+        const btnRow = el("div", { style: "display:flex;gap:8px;" });
+        const go = el("button", { style: "flex:1;" + PRIMARY_BTN }, "Start");
+        const cancel = el("button", { style: "flex:1;" + PLAIN_BTN }, "Cancel");
+        go.onclick = () => { for (const f of fields) S.tsFields[f] = picks[f]; scheduleSave(); overlay.remove(); resolve(true); };
+        cancel.onclick = () => { overlay.remove(); resolve(false); };
+        btnRow.append(go, cancel);
+        box.appendChild(btnRow);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        paint();
+      });
+    }
+    function restoreTempShown(keep) {
+      if (tsTempShown && tsTempShown !== keep) {
+        setVis(tsTempShown, false);
+        tsTempShown = null;
+        renderHeader();
+        renderRows();
+        rebuildColPanel();
+      }
+    }
+    function focusTag(tag) {
+      const target = fieldForLabel(tag.label);
+      tag.target = target;
+      const ri = view.findIndex((r) => r.id === tag.rowId);
+      const ci = visFields().indexOf(target);
+      if (ri < 0 || ci < 0) return null;
+      if (S.grid.clickMode !== "edit") setClickMode("edit");
+      startEdit(ri, ci, { tagId: tag.id, select: unpackPref("tagEditCaret") === "select", center: true });
+      return null;
+    }
+    function tagHost() {
+      return {
+        exitLabel: "Exit Timestamps",
+        onActiveTag(tag, item) {
+          if (item) activeSmid = item.smid;
+          const ri = view.findIndex((r) => r.id === tag.rowId);
+          if (tag.kind !== "edit") {
+            restoreTempShown(null);
+            if (editing && editing.tagId) commitEdit();
+            if (ri >= 0) scrollCellIntoView(ri, 0, true);
+            renderRows();
+            return null;
+          }
+          const target = fieldForLabel(tag.label);
+          tag.target = target;
+          restoreTempShown(target);
+          if (!target) {
+            if (editing && editing.tagId) commitEdit();
+            if (ri >= 0) scrollCellIntoView(ri, 0, true);
+            renderRows();
+            return { text: "(No matching column)" };
+          }
+          if (ri < 0) {
+            if (editing && editing.tagId) commitEdit();
+            renderRows();
+            return {
+              text: "(Row Filtered Out)",
+              action: "Clear Filters",
+              run: () => {
+                S.grid.filters = {};
+                S.grid.globalFilter = "";
+                globalSearchBox.value = "";
+                rerender();
+                return focusTag(tag);
+              }
+            };
+          }
+          if (!isVis(target)) {
+            if (unpackPref("tagUnhide")) {
+              setVis(target, true);
+              tsTempShown = target;
+              renderHeader();
+              rebuildColPanel();
+            } else {
+              if (editing && editing.tagId) commitEdit();
+              scrollCellIntoView(ri, 0, true);
+              renderRows();
+              return {
+                text: "(Field Hidden)",
+                action: "Unhide",
+                run: () => {
+                  setVis(target, true);
+                  rerender();
+                  return focusTag(tag);
+                }
+              };
+            }
+          }
+          return focusTag(tag);
+        },
+        onTagChange(tag) {
+          if (tag.complete || tag.hidden) S.tagState[tag.id] = { complete: !!tag.complete, hidden: !!tag.hidden };
+          else delete S.tagState[tag.id];
+          scheduleSave();
+          renderRows();
+          checkWorked(tag.group, false);
+        },
+        isEditing(tag) {
+          if (!editing) return false;
+          if (editing.tagId === tag.id) return true;
+          return !!tag.target && editing.rowId === tag.rowId && editing.field === tag.target;
+        },
+        onGroupsChange(groups) {
+          S.tsGroupsOff = groups.filter((g) => !g.enabled).map((g) => g.id);
+          scheduleSave();
+        },
+        onExit() { exitTimestamps(); }
+      };
+    }
+    function ensurePlayer(height) {
+      if (playerCtrl) {
+        if (playerCtrl.restore) playerCtrl.restore();
+        if (playerCtrl.setHeight) playerCtrl.setHeight(height);
+        return playerCtrl;
+      }
+      const pt = playerTool();
+      if (!pt || !pt._openPlayerPane) return null;
+      playerCtrl = pt._openPlayerPane(card, (reg) => { stopPlayer = reg; }, {
+        initialHeight: height,
+        settings: playerConfig(),
+        onClosed: () => {
+          playerCtrl = null;
+          stopPlayer = null;
+          activeSmid = null;
+          if (tsActive) { tsActive = false; restoreTempShown(null); updateTsBtn(); }
+          if (!closed) renderRows();
+        }
+      });
+      return playerCtrl;
+    }
+    async function startTimestamps(keepPos) {
+      if (editing) commitEdit();
+      const fields = detectTsFields();
+      if (!fields.length) { toast("No timestamp fields were found on the grid.", "#6b7280"); return; }
+      if (!keepPos) {
+        const ok = await askTsUsage(fields);
+        if (!ok || closed) return;
+      }
+      for (const f of fields) if (!S.tsFields[f]) S.tsFields[f] = kindFor(f) || "nav";
+      const groups = fields.map((f) => ({ id: f, label: baseHeader(f), kind: S.tsFields[f], enabled: !S.tsGroupsOff.includes(f) }));
+      if (!groups.some((g) => g.enabled)) groups[0].enabled = true;
+      const items = [];
+      let unlinked = 0;
+      for (const row of view) {
+        const tags = [];
+        for (const f of fields) tags.push(...tagsForRow(row, f, S.tsFields[f]));
+        if (!tags.length) continue;
+        const smid = row.meta ? getFV(row.meta, "sourceMediaId") : "";
+        if (!smid) { unlinked++; continue; }
+        items.push({ key: row.key, smid, displayLabel: row.key || rowLabel(row), row: row.meta || {}, rowId: row.id, timestamps: tags });
+      }
+      if (!items.length) {
+        dialog({ title: "No calls to play", message: unlinked ? "The rows with timestamps aren't linked to calls yet. Add Nexidia Metadata first." : "None of the rows showing on the grid have timestamps. Check your filters." });
+        return;
+      }
+      const prevRow = keepPos && tsActive && playerCtrl && playerCtrl.getActiveTag && playerCtrl.getActiveTag() ? playerCtrl.getActiveTag().rowId : null;
+      const p = ensurePlayer(TS_PLAYER_HEIGHT);
+      if (!p) { toast("Media Player isn't loaded.", "#6b7280"); return; }
+      setInstructions(false);
+      tsActive = true;
+      if (groups.some((g) => g.kind === "edit" && g.enabled)) setClickMode("edit");
+      p.setPlaylist(items, { host: tagHost(), groups });
+      let start = prevRow ? items.findIndex((it) => it.rowId === prevRow) : -1;
+      if (start < 0) start = items.findIndex((it) => it.timestamps.some((t) => !t.complete && !t.hidden && !S.tsGroupsOff.includes(t.group)));
+      if (start < 0) start = 0;
+      p.loadPlaylistIndex(start);
+      updateTsBtn();
+      if (unlinked) toast(`${unlinked} row${unlinked === 1 ? " has" : "s have"} timestamps but no linked call, so ${unlinked === 1 ? "it was" : "they were"} skipped.`, "#d97706");
+    }
+    function exitTimestamps(quiet) {
+      if (!tsActive) return;
+      if (editing && editing.tagId) commitEdit();
+      tsActive = false;
+      restoreTempShown(null);
+      if (playerCtrl) {
+        playerCtrl.clearPlaylist();
+        playerCtrl.setHeight(GRID_PLAYER_HEIGHT);
+      }
+      updateTsBtn();
+      if (!quiet) renderRows();
+    }
     function renderHeader() {
       const vf = visFields();
       thead.innerHTML = "";
@@ -2647,7 +3132,7 @@
         tr.appendChild(tdNum);
         if (playCol) {
           const tdPlay = el("td", { style: `${frozenStyle(2, false)}background:${bg};padding:2px 4px;border-bottom:1px solid #f1f5f9;text-align:center;height:${ROW_HEIGHT}px;` });
-          const icon = el("span", { style: `font-size:13px;cursor:${smid ? "pointer" : "default"};color:${smid ? "#3b82f6" : "#d1d5db"};`, title: smid ? "Play" : "No call linked yet" }, "\u25B6");
+          const icon = el("span", { style: `font-size:13px;cursor:${smid ? "pointer" : "default"};color:${smid ? "#3b82f6" : "#d1d5db"};`, title: smid ? (tsActive ? "Play this call (leaves timestamp playback)" : "Play") : "No call linked yet" }, "\u25B6");
           icon.onclick = (e) => { e.stopPropagation(); triggerPlay(row); };
           tdPlay.appendChild(icon);
           tr.appendChild(tdPlay);
@@ -2739,7 +3224,9 @@
       if (S.grid.clickMode === "edit") {
         if (editing && editing.input.contains(e.target)) return;
         e.preventDefault();
+        const prevTag = editing && editing.tagId;
         startEdit(r, c);
+        if (prevTag && playerCtrl) playerCtrl.resumeFromEdit();
         return;
       }
       if (S.grid.clickMode !== "select") return;
@@ -2817,19 +3304,17 @@
     function triggerPlay(row) {
       const smid = row.meta ? getFV(row.meta, "sourceMediaId") : "";
       if (!smid) { toast("No call is linked to this row yet. Add Nexidia Metadata first.", "#6b7280"); return; }
-      if (!playerCtrl) {
-        const pt = api.listTools().find((t) => t.id === "mediaPlayer");
-        if (!pt || !pt._openPlayerPane) { window.open(PLAYER_URL(smid), "_blank"); return; }
-        playerCtrl = pt._openPlayerPane(card, (reg) => { stopPlayer = reg; }, { initialHeight: "50vh" });
-      }
+      if (tsActive) exitTimestamps(true);
+      const p = ensurePlayer(GRID_PLAYER_HEIGHT);
+      if (!p) { window.open(PLAYER_URL(smid), "_blank"); return; }
       activeSmid = smid;
       const idx = view.indexOf(row);
-      playerCtrl.setGridNav({
+      p.setGridNav({
         items: view.map((r) => ({ row: r.meta || {} })),
         currentIndex: idx >= 0 ? idx : 0,
         onNavigate: (i) => { const t = view[i]; if (t) triggerPlay(t); }
       });
-      playerCtrl.loadCall(smid, rowLabel(row), undefined, null);
+      p.loadCall(smid, rowLabel(row), undefined, null);
       renderRows();
     }
     function escHtml(s) {
@@ -2839,7 +3324,8 @@
     //##> User to User never turn into scientific notation. Only columns positively typed as Date,
     //##> Number, or Currency export as real Excel values. Metadata columns follow the same date,
     //##> duration, hold, and sentiment formatting as export.js. Merged cells with stacked values
-    //##> always export as text.
+    //##> always export as text. Only visible columns export, so worked timestamp columns that were
+    //##> hidden automatically are left out.
     function exportCell(row, f) {
       const raw = cellRaw(row, f);
       const str = (v) => '<td x:str="' + escHtml(v) + '">' + escHtml(v) + "</td>";
@@ -2873,7 +3359,7 @@
     }
     function doExcelExport(list) {
       if (!list.length) { toast("No rows to export.", "#6b7280"); return; }
-      const fields = visFields();
+      const fields = visFields().filter((f) => !(tsTempShown && f === tsTempShown));
       const cssText = [
         "table{border-collapse:collapse}",
         'td,th{padding:4px 8px;font-family:"Aptos Narrow","Aptos",Calibri,Arial,sans-serif;font-size:10pt;text-align:left;vertical-align:bottom;white-space:nowrap;border:none}',
@@ -3090,6 +3576,16 @@
       if (fieldPolicies.length) box.appendChild(line(label("Saved choices for single fields", info("Fields where you picked \"Always do this for this field.\" Clear them to be asked again.")), clearFieldPol));
       const revertCb = el("input", { type: "checkbox", checked: !S.suppress.revertConfirm });
       box.appendChild(line(label("Confirm before reverting an edit"), revertCb));
+      box.appendChild(section("Timestamps"));
+      const hideWorkedCb = el("input", { type: "checkbox", checked: d.hideWorkedTs !== false });
+      box.appendChild(line(label("Hide timestamp columns once every tag is worked", info("When every tag in a timestamp column is marked complete, that column is hidden so it isn't exported. You can always bring it back with Show / Hide Columns.")), hideWorkedCb));
+      const tsBtn = el("button", { style: btnStyle("#ea580c", "color:#c2410c;") }, "Timestamp Settings");
+      tsBtn.onclick = () => openPlayerSettings("unpack");
+      box.appendChild(line(label("Navigation / Edit Fields and playback", info("Choose how each timestamp field is used, and how the workflow moves between tags.")), tsBtn));
+      box.appendChild(section("Media Player"));
+      const playerBtn = el("button", { style: btnStyle("#0ea5e9", "color:#0369a1;") }, "\u2699 Player Settings");
+      playerBtn.onclick = () => openPlayerSettings();
+      box.appendChild(line(label("Player settings for this session", info("How calls are named, which details show with each call, and playback options. Changes made here are saved with this session only.")), playerBtn));
       if (S.columns.length) {
         box.appendChild(section("Column Types"));
         box.appendChild(el("div", { style: "font-size:11px;color:#6b7280;margin-bottom:4px;" }, "Auto Detect reads the values as they come in. Prose columns use the Prose rules above; everything else uses the Basic rules."));
@@ -3139,8 +3635,10 @@
         d.proseDelim = proseDelimIn.value || "|";
         d.showConfidence = confCb.checked;
         d.autoMeta = autoCb.checked;
+        d.hideWorkedTs = hideWorkedCb.checked;
         const pkChanged = d.primaryKey !== S.settings.primaryKey;
         const autoTurnedOn = d.autoMeta && !S.settings.autoMeta;
+        const hideTurnedOn = d.hideWorkedTs && !S.settings.hideWorkedTs;
         S.settings = d;
         S.editPolicy.all = policySel.value === "ask" ? null : policySel.value;
         if (clearFields) S.editPolicy.fields = {};
@@ -3152,10 +3650,12 @@
           clearNotice("missing");
           clearNotice("pk");
         }
+        if (hideTurnedOn) S.tsAutoHidden = {};
         closePopovers();
         overlay.remove();
         updateMetaBtn();
         refreshAll();
+        if (hideTurnedOn) checkAllWorked();
         if ((pkChanged || autoTurnedOn) && d.autoMeta && S.entries.length) fetchMetadata(true);
       };
       overlay.appendChild(box);
@@ -3205,6 +3705,7 @@
     function teardown() {
       closed = true;
       editing = null;
+      tsActive = false;
       clearTimeout(saveTimer);
       if (typeof stopPlayer === "function") { try { stopPlayer(); } catch (_) {} }
       removeDragGhost();
@@ -3247,6 +3748,7 @@
     importSheetBtn.onclick = () => sheetInput.click();
     sheetInput.onchange = () => { const f = sheetInput.files && sheetInput.files[0]; sheetInput.value = ""; if (f) importSpreadsheet(f); };
     exportExcelBtn.onclick = () => exportExcel();
+    playTsBtn.onclick = () => startTimestamps(false);
     exportTranscriptsBtn.onclick = () => exportTranscripts();
     saveSessionBtn.onclick = () => { if (!S.entries.length) { toast("Nothing to save yet.", "#6b7280"); return; } saveSessionFile(); };
     loadSessionBtn.onclick = () => sessionInput.click();
@@ -3292,7 +3794,7 @@
     function applyPreload(p) {
       S = newState();
       S.settings.primaryKey = p.primaryKey || "Trans_Id";
-      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false };
+      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null };
       const order = [];
       const merges = [];
       for (const c of (p.columns || [])) {
