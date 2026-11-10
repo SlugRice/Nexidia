@@ -117,6 +117,8 @@
     defaultDateRange() { return previousWeekRange(); },
 
     buildConfig(container, helpers) {
+      const el = helpers.el;
+      const saved = helpers.savedConfig || null;
       if (helpers.dateControl) {
         const range = previousWeekRange();
         helpers.dateControl.setRange(range.from, range.to);
