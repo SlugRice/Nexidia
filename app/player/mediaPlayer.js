@@ -1,4 +1,4 @@
-//[Last Update: 12:19 AM 11/10/2026]
+//[Last Update: 11:04 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
 const api = window.NEXIDIA_TOOLS;
@@ -34,7 +34,6 @@ const BUILTIN_SETTINGS = {
   nameField: TRANS_FIELD,
   stageFields: [],
   showAllEvents: true,
-  timestampBuffer: 10,
   tagAfterComplete: "jump",
   tagAutoPause: true,
   tagPauseIncomplete: false
@@ -261,16 +260,11 @@ function openSettingsDialog(config, onApplied) {
       container.appendChild(previewEl);
       renderStage();
     }
-    if (!hidden.has("showAllEvents") || !hidden.has("timestampBuffer")) container.appendChild(section("Playback"));
+    if (!hidden.has("showAllEvents")) container.appendChild(section("Playback"));
     if (!hidden.has("showAllEvents")) {
       const cb = el("input", { type: "checkbox", checked: !!draft.showAllEvents });
       cb.onchange = () => { draft.showAllEvents = cb.checked; };
       container.appendChild(el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;" }, label("Show All Events", "Show Nexidia's built-in events (E1, E2...) on each call when it loads. You can still turn them on or off for a single call with the Show Events box under the timeline. Events are always hidden while playing timestamps from Unpack."), cb));
-    }
-    if (!hidden.has("timestampBuffer")) {
-      const num = el("input", { type: "number", min: 0, max: 600, step: 1, value: String(draft.timestampBuffer), style: "width:80px;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
-      num.oninput = () => { const n = Math.round(Number(num.value)); draft.timestampBuffer = isFinite(n) && n >= 0 ? Math.min(n, 600) : 0; };
-      container.appendChild(el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;" }, label("Timestamp Buffer (seconds)", "How close the next tag can be before playback pauses automatically while you're still working on the current one. 0 = Don't Pause."), num));
     }
   }
   function renderNav() {
@@ -744,6 +738,20 @@ function openPlayerPane(gridCard, onClose, options) {
     else if (e.shiftKey && e.key === "ArrowDown") { e.preventDefault(); applySpeed(Math.max(speedIdx - 1, 0)); }
   };
   document.addEventListener("keydown", onSpeedKeys);
+  //##> PLAYER SHORTCUTS: Ctrl+Left / Ctrl+Right press Prev / Next (tag or call). A module that handles its own
+  //##> shortcuts (like Unpack) opens the player with shortcuts: false.
+  const onNavKeys = (e) => {
+    if (opts.shortcuts === false || closedPlayer) return;
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    const btn = e.key === "ArrowLeft" ? els.prevNavBtn : els.nextNavBtn;
+    if (btn.style.display === "none") return;
+    e.preventDefault();
+    btn.click();
+  };
+  document.addEventListener("keydown", onNavKeys);
   /* ── Transcript scroll: breaks auto-scroll, snaps back after 5s ── */
   els.transcriptPane.addEventListener("wheel", () => {
     if (autoScrollEnabled) {
@@ -861,8 +869,8 @@ function openPlayerPane(gridCard, onClose, options) {
   //##> TAG WORKFLOW: Each call's tags play in group order (the first timestamp field's tags by time,
   //##> then the next field's). Only one tag is active at a time. A tag becomes active when it's
   //##> picked, when Prev/Next lands on it, or when playback naturally crosses it (manual seeks don't
-  //##> count). Edit Fields tags can pause playback near the next tag while the host says its field is
-  //##> still being edited. The host (Unpack) owns saving tag state and moving the grid.
+  //##> count). While the host says an Edit Fields tag is still being edited, the next tag waits and playback
+  //##> pauses near the end of the call instead of moving on. The host (Unpack) owns saving tag state and moving the grid.
   function prepTags(list) {
     for (const t of (list || [])) {
       if (!t.id) t.id = "t" + (++tagSeq);
@@ -1669,6 +1677,7 @@ function openPlayerPane(gridCard, onClose, options) {
     document.removeEventListener("mousemove", onDocMouseMove);
     document.removeEventListener("mouseup", onDocMouseUp);
     document.removeEventListener("keydown", onSpeedKeys);
+    document.removeEventListener("keydown", onNavKeys);
     document.removeEventListener("keydown", onFindKey);
     window.removeEventListener("resize", onResize);
     if (scrollSnapTimer) clearTimeout(scrollSnapTimer);
