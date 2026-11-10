@@ -1,4 +1,4 @@
-//[Last Update: 10:32 AM 10/20/2026]
+//[Last Update: 12:31 AM 11/10/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -38,10 +38,10 @@
     { kind: "meta", label: "TIN", display: "Provider Tax ID", fallback: "UDFVarchar136", stack: ["TIN"] },
     { kind: "copilot", label: "Repeat Caller", key: "Repeat_Call", aliases: ["Repeat_Caller"] },
     { kind: "copilot", label: "Caller Name", key: "Caller_Name" },
-    { kind: "copilot", label: "DOS", key: "DOS" },
-    { kind: "copilot", label: "Billed Amount", key: "Billed_Amount" },
+    { kind: "copilot", label: "DOS", key: "DOS", dataType: "date", format: "M/D/YYYY" },
+    { kind: "copilot", label: "Billed Amount", key: "Billed_Amount", dataType: "currency", format: "$#,##0.00" },
     { kind: "copilot", label: "Claim Number", key: "Claim_Number" },
-    { kind: "copilot", label: "Received", key: "Received_Date" },
+    { kind: "copilot", label: "Received", key: "Received_Date", dataType: "date", format: "M/D/YYYY" },
     { kind: "copilot", label: "Status", key: "Status" },
     { kind: "copilot", label: "Reference Number", key: "Reference_Number" },
     { kind: "meta", label: "User to User", display: "User to User", fallback: "UDFVarchar1" },
@@ -329,7 +329,10 @@
           return;
         }
         const key = def.key || stack[0] || def.label;
-        unpackColumns.push({ type: "copilot", key, header: def.label, aliases: nameVariants([key, def.label].concat(def.aliases || [])) });
+        const col = { type: "copilot", key, header: def.label, aliases: nameVariants([key, def.label].concat(def.aliases || [])) };
+        if (def.dataType) col.dataType = def.dataType;
+        if (def.format) col.format = def.format;
+        unpackColumns.push(col);
         fields.push("_blank_" + def.label); headers.push(def.label);
       });
 
