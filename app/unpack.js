@@ -1,4 +1,4 @@
-//[Last Update: 11:04 AM 11/10/2026]
+//[Last Update: 5:10 PM 11/15/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 (() => {
   const api = window.NEXIDIA_TOOLS;
@@ -44,7 +44,7 @@
     "Check each response ends with a closing curly bracket }, copy it, and paste it into the box below. Rows are added to the grid as you go.",
     "Metadata from Nexidia is added using your primary key (Trans_Id by default). If your columns look like Nexidia's, you'll be asked whether to merge them. Adjust duplicates, delimiters, and highlights in Unpack Settings.",
     "Review your rows and play calls. To fix a value, switch On Click to Edit Field and click the cell. If your outputs have timestamps, use Play All Timestamps to work through them one at a time. Use Save Session to keep a copy you can load later and keep working.",
-    "When you're finished, click Export to Excel to save your work to an Excel sheet."
+    "When you're finished, click Export to save the grid, your session log, or the raw outputs you pasted, as Excel, CSV, or text."
   ];
   const STRIP_ROW_H = 26;
   const STRIP_ROWS_COLLAPSED = 2;
@@ -304,7 +304,7 @@
       objects.push(r.pairs);
       dups += r.dups.length;
     }
-    return { status: "ok", objects, dups };
+    return { status: "ok", objects, dups, sources: scan.objects };
   }
   //##> FORMATS: Date, Currency, and Number columns can have a display format. A column's format comes from,
   //##> in order: the user's choice in Attributes, the report's column setup, or a pattern learned from the
@@ -535,6 +535,101 @@
       })
     }));
   }
+  //##> XLSX IMPORT: .xlsx files are zip folders of XML. They're opened in the browser with no outside library,
+  //##> using the browser's built-in unzip (DecompressionStream). Only cell text and numbers are read, never
+  //##> formatting, so dates come in as Excel date numbers and are converted on import.
+  async function inflateRaw(bytes) {
+    if (typeof DecompressionStream === "undefined") throw new Error("this browser can't open .xlsx files. Save the sheet as CSV and import that instead");
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  function openZip(buf) {
+    const u8 = new Uint8Array(buf);
+    const dv = new DataView(buf);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error("the workbook couldn't be opened");
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const dec = new TextDecoder();
+    const files = new Map();
+    for (let n = 0; n < count && p + 46 <= u8.length; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true);
+      const csize = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true);
+      const extraLen = dv.getUint16(p + 30, true);
+      const commentLen = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      files.set(dec.decode(u8.subarray(p + 46, p + 46 + nameLen)), { method, csize, local });
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return {
+      async text(name) {
+        const f = files.get(name);
+        if (!f) return null;
+        const start = f.local + 30 + dv.getUint16(f.local + 26, true) + dv.getUint16(f.local + 28, true);
+        const raw = u8.subarray(start, start + f.csize);
+        if (f.method !== 0 && f.method !== 8) throw new Error("the workbook uses a compression type that can't be read");
+        return dec.decode(f.method === 0 ? raw : await inflateRaw(raw));
+      }
+    };
+  }
+  function xlsxColIndex(ref) {
+    const m = /^([A-Z]+)/.exec(String(ref || ""));
+    if (!m) return -1;
+    let n = 0;
+    for (const ch of m[1]) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n - 1;
+  }
+  async function parseXlsx(buf) {
+    const zip = openZip(buf);
+    const xml = (t) => new DOMParser().parseFromString(t || "<x/>", "application/xml");
+    const textOf = (node) => {
+      let s = "";
+      for (const t of node.getElementsByTagNameNS("*", "t")) if (!t.parentNode || t.parentNode.localName !== "rPh") s += t.textContent;
+      return s;
+    };
+    const shared = [];
+    const sst = await zip.text("xl/sharedStrings.xml");
+    if (sst) for (const si of xml(sst).getElementsByTagNameNS("*", "si")) shared.push(textOf(si));
+    const rels = new Map();
+    for (const r of xml(await zip.text("xl/_rels/workbook.xml.rels")).getElementsByTagNameNS("*", "Relationship")) rels.set(r.getAttribute("Id"), r.getAttribute("Target"));
+    const sheets = [];
+    const wb = xml(await zip.text("xl/workbook.xml"));
+    for (const s of wb.getElementsByTagNameNS("*", "sheet")) {
+      const rid = s.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id") || s.getAttribute("r:id");
+      let target = String(rels.get(rid) || "");
+      if (!target) continue;
+      target = target.startsWith("/") ? target.slice(1) : "xl/" + target.replace(/^\.\//, "");
+      const txt = await zip.text(target);
+      if (!txt) continue;
+      const rows = [];
+      for (const r of xml(txt).getElementsByTagNameNS("*", "row")) {
+        const ri = Number(r.getAttribute("r") || 0);
+        if (ri) while (rows.length < ri - 1) rows.push([]);
+        const cells = [];
+        for (const c of r.getElementsByTagNameNS("*", "c")) {
+          let ci = xlsxColIndex(c.getAttribute("r"));
+          if (ci < 0) ci = cells.length;
+          while (cells.length < ci) cells.push("");
+          const t = c.getAttribute("t");
+          const v = c.getElementsByTagNameNS("*", "v")[0];
+          let val = "";
+          if (t === "s") val = v ? (shared[Number(v.textContent)] || "") : "";
+          else if (t === "inlineStr") val = textOf(c);
+          else if (t === "b") val = v ? (v.textContent === "1" ? "TRUE" : "FALSE") : "";
+          else val = v ? v.textContent : "";
+          cells[ci] = val;
+        }
+        rows.push(cells);
+      }
+      sheets.push({ name: s.getAttribute("name") || "Sheet " + (sheets.length + 1), rows });
+    }
+    return sheets;
+  }
   function isBlankRow(r) {
     return !r || !r.length || r.every((c) => !String(c == null ? "" : c).trim());
   }
@@ -566,6 +661,7 @@
   //##> autofit), between XLSX_MIN_COL_CHARS and XLSX_MAX_COL_CHARS. The zip is written with no compression.
   const XLSX_FORMATS = {
     dt: "m/d/yyyy h:mm",
+    dts: "m/d/yyyy h:mm:ss",
     d: "m/d/yyyy",
     dpad: "mm/dd/yyyy",
     d2: "m/d/yy",
@@ -663,7 +759,8 @@
     while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); }
     return s;
   }
-  function buildXlsx(sheetName, headers, rowsData, widthsChars) {
+  function buildXlsx(sheetName, headers, rowsData, widthsChars, opts) {
+    const noHeader = !!(opts && opts.noHeader);
     const fmtKeys = Object.keys(XLSX_FORMATS).filter((k) => k !== "gen");
     const styleIndex = { gen: 0 };
     fmtKeys.forEach((k, i) => { styleIndex[k] = i + 2; });
@@ -691,9 +788,10 @@
       const t = String(v == null ? "" : v).slice(0, XLSX_MAX_TEXT);
       return `<c r="${ref}" t="inlineStr" s="${s}"><is><t xml:space="preserve">${xmlEsc(t)}</t></is></c>`;
     };
-    out.push('<row r="1">' + headers.map((h, i) => strCell(colLetter(i) + "1", h, 1)).join("") + "</row>");
+    const startRow = noHeader ? 1 : 2;
+    if (!noHeader) out.push('<row r="1">' + headers.map((h, i) => strCell(colLetter(i) + "1", h, 1)).join("") + "</row>");
     rowsData.forEach((cells, ri) => {
-      const r = ri + 2;
+      const r = ri + startRow;
       const xml = [];
       cells.forEach((cell, ci) => {
         if (!cell) return;
@@ -705,8 +803,8 @@
     });
     const sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      `<dimension ref="A1:${lastCol}${rowsData.length + 1}"/>` +
-      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>' +
+      `<dimension ref="A1:${lastCol}${Math.max(1, rowsData.length + startRow - 1)}"/>` +
+      (noHeader ? '<sheetViews><sheetView workbookViewId="0"/></sheetViews>' : '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>') +
       '<sheetFormatPr defaultRowHeight="15"/>' + cols +
       `<sheetData>${out.join("")}</sheetData>` +
       "</worksheet>";
@@ -720,6 +818,66 @@
       { name: "xl/worksheets/sheet1.xml", data: sheet }
     ];
     return zipStore(files);
+  }
+  //##> LONG VALUES: Excel holds at most XLSX_MAX_TEXT characters in one cell. Any text value longer than that
+  //##> continues into extra columns right next to it, labeled (Part 2), (Part 3), and so on, so nothing is cut
+  //##> off. The same split is used for CSV, since Excel applies the same limit when it opens one.
+  function expandOverflow(headers, data) {
+    const parts = headers.map((_, ci) => {
+      let m = 1;
+      for (const r of data) {
+        const c = r[ci];
+        if (c && c.t === "s") { const n = Math.ceil(String(c.v).length / XLSX_MAX_TEXT); if (n > m) m = n; }
+      }
+      return m;
+    });
+    const map = [];
+    const outHeaders = [];
+    headers.forEach((h, ci) => { for (let p = 0; p < parts[ci]; p++) { outHeaders.push(p ? `${h} (Part ${p + 1})` : h); map.push(ci); } });
+    if (parts.every((p) => p === 1)) return { headers, data, map, long: 0 };
+    let long = 0;
+    const outData = data.map((r) => {
+      const out = [];
+      headers.forEach((_, ci) => {
+        const c = r[ci];
+        if (parts[ci] === 1) { out.push(c); return; }
+        if (!c || c.t !== "s") { out.push(c); for (let p = 1; p < parts[ci]; p++) out.push(null); return; }
+        const str = String(c.v);
+        if (str.length > XLSX_MAX_TEXT) long++;
+        for (let p = 0; p < parts[ci]; p++) {
+          const seg = str.slice(p * XLSX_MAX_TEXT, (p + 1) * XLSX_MAX_TEXT);
+          out.push(seg ? { t: "s", v: seg } : null);
+        }
+      });
+      return out;
+    });
+    return { headers: outHeaders, data: outData, map, long };
+  }
+  function csvCell(v) {
+    const s = String(v == null ? "" : v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function tsvCell(v) {
+    return String(v == null ? "" : v).replace(/[\t\r\n]+/g, " ");
+  }
+  function buildDelimited(format, headers, rowsText) {
+    const lines = [];
+    const join = format === "csv" ? (cells) => cells.map(csvCell).join(",") : (cells) => cells.map(tsvCell).join("\t");
+    if (headers) lines.push(join(headers));
+    for (const r of rowsText) lines.push(join(r));
+    return (format === "csv" ? "\uFEFF" : "") + lines.join("\r\n");
+  }
+  function downloadBlob(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = el("a", { href: url, download: filename });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  function excelLocalTime(ms) {
+    const d = new Date(ms);
+    return (ms - d.getTimezoneOffset() * 60000) / 86400000 + 25569;
   }
   let dbPromise = null;
   function db() {
@@ -758,6 +916,17 @@
       }
       if (opts.list && opts.list.length) {
         const wrap = el("div", { style: "border:1px solid #e5e7eb;border-radius:8px;max-height:260px;overflow-y:auto;margin-bottom:12px;" });
+        if (opts.collapseOver && opts.list.length > opts.collapseOver) {
+          const count = opts.list.length;
+          const toggle = el("button", { type: "button", style: "background:none;border:0;padding:0 0 8px;font-size:12px;font-weight:600;color:#1d4ed8;cursor:pointer;" + FONT }, `\u25B8 Show all ${count.toLocaleString()}`);
+          wrap.style.display = "none";
+          toggle.onclick = () => {
+            const open = wrap.style.display === "none";
+            wrap.style.display = open ? "" : "none";
+            toggle.textContent = `${open ? "\u25BE Hide" : "\u25B8 Show all"} ${count.toLocaleString()}`;
+          };
+          box.appendChild(toggle);
+        }
         for (const item of opts.list) {
           const label = typeof item === "string" ? item : item.label;
           const row = el("div", { style: `padding:8px 12px;font-size:12px;border-bottom:1px solid #f1f5f9;color:#111827;word-break:break-all;${opts.listClickable ? "cursor:pointer;" : ""}` }, label);
@@ -793,10 +962,25 @@
       document.body.appendChild(overlay);
     });
   }
+  //##> FLASH MESSAGES: Quick notes like "5 rows added" drop in at the top center of the screen, stack if
+  //##> several arrive together, and fade out on their own after FLASH_MS. The color still tells the kind of note.
+  const FLASH_MS = 3200;
   function toast(text, color) {
-    const n = el("div", { style: `position:fixed;bottom:20px;right:20px;background:${color || "#22c55e"};color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;z-index:1000030;box-shadow:0 4px 12px rgba(0,0,0,.2);transition:opacity 0.3s;` + FONT }, text);
-    document.body.appendChild(n);
-    setTimeout(() => { n.style.opacity = "0"; setTimeout(() => n.remove(), 300); }, 2400);
+    let host = document.querySelector("[data-nx-flash]");
+    if (!host) {
+      host = el("div", { style: "position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:1000040;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;max-width:90vw;" + FONT });
+      host.dataset.nxFlash = "1";
+      host.setAttribute("aria-live", "polite");
+      document.body.appendChild(host);
+    }
+    const n = el("div", { style: `background:${color || "#16a34a"};color:#fff;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:700;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3);opacity:0;transform:translateY(-12px);transition:opacity .35s,transform .35s;` }, text);
+    host.appendChild(n);
+    requestAnimationFrame(() => { n.style.opacity = "1"; n.style.transform = "translateY(0)"; });
+    setTimeout(() => {
+      n.style.opacity = "0";
+      n.style.transform = "translateY(-12px)";
+      setTimeout(() => { n.remove(); if (!host.children.length) host.remove(); }, 400);
+    }, FLASH_MS);
   }
   function downloadText(filename, text) {
     const blob = new Blob([text], { type: "text/plain" });
@@ -864,7 +1048,9 @@
       suppress: {},
       grid: { order: [], visible: [], widths: {}, sorts: [], filters: {}, globalFilter: "", clickMode: "select" },
       preset: null,
-      lockedKeys: null
+      lockedKeys: null,
+      log: [],
+      nextLogId: 1
     };
   }
   function openUnpack() {
@@ -904,6 +1090,8 @@
     let tsActive = false;
     let tsTempShown = null;
     let tsCache = null;
+    let freshKeys = new Set();
+    let exportChoice = { grid: { on: true, format: "xlsx" }, log: { on: false, format: "xlsx" }, raw: { on: false, format: "xlsx" } };
     function getFV(rowObj, key) {
       if (xls && xls.getFieldValue) return xls.getFieldValue(rowObj, key);
       if (!rowObj) return "";
@@ -1072,6 +1260,7 @@
       S.grid.order.splice(ti === -1 ? S.grid.order.length : ti + 1, 0, m.source);
       setVis(m.source, true);
       refreshAll();
+      logEvent("unmerge", `Unmerged ${baseHeader(m.source)} from ${baseHeader(rootOf(m.target))}`);
       toast(baseHeader(m.source) + " unmerged", "#0369a1");
     }
     function mergeableFields() {
@@ -1128,6 +1317,10 @@
           const v = e.values[id];
           if (!isEmptyValue(v) && vals.has(id)) vals.get(id).push(String(v).trim());
         }
+      }
+      for (const imp of S.imports) {
+        const id = imp.target.startsWith("j:") ? imp.target.slice(2) : null;
+        if (id && vals.has(id) && !isEmptyValue(imp.value)) vals.get(id).push(String(imp.value).trim());
       }
       for (const c of S.columns) {
         const v = vals.get(c.id) || [];
@@ -1195,7 +1388,9 @@
       for (const imp of imports) {
         if (imp.target.startsWith("m:")) {
           const f = imp.target.slice(2);
-          if (!row.over[f]) row.over[f] = imp.value;
+          if (imp.mode === "replace") row.rep[f] = imp.value;
+          else if (imp.mode === "stack") (row.add[f] = row.add[f] || []).push(imp.value);
+          else if (!row.over[f]) row.over[f] = imp.value;
           continue;
         }
         const id = imp.target.slice(2);
@@ -1210,7 +1405,7 @@
       }
     }
     function buildRow(g, importMap) {
-      const row = { id: g.id, key: g.key, missing: g.missing, count: g.entries.filter((e) => !e.seed).length, tok: {}, hl: {}, over: {}, cache: {}, bcache: {}, meta: null, status: null };
+      const row = { id: g.id, key: g.key, missing: g.missing, count: g.entries.filter((e) => !e.seed).length, tok: {}, hl: {}, over: {}, rep: {}, add: {}, cache: {}, bcache: {}, meta: null, status: null };
       for (const c of S.columns) {
         const r = resolveValues(c, g.entries.map((e) => e.values[c.id]));
         row.tok[c.id] = r.tokens;
@@ -1291,7 +1486,10 @@
       v = v == null ? "" : String(v).trim();
       if (row.meta && (!v || /^0+$/.test(v) || v.includes("*"))) v = "0";
       if ((!v || v === "0") && row.over[k]) v = row.over[k];
-      return v ? [v] : [];
+      if (row.rep && row.rep[k]) v = row.rep[k];
+      const out = v ? [v] : [];
+      if (row.add && row.add[k]) for (const a of row.add[k]) if (!out.some((x) => tokenKey(x) === tokenKey(a))) out.push(a);
+      return out.length > 1 ? out.filter((x) => !/^0+$/.test(x)) : out;
     }
     //##> EDITS: Stored in S.edits by row id and field, layered over the derived value at render time.
     //##> Revert just deletes the edit. Conflicts with new data are checked only after a paste,
@@ -1325,7 +1523,7 @@
       if (row.cache[f]) return row.cache[f];
       const base = baseParts(row, f, depth);
       const ed = getEdit(row, f);
-      const res = ed ? { tokens: isEmptyValue(ed.value) ? [] : [String(ed.value)], ownFirst: undefined, delim: base.delim, edited: true } : base;
+      const res = ed ? { tokens: isEmptyValue(ed.value) ? (f.startsWith("m:") && row.meta ? ["0"] : []) : [String(ed.value)], ownFirst: undefined, delim: base.delim, edited: true } : base;
       row.cache[f] = res;
       return res;
     }
@@ -1429,16 +1627,28 @@
       S.grid.order.splice(lastM + 1, 0, "m:" + field);
       setVis("m:" + field, true);
     }
-    function updateMissingNotice() {
-      const pk = pkColumn();
-      const missing = [];
-      const seen = new Set();
-      for (const e of S.entries) {
-        const k = keyOf(e, pk);
-        const lk = k.toLowerCase();
-        if (k && !seen.has(lk) && S.metaStatus[lk] === "missing") { seen.add(lk); missing.push(k); }
-      }
-      if (!missing.length) { clearNotice("missing"); return; }
+    //##> SESSION LOG: Every paste, lookup, import, edit, and export is added to S.log with a time, so it saves
+    //##> and loads with the session. Paste entries keep the raw objects that were read in their items list, and
+    //##> Raw Data exports come straight from those entries.
+    function logEvent(kind, text, extra) {
+      if (!Array.isArray(S.log)) S.log = [];
+      const entry = Object.assign({ id: S.nextLogId++, t: Date.now(), kind, text }, extra || {});
+      S.log.push(entry);
+      if (logPanel.style.display !== "none") renderLog();
+      scheduleSave();
+      return entry;
+    }
+    function plural(n, one, many) {
+      return `${Number(n).toLocaleString()} ${n === 1 ? one : (many || one + "s")}`;
+    }
+    function pkPlural() {
+      const name = String(S.settings.primaryKey || "Trans_Id").trim();
+      return /s$/i.test(name) ? name : name + "s";
+    }
+    //##> NOT FOUND NOTICE: The red note under the instructions only lists calls that weren't found in the
+    //##> lookup that just ran. Older misses keep their red ! on the row number but aren't announced again.
+    function updateMissingNotice(missing) {
+      if (!missing || !missing.length) { clearNotice("missing"); return; }
       const shown = missing.slice(0, 15).join(", ") + (missing.length > 15 ? `, and ${missing.length - 15} more` : "");
       addNotice("error", `${missing.length} call${missing.length === 1 ? "" : "s"} not found: ${shown}. Check the ${S.settings.primaryKey}. Also check that all your calls are from within the last 90 days.`, "missing");
     }
@@ -1553,6 +1763,8 @@
       const tc = transColumn();
       const multi = [];
       const notFound = [];
+      const priorStatus = {};
+      for (const lk of keys.keys()) priorStatus[lk] = S.metaStatus[lk];
       for (const [lk, orig] of keys) {
         let m = found.get(lk) || [];
         if (m.length > 1 && tc && tc.id !== pk.id) {
@@ -1569,21 +1781,42 @@
         if (!m.length) notFound.push(orig);
       }
       S.metaAdded = true;
+      const foundCount = keys.size - notFound.length;
+      logEvent("lookup", `Metadata lookup for ${plural(keys.size, "call")}: ${foundCount.toLocaleString()} found, ${notFound.length.toLocaleString()} not found${multi.length ? `, ${multi.length.toLocaleString()} with more than one match` : ""}`, notFound.length ? { items: notFound.slice() } : null);
+      const newMissing = notFound.filter((k) => freshKeys.has(k.toLowerCase()));
+      const lostMissing = notFound.filter((k) => !freshKeys.has(k.toLowerCase()) && priorStatus[k.toLowerCase()] && priorStatus[k.toLowerCase()] !== "missing");
+      for (const lk of keys.keys()) freshKeys.delete(lk);
+      let announce = lostMissing.slice();
+      if (newMissing.length) {
+        let choice = S.suppress.notFoundChoice || null;
+        if (!choice) {
+          const one = newMissing.length === 1;
+          const r = await dialog({
+            title: `${plural(newMissing.length, "call")} not found`,
+            danger: true,
+            message: `No Nexidia call was found for ${one ? "this" : "these"} ${pkName} value${one ? "" : "s"}. Check the ${pkName}, and check that the call${one ? " is" : "s are"} from within the last 90 days.\n\nLeave ${one ? "it" : "them"} off the grid, or add ${one ? "it" : "them"} anyway with the metadata columns left blank?`,
+            list: newMissing.slice(0, 300),
+            collapseOver: 12,
+            checkbox: "Remember my choice for this session",
+            buttons: [{ label: "Leave Off", value: "leave", primary: true, title: "Don't add rows for calls that weren't found." }, { label: "Add Anyway", value: "add", title: "Add the rows with their CoPilot values and blank metadata." }]
+          });
+          if (closed) return;
+          choice = r.value || "leave";
+          if (r.checked) S.suppress.notFoundChoice = choice;
+        }
+        if (choice === "leave") {
+          dropKeys(newMissing, pk);
+          logEvent("leftOff", `Left ${plural(newMissing.length, "call")} off the grid because ${newMissing.length === 1 ? "it wasn't" : "they weren't"} found`, { items: newMissing.slice() });
+          toast(`${plural(newMissing.length, "call")} not found and left off`, "#dc2626");
+        } else {
+          announce = announce.concat(newMissing);
+          logEvent("addedMissing", `Added ${plural(newMissing.length, "call")} that weren't found, with blank metadata`, { items: newMissing.slice() });
+        }
+      }
       autoMergeKeys();
-      updateMissingNotice();
+      updateMissingNotice(announce);
       newDataPending = true;
       refreshAll();
-      if (notFound.length && !S.suppress.notFound) {
-        const r = await dialog({
-          title: `${notFound.length} call${notFound.length === 1 ? "" : "s"} not found`,
-          danger: true,
-          message: `No Nexidia metadata was found for ${notFound.length === 1 ? "this" : "these"} ${pkName} value${notFound.length === 1 ? "" : "s"}. ${notFound.length === 1 ? "Its" : "Their"} CoPilot values are still on the grid, but the metadata columns are left blank.\n\nCheck the ${pkName}. Also check that all your calls are from within the last 90 days.`,
-          list: notFound.slice(0, 300),
-          checkbox: "Do not show this again",
-          buttons: [{ label: "OK", value: true, primary: true }]
-        });
-        if (r.checked) { S.suppress.notFound = true; scheduleSave(); }
-      }
       if (multi.length && !S.suppress.multi) {
         const r = await dialog({
           title: "Multiple calls matched",
@@ -1598,6 +1831,130 @@
       }
       runMergeDetection();
     }
+    function dropKeys(keys, pk) {
+      const set = new Set(keys.map((k) => String(k).toLowerCase()));
+      S.entries = S.entries.filter((e) => { const k = keyOf(e, pk); return !k || !set.has(k.toLowerCase()); });
+      for (const lk of set) { delete S.meta[lk]; delete S.metaStatus[lk]; }
+    }
+    function currentKeys(pk) {
+      const set = new Set();
+      for (const e of S.entries) { const k = keyOf(e, pk); if (k) set.add(k.toLowerCase()); }
+      return set;
+    }
+    //##> REMOVED ROWS: A key counts as removed when at least one of its rows was removed and none of its rows
+    //##> are still showing. Reinstating takes every removed row for that key out of S.removed.
+    function removedByKey(pk) {
+      const out = new Map();
+      const entryById = new Map(S.entries.map((e) => [e.id, e]));
+      for (const id of S.removed) {
+        let lk = "";
+        if (id.startsWith("k:")) lk = id.slice(2).replace(/#\d+$/, "");
+        else if (id.startsWith("e:")) { const e = entryById.get(Number(id.slice(2))); lk = e ? keyOf(e, pk).toLowerCase() : ""; }
+        if (!lk) continue;
+        if (!out.has(lk)) out.set(lk, []);
+        out.get(lk).push(id);
+      }
+      for (const r of rows) if (r.key) out.delete(r.key.toLowerCase());
+      return out;
+    }
+    async function askReinstate(keys, source) {
+      if (!keys.length) return "keep";
+      let choice = S.suppress.removedChoice || null;
+      if (!choice) {
+        const one = keys.length === 1;
+        const r = await dialog({
+          title: `${plural(keys.length, "row")} you removed`,
+          message: `${source} include${source.endsWith("s") ? "" : "s"} ${one ? "a " + S.settings.primaryKey + " that was" : keys.length.toLocaleString() + " " + pkPlural() + " that were"} removed from the grid earlier. Put ${one ? "it" : "them"} back on the grid, or keep ${one ? "it" : "them"} removed?`,
+          list: keys.slice(0, 500),
+          collapseOver: 10,
+          checkbox: "Remember my choice for this session",
+          buttons: [{ label: "Keep Removed", value: "keep", primary: true }, { label: "Reinstate", value: "reinstate" }]
+        });
+        choice = r.value || "keep";
+        if (r.checked) S.suppress.removedChoice = choice;
+      }
+      return choice;
+    }
+    function reinstateKeys(keys, removedMap) {
+      const ids = new Set();
+      for (const k of keys) for (const id of (removedMap.get(String(k).toLowerCase()) || [])) ids.add(id);
+      S.removed = S.removed.filter((id) => !ids.has(id));
+    }
+    //##> ADD KEYS: Pasted keys become placeholder rows (seed entries with only the primary key), then a
+    //##> metadata lookup fills them in. CoPilot columns start blank. Keys already on the grid are skipped. Reports
+    //##> can turn the button off with allowAddKeys: false. In a report session, added keys join its call list.
+    async function addKeys(list) {
+      if (S.preset && S.preset.allowAddKeys === false) return;
+      const seen = new Set();
+      const keys = [];
+      for (const raw of list) {
+        const k = String(raw || "").trim();
+        if (!k || /^0+$/.test(k) || seen.has(k.toLowerCase())) continue;
+        seen.add(k.toLowerCase());
+        keys.push(k);
+      }
+      if (!keys.length) return;
+      let pk = pkColumn();
+      if (!pk) { const id = ensureColumn(S.settings.primaryKey || "Trans_Id", aliasMap()); pk = colById(id); derive(); }
+      const present = currentKeys(pk);
+      const removedMap = removedByKey(pk);
+      const already = [], removedHits = [], fresh = [];
+      for (const k of keys) {
+        const lk = k.toLowerCase();
+        if (removedMap.has(lk)) removedHits.push(k);
+        else if (present.has(lk)) already.push(k);
+        else fresh.push(k);
+      }
+      let reinstated = [];
+      if (removedHits.length && (await askReinstate(removedHits, "These " + pkPlural())) === "reinstate") {
+        reinstateKeys(removedHits, removedMap);
+        reinstated = removedHits;
+      }
+      if (closed) return;
+      for (const k of fresh) {
+        S.entries.push({ id: S.nextEntryId++, pasteId: 0, seed: true, values: { [pk.id]: k } });
+        freshKeys.add(k.toLowerCase());
+        if (S.lockedKeys && !S.lockedKeys.includes(k.toLowerCase())) S.lockedKeys.push(k.toLowerCase());
+      }
+      const parts = [];
+      if (fresh.length) parts.push(`${fresh.length.toLocaleString()} added`);
+      if (reinstated.length) parts.push(`${reinstated.length.toLocaleString()} reinstated`);
+      if (already.length) parts.push(`${already.length.toLocaleString()} already on the grid`);
+      if (removedHits.length - reinstated.length) parts.push(`${(removedHits.length - reinstated.length).toLocaleString()} kept removed`);
+      logEvent("addKeys", `Added ${pkPlural()}: ${parts.join(", ")}`, { items: keys.slice() });
+      newDataPending = true;
+      refreshAll();
+      toast(`${pkPlural()}: ${parts.join(", ")}`, fresh.length || reinstated.length ? "#16a34a" : "#6b7280");
+      if (fresh.length) fetchMetadata(true);
+    }
+    function openAddKeys() {
+      const name = pkPlural();
+      const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000015;display:flex;align-items:center;justify-content:center;" + FONT });
+      const box = el("div", { style: "background:#fff;width:440px;max-width:94vw;border-radius:12px;padding:20px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+      const labelId = "nxAddKeys" + Date.now();
+      box.appendChild(el("div", { id: labelId, style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:6px;" }, "Add " + name));
+      box.appendChild(el("div", { style: "font-size:12px;color:#4b5563;line-height:1.45;margin-bottom:10px;" }, `Paste one or more ${name}. Each one is added as a row and filled in with Nexidia metadata. Your CoPilot columns start blank, so you can edit them here or paste outputs for these calls later.`));
+      const ta = el("textarea", { placeholder: `One ${S.settings.primaryKey} per line, or separated by commas or spaces`, style: "width:100%;height:150px;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:12px;font-family:Consolas,monospace;resize:vertical;" });
+      ta.setAttribute("aria-labelledby", labelId);
+      const count = el("div", { style: "font-size:11px;color:#6b7280;margin:6px 0 12px;" }, "");
+      count.setAttribute("aria-live", "polite");
+      const parse = () => ta.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+      ta.addEventListener("input", () => { const n = new Set(parse().map((x) => x.toLowerCase())).size; count.textContent = n ? `${n.toLocaleString()} ${n === 1 ? S.settings.primaryKey : name} found` : ""; });
+      const row = el("div", { style: "display:flex;gap:8px;" });
+      const addB = el("button", { type: "button", style: "flex:1;" + PRIMARY_BTN }, "Add to Grid");
+      const cancelB = el("button", { type: "button", style: "flex:1;" + PLAIN_BTN }, "Cancel");
+      addB.onclick = () => { const list = parse(); if (!list.length) { ta.focus(); return; } overlay.remove(); addKeys(list); };
+      cancelB.onclick = () => overlay.remove();
+      overlay.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.remove(); });
+      row.appendChild(addB);
+      row.appendChild(cancelB);
+      box.appendChild(ta);
+      box.appendChild(count);
+      box.appendChild(row);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      setTimeout(() => ta.focus(), 30);
+    }
     function processBlocks(blocks) {
       const accepted = [];
       const failures = [];
@@ -1609,14 +1966,17 @@
           const r = validateLine(ln);
           if (r.status === "blank") return;
           lineCount++;
-          if (r.status === "ok") accepted.push(r);
+          if (r.status === "ok") accepted.push(Object.assign({ line: ln }, r));
           else if (r.status === "message") accepted.push({ objects: [], message: r.message });
           else { failures.push({ block: b, line: i + 1, raw: ln, status: r.status, message: r.message }); failedLines.push(ln); }
         });
         blocks[b].failedText = failedLines.join("\n");
       }
       const objects = [];
-      for (const a of accepted) for (const o of a.objects) objects.push(o);
+      const rawObjects = [];
+      for (const a of accepted) {
+        a.objects.forEach((o, i) => { objects.push(o); rawObjects.push(a.sources && a.sources[i] ? a.sources[i] : ""); });
+      }
       const rejected = [];
       let keep = objects;
       if (S.lockedKeys && S.lockedKeys.length) {
@@ -1629,14 +1989,37 @@
           else rejected.push(k || "(no " + S.settings.primaryKey + ")");
         }
       }
+      const pkNow = pkColumn();
+      const before = currentKeys(pkNow);
+      const colsBefore = S.columns.length;
       let added = [];
       if (keep.length) added = ingest(keep);
+      const pkAfter = pkColumn();
+      let newRows = 0, combined = 0;
+      const newSet = new Set();
+      for (const e of added) {
+        const k = keyOf(e, pkAfter).toLowerCase();
+        if (!k || !S.settings.combine) { newRows++; if (k && !before.has(k)) freshKeys.add(k); continue; }
+        if (before.has(k) || newSet.has(k)) combined++;
+        else { newSet.add(k); newRows++; freshKeys.add(k); }
+      }
+      const newCols = S.columns.slice(colsBefore).map((c) => c.header);
       const emptyBatches = accepted.filter((a) => a.message).length;
+      if (objects.length || failures.length || emptyBatches) {
+        const bits = [];
+        if (objects.length) bits.push(`${plural(newRows, "new row")}${combined ? `, ${combined.toLocaleString()} combined into existing rows` : ""}`);
+        if (newCols.length) bits.push(`new column${newCols.length === 1 ? "" : "s"}: ${newCols.join(", ")}`);
+        if (rejected.length) bits.push(`${rejected.length.toLocaleString()} not in this report`);
+        if (failures.length) bits.push(`${plural(failures.length, "line")} couldn't be read`);
+        if (emptyBatches) bits.push(`${plural(emptyBatches, "batch", "batches")} returned no rows`);
+        logEvent("paste", `Paste #${S.pasteCount + (added.length ? 0 : 1)}: ${plural(objects.length, "object")}${bits.length ? " \u00B7 " + bits.join(" \u00B7 ") : ""}`, { items: rawObjects, count: objects.length });
+        if (!added.length) S.pasteCount++;
+      }
       if (emptyBatches) toast(`${emptyBatches} batch${emptyBatches === 1 ? "" : "es"} returned no rows (${accepted.find((a) => a.message).message})`, "#6366f1");
       if (added.length) {
         newDataPending = true;
         refreshAll();
-        toast(`${added.length} row${added.length === 1 ? "" : "s"} added`);
+        toast(combined && S.settings.combine ? `${plural(newRows, "row")} added, ${combined.toLocaleString()} combined into existing rows` : `${plural(newRows, "row")} added`);
         checkMissingKeys(added);
         if (S.settings.autoMeta) fetchMetadata(true);
         else runMergeDetection();
@@ -1735,6 +2118,8 @@
       if (!next.issueIgnore.items) next.issueIgnore.items = {};
       if (!next.issueIgnore.rules) next.issueIgnore.rules = {};
       if (!next.suppress || typeof next.suppress !== "object") next.suppress = {};
+      if (!Array.isArray(next.log)) next.log = [];
+      if (!next.nextLogId) next.nextLogId = next.log.reduce((n, x) => Math.max(n, x.id || 0), 0) + 1;
       if (!keepId) { next.sessionId = newState().sessionId; next.createdAt = Date.now(); }
       S = next;
       selected.clear();
@@ -1761,25 +2146,33 @@
         saveNow();
       }
       loadSessionData(parsed.data, false);
+      logEvent("session", `Loaded a saved session from ${file.name}`);
       toast("Session loaded");
     }
     async function importSpreadsheet(file) {
-      if (!S.entries.length) {
+      const allowNew = !(S.preset && S.preset.allowImportNew === false);
+      if (!S.entries.length && !allowNew) {
         dialog({ title: "Nothing to join to", message: "Paste your CoPilot outputs first. Spreadsheet imports only add values to rows already on the grid." });
         return;
       }
-      let text;
-      try { text = await file.text(); } catch (_) { text = null; }
-      if (text === null) { dialog({ title: "Import failed", danger: true, message: "That file couldn't be read." }); return; }
-      if (text.startsWith("PK")) {
-        dialog({ title: "Unsupported file", danger: true, message: "This looks like an .xlsx workbook, which can't be read here. Use the original .xls export from Nexidia, or save the sheet as CSV and import that." });
+      let sheets;
+      try {
+        const buf = await file.arrayBuffer();
+        const sig = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
+        if (sig[0] === 0x50 && sig[1] === 0x4b) sheets = await parseXlsx(buf);
+        else {
+          const text = new TextDecoder().decode(buf);
+          const head = text.slice(0, 3000).toLowerCase();
+          if (head.includes("<workbook")) sheets = parseSpreadsheetML(text);
+          else if (/<html|<table/i.test(head) || /<table/i.test(text)) sheets = parseHtmlTables(text);
+          else sheets = [{ name: file.name, rows: parseDelimited(text) }];
+        }
+      } catch (e) {
+        console.error(e);
+        dialog({ title: "Import failed", danger: true, message: "That file couldn't be read: " + (e && e.message ? e.message : e) + "." });
         return;
       }
-      const head = text.slice(0, 3000).toLowerCase();
-      let sheets;
-      if (head.includes("<workbook")) sheets = parseSpreadsheetML(text);
-      else if (/<html|<table/i.test(head) || /<table/i.test(text)) sheets = parseHtmlTables(text);
-      else sheets = [{ name: file.name, rows: parseDelimited(text) }];
+      if (closed) return;
       const pk = pkColumn();
       const keyNames = new Set(TRANS_ALIASES);
       keyNames.add(String(S.settings.primaryKey || "").trim().toLowerCase());
@@ -1812,75 +2205,241 @@
         if (r.value === null || r.value === undefined) return;
         pick = candidates[r.value];
       }
-      joinSheet(pick.sheet.rows, pick.header, keyNames, file.name);
+      await joinSheet(pick.sheet.rows, pick.header, keyNames, file.name);
     }
+    //##> IMPORT STANDARDIZING: Nexidia values from a spreadsheet are put back into the form Nexidia uses before
+    //##> they're compared. Date/Time becomes a date-time (from an Excel date number or text like 11/3/2026 10:15 AM),
+    //##> Duration and Hold Time become milliseconds (from Excel time, seconds, or text like 2:05). Masked and
+    //##> all-zero values are skipped. Values only count as different from Nexidia when they really are: dates
+    //##> within the same minute, times within the same second, and numbers that only lost leading zeros all match.
     function convertImportedMeta(field, value) {
       const f = field.toLowerCase();
-      const n = Number(value);
-      if (!/^-?\d+(\.\d+)?$/.test(value) || !isFinite(n)) return value;
-      if (f === "recordeddatetime" && n > 20000 && n < 80000) return new Date(Math.round((n - 25569) * 86400000)).toISOString();
-      if (f === "mediafileduration" && n < 1) return String(Math.round(n * 86400) * 1000);
-      if (f === "udfint4") return String(Math.round(n) * 1000);
-      return value;
+      const s = String(value == null ? "" : value).trim();
+      const n = Number(s);
+      const numeric = /^-?\d+(\.\d+)?$/.test(s) && isFinite(n);
+      if (f === "recordeddatetime") {
+        if (numeric && n > 20000 && n < 80000) return new Date(Math.round((n - 25569) * 86400000)).toISOString();
+        const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/);
+        if (m) {
+          let y = Number(m[3]);
+          if (m[3].length === 2) y += 2000;
+          let h = Number(m[4] || 0);
+          if (m[7]) { const pm = /p/i.test(m[7]); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+          const d = new Date(y, Number(m[1]) - 1, Number(m[2]), h, Number(m[5] || 0), Number(m[6] || 0));
+          if (!isNaN(d.getTime())) return d.toISOString();
+        }
+        return s;
+      }
+      if (f === "mediafileduration") {
+        if (numeric && n < 1) return String(Math.round(n * 86400) * 1000);
+        if (TS_TIME_RE.test(s)) { const ms = timeToMs(s); if (ms !== null) return String(ms); }
+        return s;
+      }
+      if (f === "udfint4") {
+        if (numeric) return String(Math.round(n) * 1000);
+        if (TS_TIME_RE.test(s)) { const ms = timeToMs(s); if (ms !== null) return String(ms); }
+        return s;
+      }
+      return s;
     }
-    //##> SPREADSHEET JOIN: Additive only, like the Feeder merge macro. Values are only added to rows
-    //##> whose key is already on the grid, and only to columns that already exist (matched by header or
-    //##> alias, including columns that were merged into others). Stacked values are split on semicolons
-    //##> and deduped into the existing cell. Metadata cells are only filled when they're empty.
-    function joinSheet(sheetRows, headerIdx, keyNames, fileName) {
+    function metaSame(field, a, b) {
+      const f = field.toLowerCase();
+      const x = String(a == null ? "" : a).trim(), y = String(b == null ? "" : b).trim();
+      if (x === y) return true;
+      if (f === "recordeddatetime") {
+        const d1 = new Date(x).getTime(), d2 = new Date(y).getTime();
+        if (!isNaN(d1) && !isNaN(d2)) return Math.abs(d1 - d2) < 60000;
+      }
+      if (f === "mediafileduration" || f === "udfint4") {
+        const n1 = Number(x), n2 = Number(y);
+        if (x && y && isFinite(n1) && isFinite(n2)) return Math.abs(n1 - n2) < 1000;
+      }
+      if (/^\d+$/.test(x) && /^\d+$/.test(y)) return x.replace(/^0+/, "") === y.replace(/^0+/, "");
+      const n1 = Number(x), n2 = Number(y);
+      if (x && y && isFinite(n1) && isFinite(n2) && n1 === n2) return true;
+      return x.toLowerCase() === y.toLowerCase();
+    }
+    function nexidiaValue(lk, field) {
+      const m = S.meta[lk];
+      if (!m || !m.length) return "";
+      const v = String(getFV(m[0], field) == null ? "" : getFV(m[0], field)).trim();
+      return !v || /^0+$/.test(v) || v.includes("*") ? "" : v;
+    }
+    function importedCopilotValue(c, v) {
+      if (!c || effType(c) !== "date") return v;
+      const n = Number(v);
+      if (/^\d+(\.\d+)?$/.test(v) && n > 20000 && n < 80000) {
+        const d = new Date(Math.round((Math.floor(n) - 25569) * 86400000));
+        return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
+      }
+      return v;
+    }
+    //##> SPREADSHEET JOIN: Values are added to rows whose key is already on the grid. Columns are matched by
+    //##> header or alias, including columns that were merged into others. Stacked values are split on
+    //##> semicolons and deduped into the cell. Calls and columns that aren't on the grid each get their own
+    //##> Yes/No (reports can turn this off with allowImportNew: false). Calls the user removed earlier get the
+    //##> Reinstate / Keep Removed question. A Nexidia cell that's blank is filled from the file. When the file
+    //##> and Nexidia disagree, the user picks Keep Nexidia, Use File Values, or Keep Both (stacked).
+    async function joinSheet(sheetRows, headerIdx, keyNames, fileName) {
+      const allowNew = !(S.preset && S.preset.allowImportNew === false);
       const headers = sheetRows[headerIdx].map((h) => String(h == null ? "" : h).trim());
       const am = aliasMap();
       const metaByHeader = new Map();
-      const cp = colPrefs();
-      cp.fields.forEach((f, i) => { metaByHeader.set(String(cp.headers[i] || f).toLowerCase(), f); metaByHeader.set(f.toLowerCase(), f); });
       for (const f of S.metaFields) { metaByHeader.set(String(S.metaHeaders[f] || f).toLowerCase(), f); metaByHeader.set(f.toLowerCase(), f); }
-      const pk = pkColumn();
+      let pk = pkColumn();
       const map = {};
-      const skipped = [];
+      const unknown = [];
       let keyIdx = -1;
       headers.forEach((h, i) => {
         const lk = h.toLowerCase();
         if (!lk) return;
-        if (am.has(lk)) {
-          map[i] = "j:" + am.get(lk);
-          if (pk && am.get(lk) === pk.id) keyIdx = i;
-        } else if (metaByHeader.has(lk) && S.metaFields.includes(metaByHeader.get(lk))) {
-          map[i] = "m:" + metaByHeader.get(lk);
-        } else {
-          skipped.push(h);
-        }
-        if (keyIdx === -1 && keyNames.has(lk)) keyIdx = i;
+        if (keyIdx === -1 && ((pk && am.get(lk) === pk.id) || keyNames.has(lk))) keyIdx = i;
+        if (am.has(lk)) map[i] = "j:" + am.get(lk);
+        else if (metaByHeader.has(lk)) map[i] = "m:" + metaByHeader.get(lk);
+        else if (!keyNames.has(lk)) unknown.push(i);
       });
       if (keyIdx === -1) { dialog({ title: "Import failed", danger: true, message: "The key column couldn't be located in that sheet." }); return; }
-      const existing = new Set();
-      for (const e of S.entries) { const k = keyOf(e, pk); if (k) existing.add(k.toLowerCase()); }
-      let matchedRows = 0, unmatched = 0, values = 0;
+      if (!pk) {
+        ensureColumn(S.settings.primaryKey || "Trans_Id", aliasMap());
+        pk = pkColumn();
+      }
+      const existing = currentKeys(pk);
+      const removedMap = removedByKey(pk);
+      const dataRows = [];
+      const newKeys = [], removedHits = [];
+      const seenNew = new Set();
       for (let r = headerIdx + 1; r < sheetRows.length; r++) {
         const row = sheetRows[r];
         if (isBlankRow(row)) continue;
         const key = String(row[keyIdx] == null ? "" : row[keyIdx]).trim();
-        if (!key) continue;
+        if (!key || /^0+$/.test(key)) continue;
         const lk = key.toLowerCase();
-        if (!existing.has(lk)) { unmatched++; continue; }
+        dataRows.push({ row, key, lk });
+        if (seenNew.has(lk)) continue;
+        if (removedMap.has(lk)) { seenNew.add(lk); removedHits.push(key); }
+        else if (!existing.has(lk)) { seenNew.add(lk); newKeys.push(key); }
+      }
+      let addCols = false;
+      if (unknown.length && allowNew) {
+        const names = unknown.map((i) => headers[i]);
+        const r = await dialog({
+          title: `${plural(names.length, "column")} not on the grid`,
+          message: `${fileName} has ${names.length === 1 ? "a column" : "columns"} the grid doesn't have yet. Add ${names.length === 1 ? "it" : "them"} to the grid with ${names.length === 1 ? "its" : "their"} values?`,
+          list: names.slice(0, 300),
+          collapseOver: 10,
+          buttons: [{ label: "Add Columns", value: true, primary: true }, { label: "Skip Them", value: false }]
+        });
+        if (closed) return;
+        addCols = !!r.value;
+      }
+      let addCalls = false;
+      if (newKeys.length && allowNew) {
+        const r = await dialog({
+          title: `${plural(newKeys.length, "call")} not on the grid`,
+          message: `${fileName} has ${newKeys.length === 1 ? "a " + S.settings.primaryKey + " that isn't" : newKeys.length.toLocaleString() + " " + pkPlural() + " that aren't"} on the grid yet. Add ${newKeys.length === 1 ? "it" : "them"} as new rows? ${newKeys.length === 1 ? "It" : "They"}'ll be looked up in Nexidia like any other new call.`,
+          list: newKeys.slice(0, 500),
+          collapseOver: 10,
+          buttons: [{ label: "Add Calls", value: true, primary: true }, { label: "Skip Them", value: false }]
+        });
+        if (closed) return;
+        addCalls = !!r.value;
+      }
+      let reinstated = new Set();
+      if (removedHits.length && (await askReinstate(removedHits, "This file")) === "reinstate") {
+        reinstateKeys(removedHits, removedMap);
+        reinstated = new Set(removedHits.map((k) => k.toLowerCase()));
+      }
+      if (closed) return;
+      const added = [];
+      if (addCols) {
+        for (const i of unknown) {
+          const h = headers[i];
+          const field = normName(h) === "transid" ? null : searchFieldFor(h);
+          if (field && !S.metaFields.includes(field) && !mergeSourceOf("m:" + field)) {
+            ensureMetaField(field, h);
+            map[i] = "m:" + field;
+          } else {
+            map[i] = "j:" + ensureColumn(h, aliasMap());
+          }
+          added.push(h);
+        }
+      }
+      const accept = new Set(existing);
+      for (const k of reinstated) accept.add(k);
+      if (addCalls) {
+        for (const k of newKeys) {
+          const lk = k.toLowerCase();
+          S.entries.push({ id: S.nextEntryId++, pasteId: 0, seed: true, values: { [pk.id]: k } });
+          freshKeys.add(lk);
+          if (S.lockedKeys && !S.lockedKeys.includes(lk)) S.lockedKeys.push(lk);
+          accept.add(lk);
+        }
+      }
+      const conflicts = [];
+      let matchedRows = 0, values = 0, skippedRows = 0, sameAsNexidia = 0;
+      const rowKeys = new Set();
+      for (const d of dataRows) {
+        if (!accept.has(d.lk)) { skippedRows++; continue; }
+        rowKeys.add(d.lk);
         matchedRows++;
         for (const i in map) {
           if (Number(i) === keyIdx) continue;
-          let v = String(row[i] == null ? "" : row[i]).trim();
+          let v = String(d.row[i] == null ? "" : d.row[i]).trim();
           if (!v) continue;
-          if (map[i].startsWith("m:")) {
+          const target = map[i];
+          if (target.startsWith("m:")) {
             if (v.includes("*") || /^0+$/.test(v)) continue;
-            v = convertImportedMeta(map[i].slice(2), v);
+            const field = target.slice(2);
+            v = convertImportedMeta(field, v);
+            const nex = existing.has(d.lk) ? nexidiaValue(d.lk, field) : "";
+            if (nex && metaSame(field, nex, v)) { sameAsNexidia++; continue; }
+            if (nex) { conflicts.push({ key: d.key, lk: d.lk, target, field, nex, value: v }); continue; }
+            S.imports.push({ key: d.lk, target, value: v });
+          } else {
+            S.imports.push({ key: d.lk, target, value: importedCopilotValue(colById(target.slice(2)), v) });
           }
-          S.imports.push({ key: lk, target: map[i], value: v });
           values++;
+        }
+      }
+      let conflictChoice = null;
+      if (conflicts.length) {
+        conflictChoice = S.suppress.importConflict || null;
+        if (!conflictChoice) {
+          const fmt = (c, v) => (xls && xls.formatDisplayValue ? xls.formatDisplayValue(c.field, v) : v);
+          const r = await dialog({
+            title: `${plural(conflicts.length, "value")} differ from Nexidia`,
+            message: `These values in ${fileName} don't match what Nexidia has. Keep Nexidia's values, use the file's values, or keep both in the cell?`,
+            list: conflicts.slice(0, 300).map((c) => `${c.key} \u00B7 ${baseHeader(rootOf(c.target))}: Nexidia "${fmt(c, c.nex)}", file "${fmt(c, c.value)}"`),
+            collapseOver: 8,
+            width: 520,
+            checkbox: "Remember my choice for this session",
+            buttons: [{ label: "Keep Nexidia", value: "keep", primary: true }, { label: "Use File Values", value: "replace" }, { label: "Keep Both", value: "stack" }]
+          });
+          if (closed) return;
+          conflictChoice = r.value || "keep";
+          if (r.checked) S.suppress.importConflict = conflictChoice;
+        }
+        if (conflictChoice !== "keep") {
+          for (const c of conflicts) { S.imports.push({ key: c.lk, target: c.target, value: c.value, mode: conflictChoice }); values++; }
         }
       }
       newDataPending = true;
       refreshAll();
-      const parts = [`Imported ${values.toLocaleString()} value${values === 1 ? "" : "s"} into ${matchedRows.toLocaleString()} row${matchedRows === 1 ? "" : "s"} from ${fileName}.`];
-      if (unmatched) parts.push(`${unmatched.toLocaleString()} row${unmatched === 1 ? " had a key" : "s had keys"} not on the grid and ${unmatched === 1 ? "was" : "were"} skipped.`);
-      if (skipped.length) parts.push(`Columns not on the grid were skipped: ${skipped.slice(0, 12).join(", ")}${skipped.length > 12 ? ", and " + (skipped.length - 12) + " more" : ""}.`);
+      const parts = [`Imported ${plural(values, "value")} into ${plural(rowKeys.size, "row")} from ${fileName}.`];
+      if (addCalls && newKeys.length) parts.push(`${plural(newKeys.length, "new call")} added.`);
+      if (reinstated.size) parts.push(`${plural(reinstated.size, "removed row")} reinstated.`);
+      if (added.length) parts.push(`New column${added.length === 1 ? "" : "s"}: ${added.slice(0, 12).join(", ")}${added.length > 12 ? ", and " + (added.length - 12) + " more" : ""}.`);
+      if (sameAsNexidia) parts.push(`${plural(sameAsNexidia, "value")} already matched Nexidia.`);
+      if (conflicts.length) parts.push(`${plural(conflicts.length, "value")} differed from Nexidia: ${conflictChoice === "replace" ? "used the file's values" : conflictChoice === "stack" ? "kept both" : "kept Nexidia's"}.`);
+      if (skippedRows) parts.push(`${plural(skippedRows, "row")} with ${skippedRows === 1 ? "a key" : "keys"} not on the grid ${skippedRows === 1 ? "was" : "were"} skipped.`);
+      if (unknown.length && !addCols) parts.push(`Columns not on the grid were skipped: ${unknown.slice(0, 12).map((i) => headers[i]).join(", ")}${unknown.length > 12 ? ", and " + (unknown.length - 12) + " more" : ""}.`);
       addNotice("info", parts.join(" "), "import");
+      logEvent("import", parts.join(" "), added.length ? { items: added.slice() } : null);
+      toast(`Imported ${plural(values, "value")}`);
+      if (addCalls && newKeys.length) {
+        if (S.settings.autoMeta) fetchMetadata(true);
+        else runMergeDetection();
+      }
     }
     function rowsById() {
       return new Map(rows.map((r) => [r.id, r]));
@@ -2003,6 +2562,7 @@
         if (!S.edits[rowId]) S.edits[rowId] = {};
         S.edits[rowId][f] = { value, base, at: Date.now() };
       }
+      logEvent("edit", `${value === base ? "Returned" : "Edited"} ${baseHeader(f)} on ${row.key || "a row with no " + S.settings.primaryKey}`);
       row.cache = {};
       tsCache = null;
       invalidateIssues();
@@ -2029,7 +2589,7 @@
       }
       clearRowCaches();
       renderRows();
-      scheduleSave();
+      logEvent("revert", `Reverted ${plural(list.length, "field")}`);
       toast(`${list.length} field${list.length === 1 ? "" : "s"} reverted`, "#0369a1");
     }
     function editedInSelection() {
@@ -2402,7 +2962,7 @@
           await dialog({ title: "Already in this field", message: `${ev.dupes.length === 1 ? `"${ev.dupes[0]}" is` : ev.dupes.map((d) => `"${d}"`).join(", ") + " are"} already in ${baseHeader(ed.field)}, so ${ev.dupes.length === 1 ? "it wasn't" : "they weren't"} added again.` });
         }
         if (closed) return;
-        if (changed && (await askIssues(ed)) === "edit") { if (!closed) reopenEditor(ed); return; }
+        if (changed && !review && (await askIssues(ed)) === "edit") { if (!closed) reopenEditor(ed); return; }
         if (!closed && after) after();
       })();
       return changed;
@@ -2650,7 +3210,7 @@
         }
         finish();
         refreshAll();
-        if (merged) toast(`${merged} column${merged === 1 ? "" : "s"} merged`, "#0369a1");
+        if (merged) { logEvent("merge", `Merged ${plural(merged, "column")}`); toast(`${merged} column${merged === 1 ? "" : "s"} merged`, "#0369a1"); }
       }
       addBtn.onclick = () => { items.push({ left: "", right: "", manual: true, auto: false, choice: null }); render(); };
       applyB.onclick = () => commit(false);
@@ -2686,22 +3246,24 @@
     const columnsBtn = el("button", { style: "padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;font-size:14px;flex-shrink:0;", title: "Show / Hide Columns" }, "\u2630");
     const adHocBtn = el("button", { style: btnStyle("#6366f1") }, "+ Add Column");
     const importSheetBtn = el("button", { style: btnStyle("#0f766e") }, "Import Spreadsheet");
+    const addKeysBtn = el("button", { type: "button", style: btnStyle("#0f766e"), title: "Add calls to the grid by pasting their primary keys." }, "+ Add Trans_Ids");
+    const logBtn = el("button", { type: "button", style: btnStyle("#475569", "color:#334155;"), title: "Show the session log: pastes, lookups, edits, and exports." }, "Log");
     const exportTranscriptsBtn = el("button", { style: btnStyle("#6366f1", "color:#4f46e5;") }, "Export Transcripts");
     const saveSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;"), title: "Save a hard copy of this session so you can come back later and continue your work." }, "Save Session");
     const loadSessionBtn = el("button", { style: btnStyle("#f59e0b", "color:#b45309;"), title: "Load a saved copy from a previous session." }, "Load Session");
     const resetBtn = el("button", { style: btnStyle("#9ca3af", "color:#374151;") }, "Reset View");
     const clickModeBtn = el("button", { style: btnStyle("#22c55e", "color:#16a34a;") }, "On Click: Select Field");
     const exportSlot = el("div", { style: "flex:1;min-width:170px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap;" });
-    const exportExcelBtn = el("button", { style: "padding:8px 20px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(22,163,74,.35);", title: "Download the grid as an Excel sheet." }, "Export to Excel");
+    const exportExcelBtn = el("button", { type: "button", style: "padding:8px 20px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(22,163,74,.35);", title: "Export the grid, the session log, or the raw outputs you pasted." }, "Export");
     const playTsBtn = el("button", { style: "display:none;padding:8px 16px;border-radius:8px;border:0;background:#ea580c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;box-shadow:0 2px 8px rgba(234,88,12,.35);", title: "Play every call that has timestamps, one tag at a time." }, "\u25B6 Play All Timestamps");
     exportSlot.appendChild(playTsBtn);
     exportSlot.appendChild(exportExcelBtn);
     const globalSearchBox = el("input", { type: "text", placeholder: "Search all visible columns...", style: "width:220px;max-width:26vw;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;" });
-    const sheetInput = el("input", { type: "file", accept: ".xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
+    const sheetInput = el("input", { type: "file", accept: ".xlsx,.xls,.xml,.csv,.tsv,.txt,.htm,.html", style: "display:none;" });
     const sessionInput = el("input", { type: "file", accept: ".txt,.json", style: "display:none;" });
     const issuesBtn = el("button", { style: btnStyle("#dc2626", "color:#b91c1c;display:none;"), title: "Step through cells that didn't pass their checks." }, "");
-    const reviewBar = el("div", { style: "display:none;align-items:center;gap:6px;padding:6px 12px;background:#fef2f2;border-bottom:1px solid #fecaca;flex-wrap:wrap;" });
-    [titleEl, menuBtn, rowCountEl, issuesBtn, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, exportTranscriptsBtn, saveSessionBtn, loadSessionBtn, resetBtn, clickModeBtn, exportSlot, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
+    const reviewBar = el("div", { style: "display:none;flex-direction:column;align-items:stretch;gap:2px;padding:6px 12px;max-height:40%;overflow-y:auto;flex-shrink:0;background:#fef2f2;border-bottom:1px solid #fecaca;" });
+    [titleEl, menuBtn, rowCountEl, issuesBtn, selCountEl, cellSelCountEl, removeSelectedBtn, settingsBtn, metaBtn, mergeBtn, columnsBtn, adHocBtn, importSheetBtn, addKeysBtn, exportTranscriptsBtn, saveSessionBtn, loadSessionBtn, resetBtn, clickModeBtn, logBtn, exportSlot, globalSearchBox, sheetInput, sessionInput].forEach((n) => toolbar.appendChild(n));
     const bannerWrap = el("div", { style: "display:none;padding:8px 16px;background:#fffbeb;border-bottom:1px solid #fde68a;" });
     const topPanel = el("div", { style: "padding:8px 16px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;gap:6px;" });
     const instrHead = el("div", { style: "font-size:12px;font-weight:600;color:#1d4ed8;cursor:pointer;user-select:none;" }, "\u25B8 Instructions");
@@ -2730,8 +3292,21 @@
     tableWrap.appendChild(emptyEl);
     gridWrap.appendChild(reviewBar);
     gridWrap.appendChild(tableWrap);
+    const logPanel = el("div", { style: "width:320px;max-width:40vw;border-left:1px solid #e5e7eb;display:none;flex-direction:column;flex-shrink:0;min-height:0;background:#fcfcfd;" });
+    const logHead = el("div", { style: "display:flex;align-items:center;gap:6px;padding:10px 12px 6px;" });
+    logHead.appendChild(el("div", { style: "flex:1;font-size:13px;font-weight:700;color:#111827;" }, "Session Log"));
+    const logExportBtn = el("button", { type: "button", style: btnStyle("#16a34a", "padding:3px 9px;font-size:11px;") }, "Export");
+    const logCloseBtn = el("button", { type: "button", style: btnStyle("#9ca3af", "padding:3px 8px;font-size:11px;color:#374151;"), title: "Close the log" }, "\u2715");
+    logHead.appendChild(logExportBtn);
+    logHead.appendChild(logCloseBtn);
+    const logStats = el("div", { style: "padding:4px 12px 10px;border-bottom:1px solid #e5e7eb;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:12px;color:#374151;" });
+    const logList = el("div", { style: "flex:1;min-height:0;overflow-y:auto;padding:6px 0;" });
+    logPanel.appendChild(logHead);
+    logPanel.appendChild(logStats);
+    logPanel.appendChild(logList);
     body.appendChild(colPanel);
     body.appendChild(gridWrap);
+    body.appendChild(logPanel);
     card.appendChild(toolbar);
     card.appendChild(bannerWrap);
     card.appendChild(topPanel);
@@ -3019,6 +3594,8 @@
       rebuildColPanel();
       renderNotices();
       updateTsBtn();
+      updateKeyButtons();
+      if (logPanel.style.display !== "none") renderLog();
       syncPlayerView();
       invalidateIssues();
       scheduleSave();
@@ -3513,13 +4090,15 @@
       issuesBtn.style.display = n ? "" : "none";
       issuesBtn.textContent = `\u26A0 ${n.toLocaleString()} possible issue${n === 1 ? "" : "s"}`;
     }
-    //##> REVIEW BAR: Works like Excel's Find. It holds a queue of issues for the rows and columns being looked
-    //##> at. Fixing a value clears its issue by itself; Skip sends the current one to the back of the queue.
-    function openReview(list, exportList) {
+    //##> REVIEW CARDS: The review works like Excel's Find, one card per flagged cell. Each flagged value in the
+    //##> cell is its own line with its own actions, and every action only touches that one value. The one
+    //##> exception is Ignore Rule, which covers the whole column, so the card's other lines for that rule show as
+    //##> Ignored (rule). Flags are rechecked after every action. A card that's finished stays on screen showing
+    //##> what happened to each line until the user moves on. Finished means nothing in the cell needs attention.
+    function openReview(list, exportList, exportFormat) {
       if (editing) commitEdit();
       if (tsActive) exitTimestamps(true);
-      const ids = new Set(list.map((r) => r.id));
-      review = { ids, exportList: exportList || null, queue: [], pos: 0, map: new Map(), current: null };
+      review = { ids: new Set(list.map((r) => r.id)), exportList: exportList || null, exportFormat: exportFormat || "xlsx", order: [], pos: 0, cards: new Map(), seen: new Map(), status: {}, done: new Set(), current: null };
       reviewBar.style.display = "flex";
       syncReview(true);
     }
@@ -3535,78 +4114,167 @@
     function syncReview(jump) {
       if (!review) return;
       const fresh = computeIssues(reviewRows(), exportFields());
-      const map = new Map(fresh.map((i) => [i.key, i]));
-      const cur = review.queue[review.pos];
-      const q = review.queue.filter((k) => map.has(k));
-      for (const i of fresh) if (!q.includes(i.key)) q.push(i.key);
-      review.queue = q;
-      review.map = map;
-      if (cur && q.includes(cur)) review.pos = q.indexOf(cur);
-      if (review.pos >= q.length) review.pos = 0;
+      const cards = new Map();
+      for (const i of fresh) {
+        const k = i.rowId + "|" + i.field;
+        if (!cards.has(k)) cards.set(k, { key: k, rowId: i.rowId, field: i.field, issues: [] });
+        cards.get(k).issues.push(i);
+      }
+      const curKey = review.order[review.pos];
+      for (const k of review.order) if (!cards.has(k)) review.done.add(k);
+      const order = review.order.filter((k) => cards.has(k) || k === curKey);
+      for (const k of cards.keys()) {
+        review.done.delete(k);
+        if (!order.includes(k)) order.push(k);
+      }
+      review.order = order;
+      review.cards = cards;
+      if (curKey && order.includes(curKey)) review.pos = order.indexOf(curKey);
+      if (review.pos >= order.length) review.pos = 0;
+      rememberCard(order[review.pos]);
       renderReview();
-      if (jump || review.current !== q[review.pos]) goToIssue();
+      if (jump || review.current !== order[review.pos]) goToIssue();
+    }
+    function rememberCard(key) {
+      if (!key) return;
+      const card = review.cards.get(key);
+      if (!review.seen.has(key)) review.seen.set(key, new Map());
+      const seen = review.seen.get(key);
+      if (card) for (const i of card.issues) seen.set(i.key, i);
+    }
+    function moveReview(delta) {
+      if (!review || !review.order.length) return;
+      const n = review.order.length;
+      const target = review.order[(review.pos + delta + n) % n];
+      review.order = review.order.filter((k) => k === target || review.cards.has(k));
+      review.pos = Math.max(0, review.order.indexOf(target));
+      rememberCard(target);
+      goToIssue();
+    }
+    function skipCard() {
+      if (!review || review.order.length < 2) return;
+      const k = review.order.splice(review.pos, 1)[0];
+      review.order = review.order.filter((x) => review.cards.has(x));
+      if (review.cards.has(k)) review.order.push(k);
+      if (review.pos >= review.order.length) review.pos = 0;
+      rememberCard(review.order[review.pos]);
+      goToIssue();
     }
     function goToIssue() {
       if (!review) return;
-      const key = review.queue[review.pos];
+      const key = review.order[review.pos];
       review.current = key || null;
-      const iss = key ? review.map.get(key) : null;
-      if (iss) {
-        const ri = view.findIndex((r) => r.id === iss.rowId);
-        const ci = visFields().indexOf(iss.field);
+      const card = key ? (review.cards.get(key) || cardFromKey(key)) : null;
+      if (card) {
+        const ri = view.findIndex((r) => r.id === card.rowId);
+        const ci = visFields().indexOf(card.field);
         if (ri >= 0 && ci >= 0) scrollCellIntoView(ri, ci, true);
       }
       renderRows();
       renderReview();
     }
-    function fixIssue() {
-      const iss = review && review.map.get(review.queue[review.pos]);
-      if (!iss) return;
-      const ri = view.findIndex((r) => r.id === iss.rowId);
-      const ci = visFields().indexOf(iss.field);
+    function cardFromKey(key) {
+      const i = key.indexOf("|");
+      return { key, rowId: key.slice(0, i), field: key.slice(i + 1), issues: [] };
+    }
+    function editCard(card) {
+      const ri = view.findIndex((r) => r.id === card.rowId);
+      const ci = visFields().indexOf(card.field);
       if (ri < 0 || ci < 0) return;
       startEdit(ri, ci);
+    }
+    //##> REMOVE VALUE: Takes one value out of a cell as a normal edit, so it can be reverted. If it was the only
+    //##> value, the cell goes blank, which shows as 0 for Nexidia columns and empty for CoPilot columns.
+    function removeCellValue(rowId, f, token) {
+      const row = rows.find((r) => r.id === rowId);
+      if (!row) return false;
+      const delim = delimFor(f);
+      const k = tokenKey(token);
+      const kept = [];
+      for (const t of cellParts(row, f).tokens) for (const v of splitTokens(t, delim)) if (tokenKey(v) !== k) kept.push(v);
+      let value = dedupeTokens(kept).join(delim);
+      if (!value && f.startsWith("m:") && row.meta) value = "0";
+      return applyEdit(rowId, f, value);
+    }
+    function issueAction(card, iss, kind) {
+      if (kind === "remove") {
+        if (removeCellValue(iss.rowId, iss.field, iss.token)) review.status[iss.key] = "Removed";
+        renderRows();
+        return;
+      }
+      if (kind === "ignore") {
+        S.issueIgnore.items[iss.key] = true;
+        review.status[iss.key] = "Ignored";
+        logEvent("ignore", `Ignored a flag in ${baseHeader(iss.field)}${iss.token ? ` ("${iss.token}")` : ""}`);
+      } else if (kind === "rule") {
+        S.issueIgnore.rules[iss.field + "|" + iss.ruleId] = true;
+        const seen = review.seen.get(card.key);
+        if (seen) for (const x of seen.values()) if (x.ruleId === iss.ruleId && !review.status[x.key]) review.status[x.key] = "Ignored (rule)";
+        review.status[iss.key] = "Ignored (rule)";
+        logEvent("ignore", `Ignored a rule in ${baseHeader(iss.field)} for this session`);
+      }
+      scheduleSave();
+      invalidateIssues();
+      renderRows();
     }
     function renderReview() {
       if (!review) return;
       reviewBar.innerHTML = "";
-      const n = review.queue.length;
       const b = (t, tip, fn, primary) => {
         const x = el("button", { type: "button", title: tip || "", style: primary ? "padding:4px 10px;border-radius:6px;border:0;background:#dc2626;color:#fff;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;" : "padding:4px 10px;border-radius:6px;border:1px solid #fca5a5;background:#fff;color:#b91c1c;font-size:12px;cursor:pointer;flex-shrink:0;" }, t);
         x.addEventListener("mousedown", (e) => e.preventDefault());
         x.onclick = fn;
         return x;
       };
-      if (!n) {
-        reviewBar.appendChild(el("div", { style: "flex:1;font-size:12px;font-weight:700;color:#15803d;" }, "\u2713 No issues left to review."));
-        if (review.exportList) reviewBar.appendChild(b("Export to Excel", "Export now", () => { const l = review.exportList; closeReview(); doExcelExport(l); }, true));
-        reviewBar.appendChild(b("Close", "Close the review", closeReview));
+      const exportNow = () => { const l = review.exportList, f = review.exportFormat; closeReview(); doGridExport(l, f); };
+      const top = el("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap;" });
+      reviewBar.appendChild(top);
+      if (!review.cards.size && !review.order.length) {
+        top.appendChild(el("div", { style: "flex:1;font-size:12px;font-weight:700;color:#15803d;" }, `\u2713 No issues left to review.${review.done.size ? ` ${plural(review.done.size, "cell")} finished.` : ""}`));
+        if (review.exportList) top.appendChild(b("Export", "Export now", exportNow, true));
+        top.appendChild(b("Close", "Close the review", closeReview));
         return;
       }
-      const iss = review.map.get(review.queue[review.pos]);
-      const info = el("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;" });
-      const ri = view.findIndex((r) => r.id === iss.rowId);
-      info.appendChild(el("div", { style: "font-size:11px;color:#991b1b;font-weight:700;" }, `Issue ${review.pos + 1} of ${n} \u00B7 Row ${ri + 1} \u00B7 ${baseHeader(iss.field)}${iss.token ? ` \u00B7 "${iss.token}"` : ""}`));
-      info.appendChild(el("div", { style: "font-size:12px;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", title: iss.message }, iss.message));
-      reviewBar.appendChild(b("\u25C0", "Previous issue (Ctrl+\u2190)", () => { review.pos = (review.pos - 1 + n) % n; goToIssue(); }));
-      reviewBar.appendChild(b("\u25B6", "Next issue (Ctrl+\u2192)", () => { review.pos = (review.pos + 1) % n; goToIssue(); }));
-      reviewBar.appendChild(info);
-      reviewBar.appendChild(b("Fix", "Open this field to change it. The flag clears once the value is fixed.", fixIssue, true));
-      reviewBar.appendChild(b("Ignore Item", "Stop flagging this value in this cell.", () => { S.issueIgnore.items[iss.key] = true; scheduleSave(); invalidateIssues(); }));
-      reviewBar.appendChild(b("Ignore Rule", `Stop flagging this rule in ${baseHeader(iss.field)} for this session.`, () => { S.issueIgnore.rules[iss.field + "|" + iss.ruleId] = true; scheduleSave(); invalidateIssues(); }));
-      reviewBar.appendChild(b("Skip", "Come back to this one after the others.", () => {
-        const k = review.queue.splice(review.pos, 1)[0];
-        review.queue.push(k);
-        if (review.pos >= review.queue.length) review.pos = 0;
-        goToIssue();
-      }));
-      if (review.exportList) reviewBar.appendChild(b("Export Anyway", "Export now without fixing the rest. Flags aren't included in the export.", () => { const l = review.exportList; closeReview(); doExcelExport(l); }));
-      reviewBar.appendChild(b("\u2715", "Close the review", closeReview));
+      const key = review.order[review.pos];
+      const card = review.cards.get(key) || cardFromKey(key);
+      const finished = !review.cards.has(key);
+      const ri = view.findIndex((r) => r.id === card.rowId);
+      const openCount = review.cards.size;
+      const total = openCount + review.done.size;
+      const info = el("div", { style: "flex:1;min-width:0;font-size:12px;color:#991b1b;font-weight:700;" }, `Cell ${review.pos + 1} of ${review.order.length} \u00B7 ${review.done.size.toLocaleString()} of ${total.toLocaleString()} finished \u00B7 Row ${ri >= 0 ? ri + 1 : "?"} \u00B7 ${baseHeader(card.field)}`);
+      info.setAttribute("aria-live", "polite");
+      top.appendChild(b("\u25C0", "Previous cell (Ctrl+\u2190)", () => moveReview(-1)));
+      top.appendChild(b("\u25B6", "Next cell (Ctrl+\u2192)", () => moveReview(1)));
+      top.appendChild(info);
+      top.appendChild(b("Edit Cell", "Open this cell to change its values. Flags clear once the values pass.", () => editCard(card), !finished));
+      if (!finished && review.order.length > 1) top.appendChild(b("Skip", "Come back to this cell after the others.", skipCard));
+      if (finished && openCount) top.appendChild(b("Next Cell \u25B6", "Move on to the next flagged cell.", () => moveReview(1), true));
+      if (review.exportList) top.appendChild(b(openCount ? "Export Anyway" : "Export", openCount ? "Export now without fixing the rest. Flags aren't included in the export." : "Export now", exportNow, !openCount));
+      top.appendChild(b("\u2715", "Close the review", closeReview));
+      const list = el("div", { style: "display:flex;flex-direction:column;gap:3px;margin-top:5px;" });
+      const seen = review.seen.get(key) || new Map();
+      const openKeys = new Set(card.issues.map((i) => i.key));
+      for (const i of card.issues) if (!seen.has(i.key)) seen.set(i.key, i);
+      for (const iss of seen.values()) {
+        const open = openKeys.has(iss.key);
+        const line = el("div", { style: `display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;background:${open ? "#fff" : "#f0fdf4"};border:1px solid ${open ? "#fecaca" : "#bbf7d0"};flex-wrap:wrap;` });
+        const txt = el("div", { style: `flex:1;min-width:180px;font-size:12px;color:${open ? "#111827" : "#6b7280"};${open ? "" : "text-decoration:line-through;"}`, title: iss.message }, (iss.token ? `"${iss.token}": ` : "") + iss.message);
+        line.appendChild(txt);
+        if (open) {
+          if (iss.token) line.appendChild(b("Remove Value", `Take "${iss.token}" out of this cell. Other values in the cell stay.`, () => issueAction(card, iss, "remove")));
+          line.appendChild(b("Ignore", "Stop flagging this value in this cell.", () => issueAction(card, iss, "ignore")));
+          line.appendChild(b("Ignore Rule", `Stop flagging this rule anywhere in ${baseHeader(iss.field)} for this session.`, () => issueAction(card, iss, "rule")));
+        } else {
+          line.appendChild(el("span", { style: "font-size:11px;font-weight:700;color:#15803d;flex-shrink:0;" }, "\u2713 " + (review.status[iss.key] || "Fixed")));
+        }
+        list.appendChild(line);
+      }
+      if (finished) list.appendChild(el("div", { style: "font-size:12px;font-weight:700;color:#15803d;padding:2px 2px 0;" }, openCount ? "\u2713 This cell is finished." : "\u2713 This was the last flagged cell."));
+      reviewBar.appendChild(list);
     }
     function reviewCellKey() {
       if (!review || !review.current) return null;
-      const iss = review.map.get(review.current);
-      return iss ? iss.rowId + "|" + iss.field : null;
+      return review.current;
     }
     function openChecks(f) {
       if (!f || f === "__conf__") return;
@@ -3764,7 +4432,9 @@
       if (!ids.length) return;
       for (const id of ids) if (!S.removed.includes(id)) S.removed.push(id);
       for (const id of ids) selected.delete(id);
+      const keys = ids.map((id) => { const r = rows.find((x) => x.id === id); return r && r.key ? r.key : "(no " + S.settings.primaryKey + ")"; });
       refreshAll();
+      logEvent("remove", `Removed ${plural(ids.length, "row")}`, { items: keys });
       toast(`${ids.length} row${ids.length === 1 ? "" : "s"} removed`, "#ef4444");
     }
     function openRowMenu(row, ri, x, y) {
@@ -4272,6 +4942,8 @@
           return focusTag(tag);
         },
         onTagChange(tag) {
+          const was = S.tagState[tag.id];
+          if (tag.complete && !(was && was.complete)) logEvent("timestamp", `Completed a timestamp in ${baseHeader(tag.group)}`);
           if (tag.complete || tag.hidden) S.tagState[tag.id] = { complete: !!tag.complete, hidden: !!tag.hidden };
           else delete S.tagState[tag.id];
           scheduleSave();
@@ -4693,11 +5365,9 @@
       return (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight");
     }
     function shortcutNav(dir) {
-      if (review && review.queue.length) {
+      if (review && review.order.length) {
         if (editing) commitEdit();
-        const n = review.queue.length;
-        review.pos = (review.pos + dir + n) % n;
-        goToIssue();
+        moveReview(dir);
         return true;
       }
       if (playerCtrl) {
@@ -4768,6 +5438,178 @@
     //##> duration, hold, and sentiment formatting as export.js. Merged cells with stacked values
     //##> always export as text. Only visible columns export, so worked timestamp columns that were
     //##> hidden automatically are left out.
+    const LOG_KINDS = { paste: "Paste", lookup: "Lookup", leftOff: "Left Off", addedMissing: "Added Anyway", addKeys: "Add Keys", import: "Import", edit: "Edit", revert: "Revert", merge: "Merge", unmerge: "Unmerge", remove: "Remove Rows", ignore: "Flag", timestamp: "Timestamp", export: "Export", session: "Session" };
+    const LOG_ITEMS_SHOWN = 200;
+    function logStatsList() {
+      const log = S.log || [];
+      const pastes = log.filter((x) => x.kind === "paste");
+      const objects = pastes.reduce((n, x) => n + (x.count || 0), 0);
+      let found = 0, missing = 0, multi = 0;
+      for (const r of rows) { if (r.status === "missing") missing++; else if (r.status === "multi") multi++; else if (r.meta) found++; }
+      let edits = 0;
+      for (const id of Object.keys(S.edits)) edits += Object.keys(S.edits[id]).length;
+      const started = new Date(S.createdAt);
+      const mins = Math.max(0, Math.round((Date.now() - S.createdAt) / 60000));
+      return [
+        ["Session started", started.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })],
+        ["Time in session", mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} hr ${mins % 60} min`],
+        ["Pastes", pastes.length.toLocaleString()],
+        ["Objects read", objects.toLocaleString()],
+        ["Rows on grid", rows.length.toLocaleString()],
+        ["Calls found", found.toLocaleString()],
+        ["Not found", missing.toLocaleString()],
+        ["More than one match", multi.toLocaleString()],
+        ["Edited fields", edits.toLocaleString()],
+        ["Removed rows", S.removed.length.toLocaleString()],
+        ["Exports", log.filter((x) => x.kind === "export").length.toLocaleString()]
+      ];
+    }
+    function renderLog() {
+      logStats.innerHTML = "";
+      for (const [k, v] of logStatsList()) {
+        logStats.appendChild(el("div", { style: "color:#6b7280;" }, k));
+        logStats.appendChild(el("div", { style: "font-weight:600;text-align:right;color:#111827;" }, v));
+      }
+      logList.innerHTML = "";
+      const log = (S.log || []).slice().reverse();
+      if (!log.length) { logList.appendChild(el("div", { style: "padding:14px 12px;font-size:12px;color:#9ca3af;" }, "Nothing logged yet. Pastes, lookups, edits, and exports show up here.")); return; }
+      for (const x of log) {
+        const item = el("div", { style: "padding:6px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;line-height:1.4;" });
+        const top = el("div", { style: "display:flex;gap:6px;align-items:baseline;" });
+        top.appendChild(el("span", { style: "color:#9ca3af;font-size:11px;flex-shrink:0;" }, new Date(x.t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })));
+        top.appendChild(el("span", { style: "font-weight:700;color:#334155;flex-shrink:0;" }, LOG_KINDS[x.kind] || x.kind));
+        item.appendChild(top);
+        item.appendChild(el("div", { style: "color:#111827;word-break:break-word;" }, x.text));
+        if (Array.isArray(x.items) && x.items.length) {
+          const n = x.items.length;
+          const what = x.kind === "paste" ? (n === 1 ? "raw object" : "raw objects") : (n === 1 ? "value" : "values");
+          const toggle = el("button", { type: "button", style: "background:none;border:0;padding:2px 0;font-size:11px;font-weight:600;color:#1d4ed8;cursor:pointer;" + FONT }, `\u25B8 Show ${n.toLocaleString()} ${what}`);
+          const pre = el("pre", { style: "display:none;margin:4px 0 0;max-height:220px;overflow:auto;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;font-size:11px;font-family:Consolas,monospace;white-space:pre-wrap;word-break:break-all;color:#111827;" });
+          toggle.onclick = () => {
+            const open = pre.style.display === "none";
+            if (open && !pre.textContent) pre.textContent = x.items.slice(0, LOG_ITEMS_SHOWN).join("\n") + (n > LOG_ITEMS_SHOWN ? `\n... and ${(n - LOG_ITEMS_SHOWN).toLocaleString()} more (included in exports)` : "");
+            pre.style.display = open ? "block" : "none";
+            toggle.textContent = `${open ? "\u25BE Hide" : "\u25B8 Show"} ${n.toLocaleString()} ${what}`;
+          };
+          item.appendChild(toggle);
+          item.appendChild(pre);
+        }
+        logList.appendChild(item);
+      }
+    }
+    function setLogOpen(open) {
+      logPanel.style.display = open ? "flex" : "none";
+      logBtn.style.background = open ? "#e2e8f0" : "#fff";
+      if (open) renderLog();
+    }
+    function updateKeyButtons() {
+      addKeysBtn.textContent = "+ Add " + pkPlural();
+      addKeysBtn.style.display = S.preset && S.preset.allowAddKeys === false ? "none" : "";
+    }
+    function exportBase() {
+      const label = S.preset && S.preset.label ? S.preset.label.replace(/[\\/:*?"<>|]+/g, "-").trim() : "";
+      return (label ? label + " " : "nexidia_unpacked_") + stamp();
+    }
+    function warnLong(long, what) {
+      if (!long) return;
+      dialog({ title: "Some values were too long for one cell", message: `${plural(long, "value")} in the ${what} ${long === 1 ? "was" : "were"} longer than Excel's limit of ${XLSX_MAX_TEXT.toLocaleString()} characters per cell. Nothing was cut off: ${long === 1 ? "it continues" : "each one continues"} into the column${long === 1 ? "" : "s"} right next to ${long === 1 ? "it" : "them"}${what === "grid" ? ", labeled (Part 2), (Part 3), and so on" : ""}.` });
+    }
+    function exportLog(format) {
+      const log = S.log || [];
+      if (!log.length) { toast("Nothing is in the log yet.", "#6b7280"); return false; }
+      const headers = ["Time", "Event", "Details", "Values"];
+      const name = exportBase() + "_log." + format;
+      if (format === "xlsx") {
+        const data = log.map((x) => [{ t: "n", v: excelLocalTime(x.t), cls: "dts" }, { t: "s", v: LOG_KINDS[x.kind] || x.kind }, { t: "s", v: x.text }, x.kind === "paste" ? (x.count ? { t: "n", v: x.count, cls: "int" } : null) : (x.items && x.items.length ? { t: "s", v: x.items.join(", ") } : null)]);
+        const ex = expandOverflow(headers, data);
+        const base = [20, 13, 80, 40];
+        downloadBlob(name, buildXlsx("Session Log", ex.headers, ex.data, ex.map.map((i) => base[i])));
+        warnLong(ex.long, "log");
+        return true;
+      }
+      const stats = format === "txt" ? logStatsList().map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n\r\n" : "";
+      const rowsText = log.map((x) => [new Date(x.t).toLocaleString(), LOG_KINDS[x.kind] || x.kind, x.text, x.kind === "paste" ? String(x.count || "") : (x.items || []).join(", ")]);
+      const text = format === "csv" ? buildDelimited("csv", headers, rowsText) : stats + buildDelimited("txt", headers, rowsText);
+      downloadBlob(name, new Blob([text], { type: format === "csv" ? "text/csv" : "text/plain" }));
+      return true;
+    }
+    function exportRaw(format) {
+      const raw = [];
+      for (const x of (S.log || [])) if (x.kind === "paste" && Array.isArray(x.items)) for (const o of x.items) if (o) raw.push(o);
+      if (!raw.length) { toast("No raw outputs are stored for this session yet.", "#6b7280"); return false; }
+      const name = exportBase() + "_raw." + format;
+      if (format === "txt") {
+        downloadBlob(name, new Blob([raw.map((o) => o.replace(/\r?\n/g, " ")).join("\r\n")], { type: "text/plain" }));
+        return true;
+      }
+      const ex = expandOverflow([""], raw.map((o) => [{ t: "s", v: o }]));
+      if (format === "xlsx") {
+        downloadBlob(name, buildXlsx("Raw Data", ex.headers, ex.data, ex.headers.map(() => 120), { noHeader: true }));
+      } else {
+        downloadBlob(name, new Blob([buildDelimited("csv", null, ex.data.map((r) => r.map((c) => (c ? c.v : ""))))], { type: "text/csv" }));
+      }
+      warnLong(ex.long, "raw data");
+      return true;
+    }
+    //##> EXPORT PICKER: The Export button opens one box with Grid, Session Log, and Raw Data, each with its own
+    //##> format (Excel, CSV, or tab-delimited text). Choices are remembered while Unpack is open. The grid
+    //##> goes last because its issue check can send the user to review first.
+    function openExportDialog() {
+      if (editing) commitEdit();
+      const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000015;display:flex;align-items:center;justify-content:center;" + FONT });
+      const box = el("div", { style: "background:#fff;width:440px;max-width:94vw;border-radius:12px;padding:20px;box-shadow:0 8px 24px rgba(0,0,0,.3);" });
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-label", "Export");
+      box.appendChild(el("div", { style: "font-size:15px;font-weight:700;color:#111827;margin-bottom:12px;" }, "Export"));
+      const items = [
+        ["grid", "Grid", "Everything on the grid, the way it looks now."],
+        ["log", "Session Log", "Every paste, lookup, edit, and export with its time."],
+        ["raw", "Raw Data", "Each object you pasted, one per row in column A, with no headers."]
+      ];
+      const formats = [["xlsx", "Excel (.xlsx)"], ["csv", "CSV (.csv)"], ["txt", "Text (.txt)"]];
+      const draft = JSON.parse(JSON.stringify(exportChoice));
+      const msg = el("div", { style: "font-size:12px;color:#b91c1c;min-height:16px;margin:4px 0 8px;" });
+      msg.setAttribute("aria-live", "polite");
+      for (const [id, label, tip] of items) {
+        const row = el("div", { style: "display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9;" });
+        const cbId = "nxExp_" + id + Date.now();
+        const cb = el("input", { type: "checkbox", id: cbId, checked: !!draft[id].on });
+        const lab = el("label", { htmlFor: cbId, style: "flex:1;cursor:pointer;" });
+        lab.appendChild(el("div", { style: "font-size:13px;font-weight:600;color:#111827;" }, label));
+        lab.appendChild(el("div", { style: "font-size:11px;color:#6b7280;" }, tip));
+        const sel = el("select", { style: "padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12px;" });
+        sel.setAttribute("aria-label", label + " format");
+        for (const [v, t] of formats) sel.appendChild(el("option", { value: v }, t));
+        sel.value = draft[id].format;
+        sel.disabled = !cb.checked;
+        cb.onchange = () => { draft[id].on = cb.checked; sel.disabled = !cb.checked; msg.textContent = ""; };
+        sel.onchange = () => { draft[id].format = sel.value; };
+        row.appendChild(cb);
+        row.appendChild(lab);
+        row.appendChild(sel);
+        box.appendChild(row);
+      }
+      box.appendChild(msg);
+      const btnRow = el("div", { style: "display:flex;gap:8px;" });
+      const goB = el("button", { type: "button", style: "flex:1;" + PRIMARY_BTN }, "Export");
+      const cancelB = el("button", { type: "button", style: "flex:1;" + PLAIN_BTN }, "Cancel");
+      goB.onclick = async () => {
+        if (!draft.grid.on && !draft.log.on && !draft.raw.on) { msg.textContent = "Choose at least one thing to export."; return; }
+        exportChoice = draft;
+        overlay.remove();
+        if (draft.log.on && exportLog(draft.log.format)) logEvent("export", `Exported the session log as ${draft.log.format.toUpperCase()}`);
+        if (draft.raw.on && exportRaw(draft.raw.format)) logEvent("export", `Exported raw data as ${draft.raw.format.toUpperCase()}`);
+        if (draft.grid.on) await exportGrid(draft.grid.format);
+      };
+      cancelB.onclick = () => overlay.remove();
+      overlay.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.remove(); });
+      btnRow.appendChild(goB);
+      btnRow.appendChild(cancelB);
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      setTimeout(() => goB.focus(), 30);
+    }
     function exportCell(row, f) {
       const raw = cellRaw(row, f);
       const str = (v) => ({ t: "s", v });
@@ -4807,14 +5649,22 @@
       }
       return str(raw);
     }
-    function exportName() {
-      const label = S.preset && S.preset.label ? S.preset.label.replace(/[\\/:*?"<>|]+/g, "-").trim() : "";
-      return (label ? label + " " : "nexidia_unpacked_") + stamp() + ".xlsx";
-    }
-    function doExcelExport(list) {
+    function doGridExport(list, format) {
       if (!list.length) { toast("No rows to export.", "#6b7280"); return; }
+      format = format || "xlsx";
       const fields = exportFields();
       const headers = fields.map((f) => headerOf(f));
+      const name = exportBase() + "." + format;
+      if (format === "txt" || format === "csv") {
+        const textRows = list.map((r) => fields.map((f) => cellRaw(r, f) || ""));
+        const asCells = textRows.map((r) => r.map((v) => (v ? { t: "s", v } : null)));
+        const ex = format === "csv" ? expandOverflow(headers, asCells) : { headers, data: asCells, long: 0 };
+        const text = buildDelimited(format, ex.headers, ex.data.map((r) => r.map((c) => (c ? c.v : ""))));
+        downloadBlob(name, new Blob([text], { type: format === "csv" ? "text/csv" : "text/plain" }));
+        logEvent("export", `Exported ${plural(list.length, "row")} of the grid as ${format.toUpperCase()}`);
+        warnLong(ex.long, "grid");
+        return;
+      }
       const data = list.map((r) => fields.map((f) => exportCell(r, f)));
       const charWidths = fields.map((f, ci) => {
         let n = Math.ceil(String(headers[ci]).length * 1.1);
@@ -4824,15 +5674,13 @@
         }
         return n + 2;
       });
+      const ex = expandOverflow(headers, data);
       let blob;
-      try { blob = buildXlsx(S.preset && S.preset.label ? S.preset.label : "Unpacked", headers, data, charWidths); }
+      try { blob = buildXlsx(S.preset && S.preset.label ? S.preset.label : "Unpacked", ex.headers, ex.data, ex.map.map((i) => charWidths[i])); }
       catch (e) { console.error(e); dialog({ title: "Export failed", danger: true, message: "The Excel file couldn't be built: " + (e.message || e) }); return; }
-      const url = URL.createObjectURL(blob);
-      const a = el("a", { href: url, download: exportName() });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      downloadBlob(name, blob);
+      logEvent("export", `Exported ${plural(list.length, "row")} of the grid as XLSX`);
+      warnLong(ex.long, "grid");
     }
     async function chooseScope() {
       if (!selected.size) return view;
@@ -4840,7 +5688,7 @@
       if (!r.value) return null;
       return r.value === "sel" ? view.filter((row) => selected.has(row.id)) : view;
     }
-    async function exportExcel() {
+    async function exportGrid(format) {
       if (editing) commitEdit();
       const list = await chooseScope();
       if (!list) return;
@@ -4853,10 +5701,10 @@
             buttons: [{ label: "Review", value: "review", primary: true }, { label: "Export Anyway", value: "export" }, { label: "Cancel", value: null }]
           });
           if (!r.value) return;
-          if (r.value === "review") { openReview(list, list); return; }
+          if (r.value === "review") { openReview(list, list, format); return; }
         }
       }
-      doExcelExport(list);
+      doGridExport(list, format);
     }
     async function exportTranscripts() {
       const list = await chooseScope();
@@ -5155,6 +6003,7 @@
             saveNow();
           } else dbDel(S.sessionId);
           loadSessionData(rec.data, true);
+          logEvent("session", "Resumed this session");
           if (S.settings.autoMeta && S.entries.length) fetchMetadata(true);
           renderBanner();
         };
@@ -5218,7 +6067,11 @@
     adHocBtn.onclick = () => openAdHocPicker();
     importSheetBtn.onclick = () => sheetInput.click();
     sheetInput.onchange = () => { const f = sheetInput.files && sheetInput.files[0]; sheetInput.value = ""; if (f) importSpreadsheet(f); };
-    exportExcelBtn.onclick = () => exportExcel();
+    exportExcelBtn.onclick = () => openExportDialog();
+    addKeysBtn.onclick = () => openAddKeys();
+    logBtn.onclick = () => setLogOpen(logPanel.style.display === "none");
+    logCloseBtn.onclick = () => setLogOpen(false);
+    logExportBtn.onclick = () => openExportDialog();
     issuesBtn.onclick = () => openReview(view, null);
     playTsBtn.onclick = () => startTimestamps(false);
     exportTranscriptsBtn.onclick = () => exportTranscripts();
@@ -5255,6 +6108,7 @@
     function updateTitle() {
       titleEl.textContent = S.preset && S.preset.label ? "Unpack CoPilot Outputs: " + S.preset.label : "Unpack CoPilot Outputs";
       renderInstructions();
+      updateKeyButtons();
     }
     function presetAliases(c) {
       const out = [];
@@ -5301,7 +6155,7 @@
       p = readReportSetup(p);
       S = newState();
       S.settings.primaryKey = p.primaryKey || "Trans_Id";
-      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null, checkMessages: p.checkMessages || null, instructions: Array.isArray(p.instructions) ? p.instructions.slice() : null, promptUrl: p.promptUrl || null, promptLabel: p.promptLabel || null };
+      S.preset = { label: p.label || "", batchPreset: p.batchPreset || null, suppressMergePrompts: p.suppressMergePrompts !== false, timestampUse: p.timestampUse || null, checkMessages: p.checkMessages || null, instructions: Array.isArray(p.instructions) ? p.instructions.slice() : null, promptUrl: p.promptUrl || null, promptLabel: p.promptLabel || null, allowImportNew: p.allowImportNew !== false, allowAddKeys: p.allowAddKeys !== false };
       const order = [];
       const merges = [];
       for (const c of (p.columns || [])) {
