@@ -1,4 +1,4 @@
-//[Last Update: 3:01 PM 8/13/2026]
+//[Last Update: 3:01 PM 11/16/2026]
 //[Please confirm this timestamp in your response any time it was formed using this document!]
 
 (() => {
@@ -59,6 +59,26 @@
         function normalizeCellText(raw) {
           if (xls) return xls.normalizeCellText(raw);
           return (raw === null || raw === undefined) ? "" : String(raw).trim();
+        }
+        function isNewTransactionFormat(transId) {
+          return /^[0-9a-f]+(?:-[0-9a-f]+)+$/i.test(String(transId || "").trim());
+        }
+        function normalizeMediaFileDuration(item) {
+          const r = item && (item.row || item);
+          if (!r || typeof r !== "object" || r.__durationNormalized) return;
+          const transId = normalizeCellText(getFieldValue(r, "UDFVarchar110"));
+          if (isNewTransactionFormat(transId)) {
+            const key = Object.keys(r).find((k) => k.toLowerCase() === "mediafileduration");
+            const duration = key ? Number(r[key]) : NaN;
+            if (key && Number.isFinite(duration) && duration >= 0) r[key] = Math.round((duration / 256) * 1000);
+          }
+          try { Object.defineProperty(r, "__durationNormalized", { value: true, configurable: true, enumerable: false }); } catch (_) {}
+        }
+        for (const item of data.rows) normalizeMediaFileDuration(item);
+        if (gridSession && Array.isArray(gridSession.sheets)) {
+          for (const sh of gridSession.sheets) {
+            if (sh && Array.isArray(sh.rows)) for (const item of sh.rows) normalizeMediaFileDuration(item);
+          }
         }
         function formatDisplay(fieldKey, raw) {
           if (!raw || raw === "0") return raw || "";
